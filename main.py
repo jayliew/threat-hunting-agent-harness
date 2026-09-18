@@ -8,6 +8,9 @@ from ollama import chat
 
 MODEL = "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF"
 LOG_PATH = Path(__file__).with_name("logs.jsonl")
+# Full log dump is ~9k tokens; keep headroom for the reply. Model max is 131072.
+NUM_CTX = 32768
+NUM_PREDICT = 1024
 
 
 def load_logs() -> list[dict]:
@@ -25,7 +28,7 @@ def get_security_events() -> str:
     """Return all available security events as JSON in chronological order."""
     events = load_logs()
     events.sort(key=lambda event: event["timestamp"])
-    return json.dumps(events, indent=2)
+    return json.dumps(events, separators=(",", ":"))
 
 
 SYSTEM_PROMPT = """
@@ -40,12 +43,14 @@ Do not invent users, IP addresses, timestamps, or event IDs.
 Identify the most specific recognizable threat type supported by the evidence.
 If the evidence is insufficient, say so.
 
+Cite evidence using each event's _event_id field. GELF reserves _id, so it is not present.
+
 Return exactly these sections:
 
 Verdict: suspicious, benign, or inconclusive
 Threat type: specific threat name, or none
 Summary: one short paragraph
-Evidence: comma-separated event IDs, or none
+Evidence: comma-separated _event_id values, or none
 """.strip()
 
 
@@ -69,7 +74,7 @@ def main() -> None:
     response = chat(
         model=MODEL,
         messages=messages,
-        options={"temperature": 0, "num_ctx": 8192, "num_predict": 1024},
+        options={"temperature": 0, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT},
     )
     print(response.message.content)
 

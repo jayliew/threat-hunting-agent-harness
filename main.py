@@ -8,13 +8,31 @@ from ollama import chat
 
 
 # Change this to a different Ollama model name (pull it first: ollama pull <name>).
-MODEL = "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF"
+# MODEL = "mistral-small3.2:24b"
+# MODEL = "mistral-nemo:12b"
+# MODEL = "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF"
+MODEL = "qwen3:32b"
+
 # Change this to point at a different JSONL event file (or pass the path as argv).
 DEFAULT_LOG_FILE = "logs/password-spray.jsonl"
-# Full GELF dump is ~9k tokens; keep headroom for the reply. Model max is 131072.
+# Ollama num_ctx: prompt + reply must fit. NUM_PREDICT is the reply budget.
+# Common values: 2048, 4096, 8192, 16384, 32768, 65536, 131072 (powers of 2).
+# Raise if a JSONL dump no longer fits; lower to save VRAM. GELF dump is ~9k
+# tokens; 32k leaves headroom. Model max is 131072.
+# Larger: less truncation of evidence, but a bigger KV cache (VRAM scales with
+# context length; Ollama preallocates for num_ctx), slower prefill/decode, and
+# possible attention dilution ("lost in the middle") if the window dwarfs the prompt.
+# Smaller: tighter KV cache, often faster; too small truncates the prompt and
+# the model misses events.
 NUM_CTX = 32768
 NUM_PREDICT = 1024
-
+# Ollama temperature: 0 is greedy/deterministic (good for demos). Raise for more
+# variety; common values 0, 0.2, 0.7, 1.0. Higher = more random, less repeatable.
+TEMPERATURE = 0
+# Ollama top_p (nucleus sampling). Common values 0.8, 0.9, 0.95, 1.0.
+# With temperature 0 this barely matters. Lower top_p with a non-zero temperature
+# to cut off the long tail of unlikely tokens.
+TOP_P = 0.9
 
 def resolve_log_path(log_file: str) -> Path:
     path = Path(log_file)
@@ -94,7 +112,12 @@ def main() -> None:
     response = chat(
         model=MODEL,
         messages=messages,
-        options={"temperature": 0, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT},
+        options={
+            "temperature": TEMPERATURE,
+            "top_p": TOP_P,
+            "num_ctx": NUM_CTX,
+            "num_predict": NUM_PREDICT,
+        },
     )
     print(response.message.content)
 

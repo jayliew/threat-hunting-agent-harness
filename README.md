@@ -89,6 +89,10 @@ The script prints the model name, the log file, the events it is sending, then a
 
 To use a different Ollama model, change `MODEL` in `main.py` and pull that name instead.
 
+`NUM_CTX` in `main.py` is Ollama’s context window (`num_ctx`). Common values are powers of 2: 2048, 4096, 8192, 16384, 32768, 65536, 131072. Raise it if a JSONL dump no longer fits; lower it to save VRAM. Larger context means a bigger KV cache (memory scales with window size; Ollama preallocates for `num_ctx`) and can slow prefill/decode, without a free quality win if the window dwarfs the prompt. Too small truncates the log dump and the model misses events.
+
+`TEMPERATURE` and `TOP_P` in `main.py` control sampling. `TEMPERATURE = 0` is greedy and repeatable (good for demos). Raise it (common values 0, 0.2, 0.7, 1.0) for more variety at the cost of consistency. `TOP_P` is nucleus sampling (common values 0.8, 0.9, 0.95, 1.0); it has little effect at temperature 0. With a non-zero temperature, lower `TOP_P` to drop the long tail of unlikely tokens.
+
 ## Layout
 
 | Path | Role |

@@ -103,3 +103,11 @@ To use a different Ollama model, change `MODEL` in `main.py` and pull that name 
 | `pyproject.toml` | Project metadata and the `ollama` client |
 
 Keep the harness thin so the lesson stays in the open.
+
+## Future plans
+
+Not in scope for the current harness. Tracked here so the single-pass loop stays small.
+
+- [ ] Demo/test of tool calling ability (e.g. local vector search, Graylog or ELK queries)
+- [ ] Demonstration of vector search with pgvector (or a SQLite equivalent) using a text embedding model
+- [ ] Versioning prompts (both general and vendor-specific)

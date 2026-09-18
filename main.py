@@ -1,19 +1,32 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
 from ollama import chat
 
 
+# Change this to a different Ollama model name (pull it first: ollama pull <name>).
 MODEL = "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF"
-LOG_PATH = Path(__file__).with_name("logs.jsonl")
+# Change this to point at a different JSONL event file (or pass the path as argv).
+DEFAULT_LOG_FILE = "logs/password-spray.jsonl"
+# Full GELF dump is ~9k tokens; keep headroom for the reply. Model max is 131072.
+NUM_CTX = 32768
+NUM_PREDICT = 1024
 
 
-def load_logs() -> list[dict]:
+def resolve_log_path(log_file: str) -> Path:
+    path = Path(log_file)
+    if not path.is_absolute():
+        path = Path(__file__).parent / path
+    return path
+
+
+def load_logs(log_path: Path) -> list[dict]:
     events = []
 
-    with LOG_PATH.open() as file:
+    with log_path.open() as file:
         for line in file:
             if line.strip():
                 events.append(json.loads(line))
@@ -21,11 +34,11 @@ def load_logs() -> list[dict]:
     return events
 
 
-def get_security_events() -> str:
+def get_security_events(log_path: Path) -> str:
     """Return all available security events as JSON in chronological order."""
-    events = load_logs()
+    events = load_logs(log_path)
     events.sort(key=lambda event: event["timestamp"])
-    return json.dumps(events, indent=2)
+    return json.dumps(events, separators=(",", ":"))
 
 
 SYSTEM_PROMPT = """
@@ -40,6 +53,8 @@ Do not invent users, IP addresses, timestamps, or event IDs.
 Identify the most specific recognizable threat type supported by the evidence.
 If the evidence is insufficient, say so.
 
+Cite evidence using each event's id or _event_id field.
+
 Return exactly these sections:
 
 Verdict: suspicious, benign, or inconclusive
@@ -50,8 +65,18 @@ Evidence: comma-separated event IDs, or none
 
 
 def main() -> None:
-    events = get_security_events()
+    parser = argparse.ArgumentParser(description="Run the threat-hunting harness.")
+    parser.add_argument(
+        "log_file",
+        nargs="?",
+        default=DEFAULT_LOG_FILE,
+        help="JSONL event file relative to this script (default: logs/password-spray.jsonl)",
+    )
+    args = parser.parse_args()
+    log_path = resolve_log_path(args.log_file)
+    events = get_security_events(log_path)
     print(f"Model: {MODEL}")
+    print(f"Log file: {log_path.relative_to(Path(__file__).parent)}")
     print(f"Security events supplied:\n{events}")
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -69,7 +94,7 @@ def main() -> None:
     response = chat(
         model=MODEL,
         messages=messages,
-        options={"temperature": 0, "num_ctx": 8192, "num_predict": 1024},
+        options={"temperature": 0, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT},
     )
     print(response.message.content)
 

@@ -15,12 +15,14 @@ def make_response(
     *,
     done_reason: str | None = None,
     eval_count: int | None = None,
+    prompt_eval_count: int | None = None,
     thinking: str | None = None,
 ) -> ChatResponse:
     return ChatResponse(
         message=Message(role="assistant", content=content, thinking=thinking),
         done_reason=done_reason,
         eval_count=eval_count,
+        prompt_eval_count=prompt_eval_count,
     )
 
 
@@ -68,6 +70,41 @@ class IncompleteResponseMessageTests(unittest.TestCase):
         self.assertIsNotNone(message)
         self.assertIn("token limit", message)
         self.assertIn("done_reason=unknown", message)
+
+    def test_prompt_eval_count_at_context_limit(self) -> None:
+        response = make_response(
+            '{"verdict":"benign","threat_type":"none","summary":"ok","evidence":[]}',
+            done_reason="stop",
+            eval_count=50,
+            prompt_eval_count=32768,
+        )
+        message = incomplete_response_message(response, NUM_PREDICT, num_ctx=32768)
+        self.assertIsNotNone(message)
+        self.assertIn("context window", message)
+        self.assertIn("prompt_eval_count=32768/32768", message)
+
+    def test_prompt_eval_count_below_context_limit(self) -> None:
+        response = make_response(
+            '{"verdict":"benign","threat_type":"none","summary":"ok","evidence":[]}',
+            done_reason="stop",
+            eval_count=50,
+            prompt_eval_count=400,
+        )
+        self.assertIsNone(
+            incomplete_response_message(response, NUM_PREDICT, num_ctx=32768)
+        )
+
+    def test_length_takes_priority_over_context_overflow(self) -> None:
+        response = make_response(
+            '{"verdict":"benign","threat_type":"none","summary":"ok","evidence":[]}',
+            done_reason="length",
+            eval_count=NUM_PREDICT,
+            prompt_eval_count=32768,
+        )
+        message = incomplete_response_message(response, NUM_PREDICT, num_ctx=32768)
+        self.assertIsNotNone(message)
+        self.assertIn("token limit", message)
+        self.assertNotIn("context window", message)
 
 
 if __name__ == "__main__":

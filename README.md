@@ -19,10 +19,12 @@ It is intentionally small. Prefer a few files you can hold in your head over a p
 
 1. Load events from a JSONL file (`logs/password-spray.jsonl` by default)
 2. Sort them by timestamp
-3. Send them to a local [Ollama](https://ollama.com) model with a defensive analyst prompt
-4. Print a fixed-format answer: verdict, threat type, summary, and evidence IDs
+3. Send them to a local [Ollama](https://ollama.com) model with a defensive analyst prompt and a `HuntResult` JSON schema
+4. Validate the reply (schema + cited event IDs) and print a fixed-format answer: verdict, threat type, summary, and evidence IDs
 
 The prompt treats log contents as untrusted evidence, not instructions, and forbids inventing users, IPs, timestamps, or event IDs. Cite `id` or `_event_id`, depending on the file.
+
+The harness then machine-checks that contract: `verdict` must be `suspicious`, `benign`, or `inconclusive`; required fields must be present; every cited evidence ID must appear on a supplied event. Valid IDs do not prove the summary or threat type is correct.
 
 The current script calls `get_security_events()` itself. That function is the obvious next “tool” if you want the model to request data instead of receiving the full dump up front.
 
@@ -88,7 +90,20 @@ uv run python main.py --model qwen3:32b
 uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
 ```
 
-The script prints the model name, thinking on/off, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. Incomplete answers (token limit or empty content) exit with an error instead of looking like a successful hunt.
+The script prints the model name, thinking on/off, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It exits with an error instead of looking like a successful hunt when:
+
+- the reply is not valid `HuntResult` JSON
+- a cited evidence ID is not in the supplied events
+- generation hits the token limit (`done_reason=length`) or returns empty content
+- the prompt may have been truncated to fit the context window (`prompt_eval_count >= num_ctx`)
+
+Schema-valid citations do not mean the explanation is right.
+
+Run the schema, membership, and truncation checks without calling Ollama:
+
+```bash
+uv run pytest
+```
 
 ## Thinking mode
 
@@ -100,9 +115,11 @@ Qwen3-class models enable thinking by default when the API omits `think`. This h
 
 | Path | Role |
 | --- | --- |
-| `main.py` | Prompt, log loading, one Ollama chat call |
+| `main.py` | Prompt, schema, log loading, one Ollama chat call, result validation |
 | `logs/password-spray.jsonl` | Default demo: synthetic login / password-spray events |
 | `logs/http-beaconing.jsonl` | Optional demo: GELF 1.1 HTTP beaconing among legitimate traffic |
-| `pyproject.toml` | Project metadata and the `ollama` client |
+| `test_main.py` | Unit tests for incomplete / truncated replies |
+| `tests/test_result.py` | Schema and evidence-ID membership tests |
+| `pyproject.toml` | Project metadata, `ollama`, `pydantic`, and pytest |
 
 Keep the harness thin so the lesson stays in the open.

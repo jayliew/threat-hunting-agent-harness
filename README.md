@@ -21,8 +21,11 @@ It is intentionally small. Prefer a few files you can hold in your head over a p
 2. Sort them by timestamp
 3. Send them to a local [Ollama](https://ollama.com) model with a defensive analyst prompt
 4. Print a fixed-format answer: verdict, threat type, summary, and evidence IDs
+5. Reject replies that are incomplete, missing required sections, use an illegal verdict, or cite event IDs that are not in the supplied events
 
 The prompt treats log contents as untrusted evidence, not instructions, and forbids inventing users, IPs, timestamps, or event IDs. Cite `id` or `_event_id`, depending on the file.
+
+The harness then machine-checks that contract: `Verdict` must be `suspicious`, `benign`, or `inconclusive`; all four sections must be present; every cited evidence ID must appear on a supplied event. Valid IDs do not prove the summary or threat type is correct.
 
 The current script calls `get_security_events()` itself. That function is the obvious next “tool” if you want the model to request data instead of receiving the full dump up front.
 
@@ -88,21 +91,31 @@ uv run python main.py --model qwen3:32b
 uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
 ```
 
-The script prints the model name, thinking on/off, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. Incomplete answers (token limit or empty content) exit with an error instead of looking like a successful hunt.
+The script prints the model name, thinking on/off/unsupported, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It exits with an error instead of looking like a successful hunt when:
+
+- generation hits the token limit (`done_reason=length`) or returns empty content
+- a required section is missing or empty
+- the verdict is not `suspicious`, `benign`, or `inconclusive`
+- a cited evidence ID is not in the supplied events (for example `nonexistent-id`)
+
+Valid citations do not mean the explanation is right.
 
 ## Thinking mode
 
-Before you run, set `THINK` in `main.py` to `True` (on) or `False` (off). Do not leave the choice implicit.
+Before you run, set `THINK` in `main.py` to `True` (on) or `False` (off) for models that support thinking. Do not leave the choice implicit.
 
-Qwen3-class models enable thinking by default when the API omits `think`. This harness always sends `think` explicitly. Thinking tokens and the final answer share the 1,024-token `num_predict` budget; with thinking on, the model can hit that limit mid-trace and return an empty or truncated analysis.
+The harness queries Ollama (`/api/show`) and sends `think` only when the model lists the `thinking` capability. Models without that capability reject the argument (`does not support thinking`), so it is omitted. Qwen3-class models enable thinking by default when the API omits `think`; for those models the harness always sends `think` explicitly.
+
+Thinking tokens and the final answer share the 1,024-token `num_predict` budget; with thinking on, the model can hit that limit mid-trace and return an empty or truncated analysis.
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `main.py` | Prompt, log loading, one Ollama chat call |
+| `main.py` | Prompt, log loading, one Ollama chat call (think only if supported), output and evidence-ID validation |
 | `logs/password-spray.jsonl` | Default demo: synthetic login / password-spray events |
 | `logs/http-beaconing.jsonl` | Optional demo: GELF 1.1 HTTP beaconing among legitimate traffic |
+| `test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |
 | `pyproject.toml` | Project metadata and the `ollama` client |
 
 Keep the harness thin so the lesson stays in the open.

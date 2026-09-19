@@ -11,9 +11,12 @@ from ollama import ChatResponse, chat, show
 
 # Default Ollama model. Must already be installed locally (`ollama list`).
 # Pass --model to use a different installed name.
-DEFAULT_MODEL = "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF"
+# DEFAULT_MODEL = "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF"
+# DEFAULT_MODEL = "qwen3:32b"
+DEFAULT_MODEL = "mistral-small3.2:24b"
 # Change this to point at a different JSONL event file (or pass the path as argv).
-DEFAULT_LOG_FILE = "logs/password-spray.jsonl"
+# DEFAULT_LOG_FILE = "logs/password-spray.jsonl"
+DEFAULT_LOG_FILE = "logs/http-beaconing.jsonl"
 
 # Full GELF dump is ~9k tokens; keep headroom for the reply. Model max is 131072.
 NUM_CTX = 32768
@@ -193,7 +196,7 @@ def main() -> None:
         "log_file",
         nargs="?",
         default=DEFAULT_LOG_FILE,
-        help="JSONL event file relative to this script (default: logs/password-spray.jsonl)",
+        help=f"JSONL event file relative to this script (default: {DEFAULT_LOG_FILE})",
     )
     parser.add_argument(
         "--model",

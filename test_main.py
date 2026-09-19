@@ -7,6 +7,7 @@ from ollama import ChatResponse, Message
 
 from main import (
     allowed_evidence_ids,
+    chat_think_kwargs,
     incomplete_response_message,
     invalid_hunt_output_message,
     load_security_events,
@@ -46,6 +47,20 @@ def hunt_output(
         f"Summary: {summary}\n"
         f"Evidence: {evidence}"
     )
+
+
+class ChatThinkKwargsTests(unittest.TestCase):
+    def test_omits_think_when_capability_missing(self) -> None:
+        self.assertEqual(chat_think_kwargs(True, None), {})
+        self.assertEqual(chat_think_kwargs(True, []), {})
+        self.assertEqual(chat_think_kwargs(False, ["completion"]), {})
+
+    def test_sends_think_when_capability_present(self) -> None:
+        self.assertEqual(chat_think_kwargs(True, ["thinking"]), {"think": True})
+        self.assertEqual(
+            chat_think_kwargs(False, ["completion", "thinking"]),
+            {"think": False},
+        )
 
 
 class IncompleteResponseMessageTests(unittest.TestCase):

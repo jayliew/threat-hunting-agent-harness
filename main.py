@@ -6,7 +6,7 @@ import re
 import sys
 from pathlib import Path
 
-from ollama import ChatResponse, chat
+from ollama import ChatResponse, chat, show
 
 
 # Default Ollama model. Must already be installed locally (`ollama list`).
@@ -14,13 +14,16 @@ from ollama import ChatResponse, chat
 DEFAULT_MODEL = "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF"
 # Change this to point at a different JSONL event file (or pass the path as argv).
 DEFAULT_LOG_FILE = "logs/password-spray.jsonl"
+
 # Full GELF dump is ~9k tokens; keep headroom for the reply. Model max is 131072.
 NUM_CTX = 32768
 NUM_PREDICT = 1024
 # Thinking models (Qwen3, DeepSeek-R1, …): Ollama default is True if `think`
-# is omitted. Non-thinking models ignore this. Set True or False explicitly;
-# do not leave the API default implicit. Thinking tokens share NUM_PREDICT
-# with the final answer; at 1024 tokens, True can return an empty or truncated
+# is omitted. Models without the thinking capability reject the argument
+# (HTTP 400: "does not support thinking"). Send think only when /api/show
+# lists "thinking". For those models, set True or False explicitly; do not
+# leave the API default implicit. Thinking tokens share NUM_PREDICT with
+# the final answer; at 1024 tokens, True can return an empty or truncated
 # analysis. True keeps the reasoning trace; False spends the budget on the
 # structured verdict.
 THINK = False
@@ -65,6 +68,15 @@ def event_id(event: dict) -> str | None:
 
 def allowed_evidence_ids(events: list[dict]) -> set[str]:
     return {eid for event in events if (eid := event_id(event))}
+
+
+def chat_think_kwargs(
+    think: bool, capabilities: list[str] | None
+) -> dict[str, bool]:
+    """Omit think unless the model advertises the thinking capability."""
+    if "thinking" not in (capabilities or []):
+        return {}
+    return {"think": think}
 
 
 SYSTEM_PROMPT = """
@@ -196,8 +208,12 @@ def main() -> None:
     event_list = load_security_events(log_path)
     allowed_ids = allowed_evidence_ids(event_list)
     events = json.dumps(event_list, separators=(",", ":"))
+    think_kwargs = chat_think_kwargs(THINK, show(args.model).capabilities)
     print(f"Model: {args.model}")
-    print(f"Thinking: {'on' if THINK else 'off'}")
+    if "think" in think_kwargs:
+        print(f"Thinking: {'on' if think_kwargs['think'] else 'off'}")
+    else:
+        print("Thinking: unsupported")
     # resolve_log_path() accepts absolute paths, including files outside this repo.
     # relative_to() raises ValueError for those; print the absolute path instead.
     repo_root = Path(__file__).parent
@@ -224,8 +240,8 @@ def main() -> None:
     response = chat(
         model=args.model,
         messages=messages,
-        think=THINK,
         options={"temperature": 0, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT},
+        **think_kwargs,
     )
     print_analysis(response)
     error = incomplete_response_message(response, NUM_PREDICT)

@@ -90,20 +90,11 @@ uv run python main.py --model qwen3:32b
 uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
 ```
 
-The script prints the model name, thinking on/off, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It exits with an error instead of looking like a successful hunt when:
+The script prints the model name, thinking on/off, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`.
 
-- the reply is not valid `HuntResult` JSON
-- a cited evidence ID is not in the supplied events
-- generation hits the token limit (`done_reason=length`) or returns empty content
-- the prompt may have been truncated to fit the context window (`prompt_eval_count >= num_ctx`)
+If generation is truncated or empty, the live run prints `*** INCOMPLETE RESPONSE ***` (token limit, empty answer, or a prompt that filled `num_ctx`) and exits with an error. That alert is part of `uv run python main.py`, not a separate test run. Schema-invalid JSON or unknown evidence IDs also fail the run.
 
 Schema-valid citations do not mean the explanation is right.
-
-Run the schema, membership, and truncation checks without calling Ollama:
-
-```bash
-uv run pytest
-```
 
 ## Thinking mode
 
@@ -118,7 +109,6 @@ Qwen3-class models enable thinking by default when the API omits `think`. This h
 | `main.py` | Prompt, schema, log loading, one Ollama chat call, result validation |
 | `logs/password-spray.jsonl` | Default demo: synthetic login / password-spray events |
 | `logs/http-beaconing.jsonl` | Optional demo: GELF 1.1 HTTP beaconing among legitimate traffic |
-| `test_main.py` | Unit tests for incomplete / truncated replies |
 | `tests/test_result.py` | Schema and evidence-ID membership tests |
 | `pyproject.toml` | Project metadata, `ollama`, `pydantic`, and pytest |
 

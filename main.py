@@ -199,6 +199,13 @@ def print_thinking(response: ChatResponse) -> None:
         print(f"Thinking:\n{thinking}")
 
 
+def print_incomplete_alert(message: str) -> None:
+    print()
+    print("*** INCOMPLETE RESPONSE ***")
+    print(message)
+    print("This run is not a successful hunt.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the threat-hunting harness.")
     parser.add_argument(
@@ -259,7 +266,10 @@ def main() -> None:
         raw = response.message.content
         if raw:
             print(raw)
-        print(exc, file=sys.stderr)
+        if str(exc).startswith("Incomplete response"):
+            print_incomplete_alert(str(exc))
+        else:
+            print(exc, file=sys.stderr)
         raise SystemExit(1)
     print(format_hunt_result(result))
 

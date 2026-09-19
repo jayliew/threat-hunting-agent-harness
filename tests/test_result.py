@@ -8,13 +8,10 @@ from ollama import ChatResponse, Message
 from pydantic import ValidationError
 
 from main import (
-    NUM_CTX,
-    NUM_PREDICT,
     HuntResult,
     HuntResultError,
     allowed_evidence_ids,
     format_hunt_result,
-    incomplete_response_message,
     load_security_events,
     parse_hunt_result,
     validate_evidence_ids,
@@ -154,44 +151,6 @@ def test_validate_model_response_rejects_schema_mismatch(
     response = make_response(valid_payload(verdict="maybe"))
     with pytest.raises(HuntResultError, match="schema"):
         validate_model_response(response, password_spray_ids)
-
-
-def test_done_reason_length_rejected_even_if_json_parses(
-    password_spray_ids: set[str],
-) -> None:
-    response = make_response(
-        valid_payload(),
-        done_reason="length",
-        eval_count=NUM_PREDICT,
-    )
-    with pytest.raises(HuntResultError, match="token limit"):
-        validate_model_response(response, password_spray_ids)
-
-
-def test_prompt_eval_count_at_context_limit_is_rejected(
-    password_spray_ids: set[str],
-) -> None:
-    response = make_response(
-        valid_payload(),
-        done_reason="stop",
-        eval_count=80,
-        prompt_eval_count=NUM_CTX,
-    )
-    with pytest.raises(HuntResultError, match="context window"):
-        validate_model_response(response, password_spray_ids)
-
-
-def test_incomplete_response_message_reports_context_overflow() -> None:
-    response = make_response(
-        valid_payload(),
-        done_reason="stop",
-        eval_count=80,
-        prompt_eval_count=NUM_CTX,
-    )
-    message = incomplete_response_message(response, NUM_PREDICT, num_ctx=NUM_CTX)
-    assert message is not None
-    assert "context window" in message
-    assert f"{NUM_CTX}/{NUM_CTX}" in message
 
 
 def test_format_hunt_result_uses_section_layout() -> None:

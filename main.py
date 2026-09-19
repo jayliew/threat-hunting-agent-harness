@@ -2,24 +2,31 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
-from ollama import ChatResponse, chat
+from ollama import ChatResponse, chat, show
 
 
 # Default Ollama model. Must already be installed locally (`ollama list`).
 # Pass --model to use a different installed name.
-DEFAULT_MODEL = "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF"
+# DEFAULT_MODEL = "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF"
+# DEFAULT_MODEL = "qwen3:32b"
+DEFAULT_MODEL = "mistral-small3.2:24b"
 # Change this to point at a different JSONL event file (or pass the path as argv).
-DEFAULT_LOG_FILE = "logs/password-spray.jsonl"
+# DEFAULT_LOG_FILE = "logs/password-spray.jsonl"
+DEFAULT_LOG_FILE = "logs/http-beaconing.jsonl"
+
 # Full GELF dump is ~9k tokens; keep headroom for the reply. Model max is 131072.
 NUM_CTX = 32768
 NUM_PREDICT = 1024
 # Thinking models (Qwen3, DeepSeek-R1, …): Ollama default is True if `think`
-# is omitted. Non-thinking models ignore this. Set True or False explicitly;
-# do not leave the API default implicit. Thinking tokens share NUM_PREDICT
-# with the final answer; at 1024 tokens, True can return an empty or truncated
+# is omitted. Models without the thinking capability reject the argument
+# (HTTP 400: "does not support thinking"). Send think only when /api/show
+# lists "thinking". For those models, set True or False explicitly; do not
+# leave the API default implicit. Thinking tokens share NUM_PREDICT with
+# the final answer; at 1024 tokens, True can return an empty or truncated
 # analysis. True keeps the reasoning trace; False spends the budget on the
 # structured verdict.
 THINK = False
@@ -43,11 +50,36 @@ def load_logs(log_path: Path) -> list[dict]:
     return events
 
 
-def get_security_events(log_path: Path) -> str:
-    """Return all available security events as JSON in chronological order."""
+def load_security_events(log_path: Path) -> list[dict]:
+    """Load security events and return them in chronological order."""
     events = load_logs(log_path)
     events.sort(key=lambda event: event["timestamp"])
-    return json.dumps(events, separators=(",", ":"))
+    return events
+
+
+def get_security_events(log_path: Path) -> str:
+    """Return all available security events as JSON in chronological order."""
+    return json.dumps(load_security_events(log_path), separators=(",", ":"))
+
+
+def event_id(event: dict) -> str | None:
+    value = event.get("id") or event.get("_event_id")
+    if value is None:
+        return None
+    return str(value)
+
+
+def allowed_evidence_ids(events: list[dict]) -> set[str]:
+    return {eid for event in events if (eid := event_id(event))}
+
+
+def chat_think_kwargs(
+    think: bool, capabilities: list[str] | None
+) -> dict[str, bool]:
+    """Omit think unless the model advertises the thinking capability."""
+    if "thinking" not in (capabilities or []):
+        return {}
+    return {"think": think}
 
 
 SYSTEM_PROMPT = """
@@ -96,6 +128,59 @@ def incomplete_response_message(
     return None
 
 
+REQUIRED_SECTIONS = ("Verdict", "Threat type", "Summary", "Evidence")
+ALLOWED_VERDICTS = frozenset({"suspicious", "benign", "inconclusive"})
+_SECTION_ALIASES = {name.lower(): name for name in REQUIRED_SECTIONS}
+_SECTION_HEADER_RE = re.compile(
+    r"^(Verdict|Threat type|Summary|Evidence)[ \t]*:[ \t]*(.*)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def parse_hunt_sections(content: str) -> dict[str, str]:
+    """Map canonical section names to their values (may omit missing ones)."""
+    matches = list(_SECTION_HEADER_RE.finditer(content))
+    sections: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        name = _SECTION_ALIASES[match.group(1).lower()]
+        first_line = match.group(2)
+        rest_start = match.end()
+        rest_end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
+        sections[name] = (first_line + content[rest_start:rest_end]).strip()
+    return sections
+
+
+def parse_evidence_ids(raw: str) -> list[str]:
+    if raw.lower() == "none":
+        return []
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+def invalid_hunt_output_message(content: str, allowed_ids: set[str]) -> str | None:
+    sections = parse_hunt_sections(content)
+    missing = [name for name in REQUIRED_SECTIONS if name not in sections]
+    if missing:
+        return "Invalid hunt output: missing required section: " + ", ".join(missing)
+    empty = [name for name in REQUIRED_SECTIONS if not sections[name]]
+    if empty:
+        return "Invalid hunt output: empty required section: " + ", ".join(empty)
+
+    verdict = sections["Verdict"].strip().lower()
+    if verdict not in ALLOWED_VERDICTS:
+        return (
+            "Invalid hunt output: verdict must be suspicious, benign, or "
+            f"inconclusive (got {verdict!r})."
+        )
+
+    cited = parse_evidence_ids(sections["Evidence"])
+    unknown = [eid for eid in cited if eid not in allowed_ids]
+    if unknown:
+        return (
+            "Unknown evidence IDs (not in the supplied events): " + ", ".join(unknown)
+        )
+    return None
+
+
 def print_analysis(response: ChatResponse) -> None:
     thinking = (response.message.thinking or "").strip()
     if thinking:
@@ -111,7 +196,7 @@ def main() -> None:
         "log_file",
         nargs="?",
         default=DEFAULT_LOG_FILE,
-        help="JSONL event file relative to this script (default: logs/password-spray.jsonl)",
+        help=f"JSONL event file relative to this script (default: {DEFAULT_LOG_FILE})",
     )
     parser.add_argument(
         "--model",
@@ -123,9 +208,15 @@ def main() -> None:
     )
     args = parser.parse_args()
     log_path = resolve_log_path(args.log_file)
-    events = get_security_events(log_path)
+    event_list = load_security_events(log_path)
+    allowed_ids = allowed_evidence_ids(event_list)
+    events = json.dumps(event_list, separators=(",", ":"))
+    think_kwargs = chat_think_kwargs(THINK, show(args.model).capabilities)
     print(f"Model: {args.model}")
-    print(f"Thinking: {'on' if THINK else 'off'}")
+    if "think" in think_kwargs:
+        print(f"Thinking: {'on' if think_kwargs['think'] else 'off'}")
+    else:
+        print("Thinking: unsupported")
     # resolve_log_path() accepts absolute paths, including files outside this repo.
     # relative_to() raises ValueError for those; print the absolute path instead.
     repo_root = Path(__file__).parent
@@ -152,11 +243,13 @@ def main() -> None:
     response = chat(
         model=args.model,
         messages=messages,
-        think=THINK,
         options={"temperature": 0, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT},
+        **think_kwargs,
     )
     print_analysis(response)
     error = incomplete_response_message(response, NUM_PREDICT)
+    if error is None:
+        error = invalid_hunt_output_message(response.message.content or "", allowed_ids)
     if error:
         print(error, file=sys.stderr)
         raise SystemExit(1)

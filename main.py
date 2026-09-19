@@ -4,8 +4,10 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Literal
 
 from ollama import ChatResponse, chat
+from pydantic import BaseModel, Field, ValidationError
 
 
 # Default Ollama model. Must already be installed locally (`ollama list`).
@@ -23,6 +25,27 @@ NUM_PREDICT = 1024
 # analysis. True keeps the reasoning trace; False spends the budget on the
 # structured verdict.
 THINK = False
+
+
+class HuntResult(BaseModel):
+    verdict: Literal["suspicious", "benign", "inconclusive"] = Field(
+        description="Overall hunt verdict"
+    )
+    threat_type: str = Field(
+        min_length=1,
+        description="Most specific threat name supported by the evidence, or none",
+    )
+    summary: str = Field(
+        min_length=1,
+        description="One short paragraph grounded in the supplied events",
+    )
+    evidence: list[str] = Field(
+        description="Event IDs from the supplied events (id or _event_id); empty if none",
+    )
+
+
+class HuntResultError(ValueError):
+    """Raised when the model reply cannot be accepted as a hunt result."""
 
 
 def resolve_log_path(log_file: str) -> Path:
@@ -43,11 +66,50 @@ def load_logs(log_path: Path) -> list[dict]:
     return events
 
 
-def get_security_events(log_path: Path) -> str:
-    """Return all available security events as JSON in chronological order."""
+def load_security_events(log_path: Path) -> list[dict]:
+    """Load security events and return them in chronological order."""
     events = load_logs(log_path)
     events.sort(key=lambda event: event["timestamp"])
-    return json.dumps(events, separators=(",", ":"))
+    return events
+
+
+def get_security_events(log_path: Path) -> str:
+    """Return all available security events as JSON in chronological order."""
+    return json.dumps(load_security_events(log_path), separators=(",", ":"))
+
+
+def event_id(event: dict) -> str | None:
+    value = event.get("id") or event.get("_event_id")
+    if value is None:
+        return None
+    return str(value)
+
+
+def allowed_evidence_ids(events: list[dict]) -> set[str]:
+    return {eid for event in events if (eid := event_id(event))}
+
+
+def parse_hunt_result(raw: str) -> HuntResult:
+    return HuntResult.model_validate_json(raw)
+
+
+def validate_evidence_ids(result: HuntResult, allowed_ids: set[str]) -> None:
+    unknown = [eid for eid in result.evidence if eid not in allowed_ids]
+    if unknown:
+        raise HuntResultError(
+            "Unknown evidence IDs (not in the supplied events): "
+            + ", ".join(unknown)
+        )
+
+
+def format_hunt_result(result: HuntResult) -> str:
+    evidence = ", ".join(result.evidence) if result.evidence else "none"
+    return (
+        f"Verdict: {result.verdict}\n"
+        f"Threat type: {result.threat_type}\n"
+        f"Summary: {result.summary}\n"
+        f"Evidence: {evidence}"
+    )
 
 
 SYSTEM_PROMPT = """
@@ -64,17 +126,18 @@ If the evidence is insufficient, say so.
 
 Cite evidence using each event's id or _event_id field.
 
-Return exactly these sections:
-
-Verdict: suspicious, benign, or inconclusive
-Threat type: specific threat name, or none
-Summary: one short paragraph
-Evidence: comma-separated event IDs, or none
+Return a JSON object with exactly these fields:
+- verdict: "suspicious", "benign", or "inconclusive"
+- threat_type: specific threat name, or "none"
+- summary: one short paragraph
+- evidence: array of event IDs from the supplied events, or an empty array
 """.strip()
 
 
 def incomplete_response_message(
-    response: ChatResponse, num_predict: int
+    response: ChatResponse,
+    num_predict: int,
+    num_ctx: int | None = None,
 ) -> str | None:
     content = (response.message.content or "").strip()
     done_reason = response.done_reason or ""
@@ -93,16 +156,47 @@ def incomplete_response_message(
             f"Incomplete response: model returned an empty answer "
             f"(done_reason={done_reason or 'unknown'})."
         )
+    prompt_eval_count = response.prompt_eval_count
+    if (
+        num_ctx is not None
+        and prompt_eval_count is not None
+        and prompt_eval_count >= num_ctx
+    ):
+        return (
+            "Incomplete response: prompt may have been truncated to fit "
+            "the context window "
+            f"(prompt_eval_count={prompt_eval_count}/{num_ctx})."
+        )
     return None
 
 
-def print_analysis(response: ChatResponse) -> None:
+def validate_model_response(
+    response: ChatResponse,
+    allowed_ids: set[str],
+    *,
+    num_predict: int = NUM_PREDICT,
+    num_ctx: int = NUM_CTX,
+) -> HuntResult:
+    limit_error = incomplete_response_message(response, num_predict, num_ctx)
+    if limit_error:
+        raise HuntResultError(limit_error)
+
+    raw = response.message.content or ""
+    try:
+        result = parse_hunt_result(raw)
+    except ValidationError as exc:
+        raise HuntResultError(
+            f"Response does not match hunt result schema:\n{exc}"
+        ) from exc
+
+    validate_evidence_ids(result, allowed_ids)
+    return result
+
+
+def print_thinking(response: ChatResponse) -> None:
     thinking = (response.message.thinking or "").strip()
     if thinking:
         print(f"Thinking:\n{thinking}")
-    content = response.message.content
-    if content:
-        print(content)
 
 
 def main() -> None:
@@ -123,7 +217,9 @@ def main() -> None:
     )
     args = parser.parse_args()
     log_path = resolve_log_path(args.log_file)
-    events = get_security_events(log_path)
+    events = load_security_events(log_path)
+    allowed_ids = allowed_evidence_ids(events)
+    events_json = json.dumps(events, separators=(",", ":"))
     print(f"Model: {args.model}")
     print(f"Thinking: {'on' if THINK else 'off'}")
     # resolve_log_path() accepts absolute paths, including files outside this repo.
@@ -135,7 +231,7 @@ def main() -> None:
         else log_path
     )
     print(f"Log file: {displayed_log}")
-    print(f"Security events supplied:\n{events}")
+    print(f"Security events supplied:\n{events_json}")
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
@@ -143,7 +239,7 @@ def main() -> None:
             "content": (
                 "Review the available security events. Determine whether they "
                 "indicate a threat and explain what the evidence supports.\n\n"
-                f"Security events (JSON):\n{events}"
+                f"Security events (JSON):\n{events_json}"
             ),
         },
     ]
@@ -153,13 +249,19 @@ def main() -> None:
         model=args.model,
         messages=messages,
         think=THINK,
+        format=HuntResult.model_json_schema(),
         options={"temperature": 0, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT},
     )
-    print_analysis(response)
-    error = incomplete_response_message(response, NUM_PREDICT)
-    if error:
-        print(error, file=sys.stderr)
+    print_thinking(response)
+    try:
+        result = validate_model_response(response, allowed_ids)
+    except HuntResultError as exc:
+        raw = response.message.content
+        if raw:
+            print(raw)
+        print(exc, file=sys.stderr)
         raise SystemExit(1)
+    print(format_hunt_result(result))
 
 
 if __name__ == "__main__":

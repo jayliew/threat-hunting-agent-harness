@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -43,11 +44,27 @@ def load_logs(log_path: Path) -> list[dict]:
     return events
 
 
-def get_security_events(log_path: Path) -> str:
-    """Return all available security events as JSON in chronological order."""
+def load_security_events(log_path: Path) -> list[dict]:
+    """Load security events and return them in chronological order."""
     events = load_logs(log_path)
     events.sort(key=lambda event: event["timestamp"])
-    return json.dumps(events, separators=(",", ":"))
+    return events
+
+
+def get_security_events(log_path: Path) -> str:
+    """Return all available security events as JSON in chronological order."""
+    return json.dumps(load_security_events(log_path), separators=(",", ":"))
+
+
+def event_id(event: dict) -> str | None:
+    value = event.get("id") or event.get("_event_id")
+    if value is None:
+        return None
+    return str(value)
+
+
+def allowed_evidence_ids(events: list[dict]) -> set[str]:
+    return {eid for event in events if (eid := event_id(event))}
 
 
 SYSTEM_PROMPT = """
@@ -96,6 +113,59 @@ def incomplete_response_message(
     return None
 
 
+REQUIRED_SECTIONS = ("Verdict", "Threat type", "Summary", "Evidence")
+ALLOWED_VERDICTS = frozenset({"suspicious", "benign", "inconclusive"})
+_SECTION_ALIASES = {name.lower(): name for name in REQUIRED_SECTIONS}
+_SECTION_HEADER_RE = re.compile(
+    r"^(Verdict|Threat type|Summary|Evidence)[ \t]*:[ \t]*(.*)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def parse_hunt_sections(content: str) -> dict[str, str]:
+    """Map canonical section names to their values (may omit missing ones)."""
+    matches = list(_SECTION_HEADER_RE.finditer(content))
+    sections: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        name = _SECTION_ALIASES[match.group(1).lower()]
+        first_line = match.group(2)
+        rest_start = match.end()
+        rest_end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
+        sections[name] = (first_line + content[rest_start:rest_end]).strip()
+    return sections
+
+
+def parse_evidence_ids(raw: str) -> list[str]:
+    if raw.lower() == "none":
+        return []
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+def invalid_hunt_output_message(content: str, allowed_ids: set[str]) -> str | None:
+    sections = parse_hunt_sections(content)
+    missing = [name for name in REQUIRED_SECTIONS if name not in sections]
+    if missing:
+        return "Invalid hunt output: missing required section: " + ", ".join(missing)
+    empty = [name for name in REQUIRED_SECTIONS if not sections[name]]
+    if empty:
+        return "Invalid hunt output: empty required section: " + ", ".join(empty)
+
+    verdict = sections["Verdict"].strip().lower()
+    if verdict not in ALLOWED_VERDICTS:
+        return (
+            "Invalid hunt output: verdict must be suspicious, benign, or "
+            f"inconclusive (got {verdict!r})."
+        )
+
+    cited = parse_evidence_ids(sections["Evidence"])
+    unknown = [eid for eid in cited if eid not in allowed_ids]
+    if unknown:
+        return (
+            "Unknown evidence IDs (not in the supplied events): " + ", ".join(unknown)
+        )
+    return None
+
+
 def print_analysis(response: ChatResponse) -> None:
     thinking = (response.message.thinking or "").strip()
     if thinking:
@@ -123,7 +193,9 @@ def main() -> None:
     )
     args = parser.parse_args()
     log_path = resolve_log_path(args.log_file)
-    events = get_security_events(log_path)
+    event_list = load_security_events(log_path)
+    allowed_ids = allowed_evidence_ids(event_list)
+    events = json.dumps(event_list, separators=(",", ":"))
     print(f"Model: {args.model}")
     print(f"Thinking: {'on' if THINK else 'off'}")
     # resolve_log_path() accepts absolute paths, including files outside this repo.
@@ -157,6 +229,8 @@ def main() -> None:
     )
     print_analysis(response)
     error = incomplete_response_message(response, NUM_PREDICT)
+    if error is None:
+        error = invalid_hunt_output_message(response.message.content or "", allowed_ids)
     if error:
         print(error, file=sys.stderr)
         raise SystemExit(1)

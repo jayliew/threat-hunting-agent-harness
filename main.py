@@ -76,7 +76,15 @@ def main() -> None:
     log_path = resolve_log_path(args.log_file)
     events = get_security_events(log_path)
     print(f"Model: {MODEL}")
-    print(f"Log file: {log_path.relative_to(Path(__file__).parent)}")
+    # resolve_log_path() accepts absolute paths, including files outside this repo.
+    # relative_to() raises ValueError for those; print the absolute path instead.
+    repo_root = Path(__file__).parent
+    displayed_log = (
+        log_path.relative_to(repo_root)
+        if log_path.is_relative_to(repo_root)
+        else log_path
+    )
+    print(f"Log file: {displayed_log}")
     print(f"Security events supplied:\n{events}")
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},

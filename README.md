@@ -58,36 +58,43 @@ Use it to check whether the model:
 
 ## How to run
 
-You need Python 3.14+, [uv](https://docs.astral.sh/uv/), and [Ollama](https://ollama.com) running locally.
+You need Python 3.14+, [uv](https://docs.astral.sh/uv/), and [Ollama](https://ollama.com) running locally. This harness does not download weights. It talks to Ollama on your machine and will fail if the chosen model is not installed.
 
-1. Install Ollama and start it. On macOS that is typically `brew install ollama` then `ollama serve` (or open the Ollama app). Confirm it is up:
+1. Install Ollama and start it. On macOS that is typically `brew install ollama` then `ollama serve` (or open the Ollama app). Confirm it is up and see which models you already have:
 
 ```bash
 ollama list
 ```
 
-2. Pull the local defensive model once (several GB; this is the name `main.py` already uses):
+2. Pick a model from that list. If the list is empty (or you want the suggested defensive model), pull it once (several GB):
 
 ```bash
 ollama pull hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF
 ```
 
-3. From this repo, install Python deps and run a hunt. Default is the password-spray file:
+That name is the script default. Any other installed name is fine; pass it with `--model`.
+
+3. From this repo, install Python deps and run a hunt. Default is the password-spray file and the suggested model:
 
 ```bash
 uv sync
 uv run python main.py
 ```
 
-Pass another JSONL file for a different scenario:
+Pass `--model` with a name from `ollama list`, and optionally another JSONL file:
 
 ```bash
-uv run python main.py logs/http-beaconing.jsonl
+uv run python main.py --model qwen3:32b
+uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
 ```
 
-The script prints the model name, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`.
+The script prints the model name, thinking on/off, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. Incomplete answers (token limit or empty content) exit with an error instead of looking like a successful hunt.
 
-To use a different Ollama model, change `MODEL` in `main.py` and pull that name instead.
+## Thinking mode
+
+Before you run, set `THINK` in `main.py` to `True` (on) or `False` (off). Do not leave the choice implicit.
+
+Qwen3-class models enable thinking by default when the API omits `think`. This harness always sends `think` explicitly. Thinking tokens and the final answer share the 1,024-token `num_predict` budget; with thinking on, the model can hit that limit mid-trace and return an empty or truncated analysis.
 
 ## Layout
 

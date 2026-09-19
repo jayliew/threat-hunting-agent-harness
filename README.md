@@ -91,7 +91,7 @@ uv run python main.py --model qwen3:32b
 uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
 ```
 
-The script prints the model name, thinking on/off, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It exits with an error instead of looking like a successful hunt when:
+The script prints the model name, thinking on/off/unsupported, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It exits with an error instead of looking like a successful hunt when:
 
 - generation hits the token limit (`done_reason=length`) or returns empty content
 - a required section is missing or empty
@@ -102,18 +102,20 @@ Valid citations do not mean the explanation is right.
 
 ## Thinking mode
 
-Before you run, set `THINK` in `main.py` to `True` (on) or `False` (off). Do not leave the choice implicit.
+Before you run, set `THINK` in `main.py` to `True` (on) or `False` (off) for models that support thinking. Do not leave the choice implicit.
 
-Qwen3-class models enable thinking by default when the API omits `think`. This harness always sends `think` explicitly. Thinking tokens and the final answer share the 1,024-token `num_predict` budget; with thinking on, the model can hit that limit mid-trace and return an empty or truncated analysis.
+The harness queries Ollama (`/api/show`) and sends `think` only when the model lists the `thinking` capability. Models without that capability reject the argument (`does not support thinking`), so it is omitted. Qwen3-class models enable thinking by default when the API omits `think`; for those models the harness always sends `think` explicitly.
+
+Thinking tokens and the final answer share the 1,024-token `num_predict` budget; with thinking on, the model can hit that limit mid-trace and return an empty or truncated analysis.
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `main.py` | Prompt, log loading, one Ollama chat call, output and evidence-ID validation |
+| `main.py` | Prompt, log loading, one Ollama chat call (think only if supported), output and evidence-ID validation |
 | `logs/password-spray.jsonl` | Default demo: synthetic login / password-spray events |
 | `logs/http-beaconing.jsonl` | Optional demo: GELF 1.1 HTTP beaconing among legitimate traffic |
-| `test_main.py` | Unit tests for incomplete replies and hunt-output validation |
+| `test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |
 | `pyproject.toml` | Project metadata and the `ollama` client |
 
 Keep the harness thin so the lesson stays in the open.

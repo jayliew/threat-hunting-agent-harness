@@ -96,14 +96,14 @@ class ResultsDirectoryNameTests(unittest.TestCase):
         when = datetime(2026, 9, 20, 13, 28, tzinfo=timezone.utc)
         self.assertEqual(
             compare.results_directory_name(when),
-            "Sun-20-Sep-26_09-28am-ET",
+            "Sun-20-Sep-2026_09-28am-ET",
         )
 
     def test_eastern_standard_saturday_evening(self):
         when = datetime(2026, 1, 11, 2, 5, tzinfo=timezone.utc)
         self.assertEqual(
             compare.results_directory_name(when),
-            "Sat-10-Jan-26_09-05pm-ET",
+            "Sat-10-Jan-2026_09-05pm-ET",
         )
 
 
@@ -197,8 +197,8 @@ class ComparisonTests(unittest.TestCase):
         with patch.object(compare, "eastern_now", return_value=when):
             first = self.run_quietly(client())
             second = self.run_quietly(client())
-        self.assertEqual(first.name, "Sun-20-Sep-26_09-28am-ET")
-        self.assertEqual(second.name, "Sun-20-Sep-26_09-28am-ET-2")
+        self.assertEqual(first.name, "Sun-20-Sep-2026_09-28am-ET")
+        self.assertEqual(second.name, "Sun-20-Sep-2026_09-28am-ET-2")
         self.assertTrue((first / "results.jsonl").exists())
 
     def test_cli_exits_nonzero_after_recording_invalid_runs(self):

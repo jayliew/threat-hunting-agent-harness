@@ -94,27 +94,65 @@ def chat_think_kwargs(
     return {"think": think}
 
 
+FOUNDATION_SEC_MARKERS = ("<|system|>", "<|user|>", "<|assistant|>")
+CHAT_ROLE_MARKERS = FOUNDATION_SEC_MARKERS + (
+    "<|im_start|>",
+    "<|start_header_id|>",
+    "[INST]",
+    "<start_of_turn>",
+)
+
+
 def is_bare_prompt_template(template: str | None) -> bool:
     """True when Ollama will send chat text without native role/turn markers."""
     collapsed = re.sub(r"\s+", "", template or "")
-    return collapsed in {"{{.Prompt}}", "{{.Prompt}}{{.Response}}"}
+    return collapsed in {"{{.Prompt}}", "{{.Prompt}}{{.Response}}", ""}
 
 
-def bare_prompt_template_warning(model: str, template: str | None) -> str | None:
-    """Explain a {{ .Prompt }} install; Foundation-Sec needs a native template."""
-    if not is_bare_prompt_template(template):
+def is_foundation_sec_model(model: str) -> bool:
+    return "foundation-sec" in model.lower()
+
+
+def chat_template_error(model: str, template: str | None) -> str | None:
+    """Return an error if the installed Ollama template cannot frame this chat."""
+    text = template or ""
+    if is_foundation_sec_model(model):
+        missing = [marker for marker in FOUNDATION_SEC_MARKERS if marker not in text]
+        if missing:
+            installed = text.strip() or "(empty)"
+            return (
+                f"Installed Ollama template for {model!r} is missing "
+                f"{', '.join(missing)}. Foundation-Sec-8B-Instruct expects "
+                "<|system|>, <|user|>, and <|assistant|>. Create a local model "
+                "from Modelfile.foundation-sec-8b-instruct before running. "
+                f"Installed template: {installed}"
+            )
         return None
-    message = (
-        f"Installed Ollama template for {model!r} is {{{{ .Prompt }}}}; "
-        "chat messages are sent without native role/turn markers."
-    )
-    if "foundation-sec" in model.lower():
-        message += (
-            " fdtn-ai/Foundation-Sec-8B-Instruct expects <|system|>, <|user|>, "
-            "and <|assistant|>. Create a local model from "
-            "Modelfile.foundation-sec-8b-instruct."
+    if is_bare_prompt_template(text):
+        installed = text.strip() or "(empty)"
+        return (
+            f"Installed Ollama template for {model!r} is {installed}. "
+            "This harness sends chat roles; {{ .Prompt }} sends only the user "
+            "text and drops system instructions."
         )
-    return message
+    if ".Messages" not in text and not any(marker in text for marker in CHAT_ROLE_MARKERS):
+        return (
+            f"Installed Ollama template for {model!r} has no role/turn markers "
+            "and does not range .Messages, so chat framing will not be applied. "
+            f"Installed template: {text.strip()}"
+        )
+    return None
+
+
+def inspect_installed_model(client: Client, model: str) -> tuple[str, list[str]]:
+    """Read /api/show and refuse models whose template cannot frame chat roles."""
+    info = client.show(model)
+    template = info.template or ""
+    capabilities = list(info.capabilities or [])
+    error = chat_template_error(model, template)
+    if error:
+        raise ValueError(error)
+    return template, capabilities
 
 
 # Application instructions, not a model's chat template. Ollama supplies the
@@ -280,14 +318,22 @@ def run_hunt(
         "timing": {},
     }
     started = perf_counter()
+    inspected_template = chat_template is not None
     try:
         if capabilities is None:
             info = client.show(model)
             capabilities = info.capabilities or []
-            if not result["chat_template"]:
+            if not inspected_template:
                 result["chat_template"] = info.template or ""
+                inspected_template = True
         result["capabilities"] = capabilities
         result["request"].update(chat_think_kwargs(THINK, capabilities))
+        if inspected_template:
+            error = chat_template_error(model, result["chat_template"])
+            if error:
+                result["error"] = error
+                result["timing"]["wall_seconds"] = perf_counter() - started
+                return result
         response = client.chat(**result["request"])
         content = response.message.content or ""
         result["response"] = response.model_dump(mode="json")
@@ -329,10 +375,17 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    print(f"Model: {args.model}")
+    client = Client(timeout=300)
+    try:
+        template, capabilities = inspect_installed_model(client, args.model)
+    except Exception as error:
+        print(error, file=sys.stderr)
+        raise SystemExit(1)
+    print(f"Chat template:\n{template}")
     log_path = resolve_log_path(args.log_file)
     event_list = load_security_events(log_path)
     events = json.dumps(event_list, separators=(",", ":"))
-    print(f"Model: {args.model}")
     # resolve_log_path() accepts absolute paths, including files outside this repo.
     # relative_to() raises ValueError for those; print the absolute path instead.
     repo_root = Path(__file__).parent
@@ -344,12 +397,13 @@ def main() -> None:
     print(f"Log file: {displayed_log}")
     print(f"Security events supplied:\n{events}")
     print("\n--- Analysis ---", flush=True)
-    result = run_hunt(args.model, event_list)
-    template = result.get("chat_template") or ""
-    print(f"Chat template: {template or '(unavailable)'}")
-    warning = bare_prompt_template_warning(args.model, template)
-    if warning:
-        print(warning, file=sys.stderr)
+    result = run_hunt(
+        args.model,
+        event_list,
+        client=client,
+        capabilities=capabilities,
+        chat_template=template,
+    )
     effective_think = result["request"].get("think")
     print(f"Thinking: {effective_think if effective_think is not None else 'unsupported or unavailable'}")
     if result["thinking"]:

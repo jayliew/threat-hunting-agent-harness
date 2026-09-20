@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 
-from ollama import ChatResponse, chat, show
+from ollama import ChatResponse, Client
 
 
 # Default Ollama model. Must already be installed locally (`ollama list`).
@@ -181,13 +184,79 @@ def invalid_hunt_output_message(content: str, allowed_ids: set[str]) -> str | No
     return None
 
 
-def print_analysis(response: ChatResponse) -> None:
-    thinking = (response.message.thinking or "").strip()
-    if thinking:
-        print(f"Thinking:\n{thinking}")
-    content = response.message.content
-    if content:
-        print(content)
+def build_messages(events: list[dict]) -> list[dict[str, str]]:
+    serialized = json.dumps(events, separators=(",", ":"))
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                "Review the available security events. Determine whether they "
+                "indicate a threat and explain what the evidence supports.\n\n"
+                f"Security events (JSON):\n{serialized}"
+            ),
+        },
+    ]
+
+
+def run_hunt(
+    model: str,
+    events: list[dict],
+    *,
+    client: Client | None = None,
+    capabilities: list[str] | None = None,
+    keep_alive: str | int = "5m",
+) -> dict:
+    """Run one fresh conversation; retain answers and failures for inspection."""
+    client = client if client is not None else Client(timeout=300)
+    messages = build_messages(events)
+    options = {"temperature": 0, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT}
+    result = {
+        "model": model,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "status": "error",
+        "raw_content": "",
+        "thinking": "",
+        "sections": {},
+        "unknown_evidence_ids": [],
+        "validation_errors": [],
+        "error": None,
+        "response": None,
+        "request": {"model": model, "messages": messages, "options": options,
+                    "stream": False, "keep_alive": keep_alive},
+        "prompt_sha256": hashlib.sha256(
+            json.dumps(messages, sort_keys=True).encode()
+        ).hexdigest(),
+        "timing": {},
+    }
+    started = perf_counter()
+    try:
+        if capabilities is None:
+            capabilities = client.show(model).capabilities or []
+        result["capabilities"] = capabilities
+        result["request"].update(chat_think_kwargs(THINK, capabilities))
+        response = client.chat(**result["request"])
+        content = response.message.content or ""
+        result["response"] = response.model_dump(mode="json")
+        result["raw_content"] = content
+        result["thinking"] = response.message.thinking or ""
+        result["sections"] = parse_hunt_sections(content)
+        allowed = allowed_evidence_ids(events)
+        result["unknown_evidence_ids"] = sorted(set(
+            parse_evidence_ids(result["sections"].get("Evidence", ""))
+        ) - allowed)
+        result["validation_errors"] = [error for error in (
+            incomplete_response_message(response, NUM_PREDICT),
+            invalid_hunt_output_message(content, allowed),
+        ) if error]
+        result["status"] = "invalid" if result["validation_errors"] else "ok"
+        for field in ("total_duration", "load_duration", "prompt_eval_duration", "eval_duration"):
+            value = getattr(response, field, None)
+            result["timing"][field + "_seconds"] = value / 1e9 if value is not None else None
+    except Exception as error:
+        result["error"] = f"{type(error).__name__}: {error}"
+    result["timing"]["wall_seconds"] = perf_counter() - started
+    return result
 
 
 def main() -> None:
@@ -209,14 +278,8 @@ def main() -> None:
     args = parser.parse_args()
     log_path = resolve_log_path(args.log_file)
     event_list = load_security_events(log_path)
-    allowed_ids = allowed_evidence_ids(event_list)
     events = json.dumps(event_list, separators=(",", ":"))
-    think_kwargs = chat_think_kwargs(THINK, show(args.model).capabilities)
     print(f"Model: {args.model}")
-    if "think" in think_kwargs:
-        print(f"Thinking: {'on' if think_kwargs['think'] else 'off'}")
-    else:
-        print("Thinking: unsupported")
     # resolve_log_path() accepts absolute paths, including files outside this repo.
     # relative_to() raises ValueError for those; print the absolute path instead.
     repo_root = Path(__file__).parent
@@ -227,31 +290,18 @@ def main() -> None:
     )
     print(f"Log file: {displayed_log}")
     print(f"Security events supplied:\n{events}")
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": (
-                "Review the available security events. Determine whether they "
-                "indicate a threat and explain what the evidence supports.\n\n"
-                f"Security events (JSON):\n{events}"
-            ),
-        },
-    ]
-
     print("\n--- Analysis ---", flush=True)
-    response = chat(
-        model=args.model,
-        messages=messages,
-        options={"temperature": 0, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT},
-        **think_kwargs,
-    )
-    print_analysis(response)
-    error = incomplete_response_message(response, NUM_PREDICT)
-    if error is None:
-        error = invalid_hunt_output_message(response.message.content or "", allowed_ids)
-    if error:
+    result = run_hunt(args.model, event_list)
+    effective_think = result["request"].get("think")
+    print(f"Thinking: {effective_think if effective_think is not None else 'unsupported or unavailable'}")
+    if result["thinking"]:
+        print(f"Thinking:\n{result['thinking']}")
+    if result["raw_content"]:
+        print(result["raw_content"])
+    errors = result["validation_errors"] + ([result["error"]] if result["error"] else [])
+    for error in errors:
         print(error, file=sys.stderr)
+    if result["status"] != "ok":
         raise SystemExit(1)
 
 

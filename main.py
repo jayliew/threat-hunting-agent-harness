@@ -14,7 +14,10 @@ from ollama import ChatResponse, Client
 
 # Default Ollama model. Must already be installed locally (`ollama list`).
 # Pass --model to use a different installed name.
-DEFAULT_MODEL = "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest"
+# Apply Modelfile.foundation-sec-8b-instruct to the Hugging Face GGUF import
+# so Ollama sends <|system|> / <|user|> / <|assistant|> instead of {{ .Prompt }}.
+DEFAULT_MODEL = "foundation-sec-8b-instruct"
+# DEFAULT_MODEL = "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest"
 # DEFAULT_MODEL = "qwen3:32b"
 # DEFAULT_MODEL = "mistral-small3.2:24b"
 # Change this to point at a different JSONL event file (or pass the path as argv).
@@ -83,6 +86,29 @@ def chat_think_kwargs(
     if "thinking" not in (capabilities or []):
         return {}
     return {"think": think}
+
+
+def is_bare_prompt_template(template: str | None) -> bool:
+    """True when Ollama will send chat text without native role/turn markers."""
+    collapsed = re.sub(r"\s+", "", template or "")
+    return collapsed in {"{{.Prompt}}", "{{.Prompt}}{{.Response}}"}
+
+
+def bare_prompt_template_warning(model: str, template: str | None) -> str | None:
+    """Explain a {{ .Prompt }} install; Foundation-Sec needs a native template."""
+    if not is_bare_prompt_template(template):
+        return None
+    message = (
+        f"Installed Ollama template for {model!r} is {{{{ .Prompt }}}}; "
+        "chat messages are sent without native role/turn markers."
+    )
+    if "foundation-sec" in model.lower():
+        message += (
+            " fdtn-ai/Foundation-Sec-8B-Instruct expects <|system|>, <|user|>, "
+            "and <|assistant|>. Create a local model from "
+            "Modelfile.foundation-sec-8b-instruct."
+        )
+    return message
 
 
 # Application instructions, not a model's chat template. Ollama supplies the
@@ -221,6 +247,7 @@ def run_hunt(
     *,
     client: Client | None = None,
     capabilities: list[str] | None = None,
+    chat_template: str | None = None,
     keep_alive: str | int = "5m",
 ) -> dict:
     """Run one fresh conversation; retain answers and failures for inspection."""
@@ -238,6 +265,7 @@ def run_hunt(
         "validation_errors": [],
         "error": None,
         "response": None,
+        "chat_template": chat_template or "",
         "request": {"model": model, "messages": messages, "options": options,
                     "stream": False, "keep_alive": keep_alive},
         "prompt_sha256": hashlib.sha256(
@@ -248,7 +276,10 @@ def run_hunt(
     started = perf_counter()
     try:
         if capabilities is None:
-            capabilities = client.show(model).capabilities or []
+            info = client.show(model)
+            capabilities = info.capabilities or []
+            if not result["chat_template"]:
+                result["chat_template"] = info.template or ""
         result["capabilities"] = capabilities
         result["request"].update(chat_think_kwargs(THINK, capabilities))
         response = client.chat(**result["request"])
@@ -308,6 +339,11 @@ def main() -> None:
     print(f"Security events supplied:\n{events}")
     print("\n--- Analysis ---", flush=True)
     result = run_hunt(args.model, event_list)
+    template = result.get("chat_template") or ""
+    print(f"Chat template: {template or '(unavailable)'}")
+    warning = bare_prompt_template_warning(args.model, template)
+    if warning:
+        print(warning, file=sys.stderr)
     effective_think = result["request"].get("think")
     print(f"Thinking: {effective_think if effective_think is not None else 'unsupported or unavailable'}")
     if result["thinking"]:

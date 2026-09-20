@@ -35,6 +35,8 @@ The single-hunt command and comparison runner share `run_hunt(model, events)`. E
 
 Let the installed model's [Ollama chat template](https://docs.ollama.com/modelfile#template) supply its native role/turn tokens. Do not manually add ChatML tokens, Llama headers, Mistral `[INST]` markers, or Gemma turn markers to these prompts. [Chat templates differ even between models derived from the same base](https://huggingface.co/docs/transformers/chat_templating). For models whose native format lacks a separate system role, verify that the installed template incorporates those instructions appropriately; a portable message API does not imply identical role support. Inspect imported GGUF models with `ollama show --modelfile MODEL`: a bare `{{ .Prompt }}` template does not provide native chat framing and must be checked against that model's intended instruction template before comparing results.
 
+The Hugging Face GGUF `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest` is that case. The GGUF has no `tokenizer.chat_template`, the Hub repo has no Ollama `template` file, and Ollama therefore installs `TEMPLATE {{ .Prompt }}`. That path sends only the user text. It omits `<|system|>`, `<|user|>`, and `<|assistant|>` from [`chat_template.jinja`](https://huggingface.co/fdtn-ai/Foundation-Sec-8B-Instruct/blob/main/chat_template.jinja), and it does not interpolate the harness system message. The weights are Llama 3.1–based, but this instruct checkpoint was not trained on Llama `<|start_header_id|>` headers; those tokens are still in the tokenizer and are the wrong framing. The script default is `foundation-sec-8b-instruct`, created from `Modelfile.foundation-sec-8b-instruct`. If you pass the raw `hf.co/...` import, the CLI prints a warning.
+
 The evidence serializer escapes `<`, `>`, and `&` using JSON Unicode escapes. This prevents a field containing `</security_events>` from literally ending the outer evidence block while preserving its exact decoded value. These delimiters are not a security boundary or a guarantee of instruction-following. Existing completion, output-format, and evidence-ID checks still apply. Prompt structure is tested offline; response quality and compatibility must be evaluated per installed model/template.
 
 ## Demo scenarios
@@ -85,11 +87,12 @@ ollama list
 
 ```bash
 ollama pull hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF
+ollama create foundation-sec-8b-instruct -f Modelfile.foundation-sec-8b-instruct
 ```
 
-That installs as `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest`, which is the script default. Any other installed name is fine; pass it with `--model`.
+The pull installs `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest`. That name has no native chat template (`{{ .Prompt }}`). The `ollama create` step is required so the script default `foundation-sec-8b-instruct` sends `<|system|>`, `<|user|>`, and `<|assistant|>`. Any other installed name is fine; pass it with `--model`.
 
-3. From this repo, install Python deps and run a hunt. Default is the HTTP-beaconing file and the suggested Foundation-Sec model:
+3. From this repo, install Python deps and run a hunt. Default is the HTTP-beaconing file and `foundation-sec-8b-instruct`:
 
 ```bash
 uv sync
@@ -160,6 +163,8 @@ uv run python -m unittest -v
 | Path | Role |
 | --- | --- |
 | `main.py` | Prompt, log loading, one Ollama chat call (think only if supported), output and evidence-ID validation |
+| `compare.py` | Sequential comparison runner and HTML reports |
+| `Modelfile.foundation-sec-8b-instruct` | Native `<|system|>/<|user|>/<|assistant|>` template for the Foundation-Sec GGUF import |
 | `logs/password-spray.jsonl` | Optional demo: synthetic login / password-spray events |
 | `logs/http-beaconing.jsonl` | Default demo: GELF 1.1 HTTP beaconing among legitimate traffic |
 | `logs/internal-network-scan.jsonl` | Optional demo: internal scanning among legitimate traffic |

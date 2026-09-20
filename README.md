@@ -106,7 +106,7 @@ Valid citations do not mean the explanation is right.
 
 ## Thinking mode
 
-Before you run a single hunt, set `THINK` in `main.py` to `True` (on) or `False` (off) for models that support thinking. Do not leave the choice implicit. Comparison always requests thinking when the model supports it.
+Single hunts and comparison both request thinking when the model lists that capability. Set `THINK` in `main.py` to `False` if you want thinking models to spend the token budget on the structured verdict instead. Do not leave the API default implicit.
 
 The harness queries Ollama (`/api/show`) and sends `think` only when the model lists the `thinking` capability. Models without that capability reject the argument (`does not support thinking`), so it is omitted. Qwen3-class models enable thinking by default when the API omits `think`; for those models the harness always sends `think` explicitly.
 

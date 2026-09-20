@@ -32,7 +32,7 @@ NUM_PREDICT = 1024
 # the final answer; at 1024 tokens, True can return an empty or truncated
 # analysis. True keeps the reasoning trace; False spends the budget on the
 # structured verdict.
-THINK = False
+THINK = True
 
 
 def resolve_log_path(log_file: str) -> Path:

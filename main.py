@@ -206,6 +206,7 @@ def run_hunt(
     client: Client | None = None,
     capabilities: list[str] | None = None,
     keep_alive: str | int = "5m",
+    think: bool | None = None,
 ) -> dict:
     """Run one fresh conversation; retain answers and failures for inspection."""
     client = client if client is not None else Client()
@@ -234,7 +235,9 @@ def run_hunt(
         if capabilities is None:
             capabilities = client.show(model).capabilities or []
         result["capabilities"] = capabilities
-        result["request"].update(chat_think_kwargs(THINK, capabilities))
+        result["request"].update(
+            chat_think_kwargs(THINK if think is None else think, capabilities)
+        )
         response = client.chat(**result["request"])
         content = response.message.content or ""
         result["response"] = response.model_dump(mode="json")

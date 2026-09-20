@@ -106,7 +106,7 @@ Valid citations do not mean the explanation is right.
 
 ## Thinking mode
 
-Before you run, set `THINK` in `main.py` to `True` (on) or `False` (off) for models that support thinking. Do not leave the choice implicit.
+Before you run a single hunt, set `THINK` in `main.py` to `True` (on) or `False` (off) for models that support thinking. Do not leave the choice implicit. Comparison always requests thinking when the model supports it.
 
 The harness queries Ollama (`/api/show`) and sends `think` only when the model lists the `thinking` capability. Models without that capability reject the argument (`does not support thinking`), so it is omitted. Qwen3-class models enable thinking by default when the API omits `think`; for those models the harness always sends `think` explicitly.
 
@@ -135,7 +135,7 @@ Log paths are relative to the script (or absolute); a supplied output directory 
 - `results.jsonl`: one row per attempted model/case pair, saved immediately. Includes full raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages/options, prompt and input hashes, model digest, and timings.
 - `manifest.json`: selected models/digests and input file identities. Pending cases remain visible in the report if the process is interrupted.
 
-Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Temperature, context size, answer budget, and the requested thinking mode come from `main.py`; capability-aware handling omits `think` for models without that capability. The last case for each model requests unloading afterward. The configurable HTTP operation timeout defaults to 600 seconds (10 minutes); it is not a total batch deadline.
+Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Temperature, context size, and answer budget come from `main.py`. Comparison sends `think=True` when the model lists the thinking capability and omits `think` otherwise. The last case for each model requests unloading afterward. The configurable HTTP operation timeout defaults to 600 seconds (10 minutes); it is not a total batch deadline.
 
 Invalid, empty, truncated, and failed responses are retained. An individual inference error does not stop the remaining cases. The report updates after every saved result. Exit status is nonzero if any run is invalid or failed, preflight fails, or execution is interrupted; completed results remain available.
 

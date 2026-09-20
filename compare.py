@@ -154,7 +154,8 @@ def run_comparison(client: Client, models: list[str], logs: list[str], output_ro
                 print(f'[{len(results)+1}/{len(selected)*len(cases)}] {model["name"]} · {case["name"]}', flush=True)
                 result = run_hunt(model["name"], case["events"], client=client,
                                   capabilities=model["capabilities"],
-                                  keep_alive=0 if index == len(cases)-1 else "5m")
+                                  keep_alive=0 if index == len(cases)-1 else "5m",
+                                  think=True)
                 result.update({"schema_version": 1, "case": case["name"], "log_path": case["path"],
                                "events_sha256": case["events_sha256"], "model_digest": model["digest"]})
                 output.write(json.dumps(result) + "\n")

@@ -83,20 +83,55 @@ class HuntTests(unittest.TestCase):
         self.assertIsNone(result['response'])
         self.assertGreaterEqual(result['timing']['wall_seconds'], 0)
 
+    def test_run_hunt_skips_chat_when_show_template_is_bare(self):
+        api = client()
+        api.show.return_value.template = "{{ .Prompt }}"
+        result = harness.run_hunt('alpha:latest', EVENTS, client=api)
+        self.assertEqual(result['status'], 'error')
+        self.assertIn("{{ .Prompt }}", result['error'])
+        self.assertFalse(api.chat.called)
+
     def test_single_hunt_cli_uses_shared_runner(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'case.jsonl'
             path.write_text(json.dumps(EVENTS[0])+'\n')
-            result = harness.run_hunt('alpha', EVENTS, client=client())
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'alpha']), patch.object(harness, 'run_hunt', return_value=result) as run, contextlib.redirect_stdout(io.StringIO()) as out:
+            api = client()
+            result = harness.run_hunt('alpha', EVENTS, client=api)
+            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'alpha']), \
+                    patch.object(harness, 'Client', return_value=api), \
+                    patch.object(harness, 'run_hunt', return_value=result) as run, \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
                 harness.main()
-            run.assert_called_once_with('alpha', EVENTS)
+            self.assertEqual(run.call_args.args[:2], ('alpha', EVENTS))
             self.assertIn(ANSWER, out.getvalue())
             result['status'] = 'invalid'
             result['validation_errors'] = ['Invalid output']
-            with patch.object(sys, 'argv', ['main.py', str(path)]), patch.object(harness, 'run_hunt', return_value=result), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exit:
+            with patch.object(sys, 'argv', ['main.py', str(path)]), \
+                    patch.object(harness, 'Client', return_value=api), \
+                    patch.object(harness, 'run_hunt', return_value=result), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit) as exit:
                 harness.main()
             self.assertEqual(exit.exception.code, 1)
+
+    def test_single_hunt_cli_rejects_bad_template_before_inference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'case.jsonl'
+            path.write_text(json.dumps(EVENTS[0])+'\n')
+            api = client()
+            api.show.return_value.template = "{{ .Prompt }}"
+            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'alpha']), \
+                    patch.object(harness, 'Client', return_value=api), \
+                    patch.object(harness, 'run_hunt') as run, \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()) as err, \
+                    self.assertRaises(SystemExit) as exit:
+                harness.main()
+            self.assertEqual(exit.exception.code, 1)
+            self.assertFalse(run.called)
+            self.assertFalse(api.chat.called)
+            self.assertIn("{{ .Prompt }}", err.getvalue())
 
 
 class ResultsDirectoryNameTests(unittest.TestCase):
@@ -177,14 +212,13 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(len(logs), 2)
         self.assertIn("<|system|>", models[0]["chat_template"])
 
-    def test_bare_prompt_template_is_warned_during_preflight(self):
+    def test_bare_prompt_template_fails_preflight_without_inference(self):
         api = client()
         api.show.return_value.template = "{{ .Prompt }}"
-        with contextlib.redirect_stderr(io.StringIO()) as err:
-            selected, _cases = compare_models.prepare_comparison(api, ['alpha'], self.logs[:1])
-        self.assertEqual(selected[0]["chat_template"], "{{ .Prompt }}")
-        self.assertIn("{{ .Prompt }}", err.getvalue())
-        self.assertNotIn("<|system|>", err.getvalue())
+        with self.assertRaises(ValueError) as error:
+            compare_models.prepare_comparison(api, ['alpha'], self.logs[:1])
+        self.assertIn("{{ .Prompt }}", str(error.exception))
+        self.assertFalse(api.chat.called)
 
     def test_report_escapes_model_output(self):
         api = client()

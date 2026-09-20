@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 from ollama import Client
 
 from main import (
-    bare_prompt_template_warning,
+    chat_template_error,
     load_security_events,
     resolve_log_path,
     run_hunt,
@@ -103,9 +103,9 @@ def prepare_comparison(client: Client, models: list[str], logs: list[str]) -> tu
             if capabilities and "completion" not in capabilities:
                 raise ValueError("model does not support text completion")
             template = info.template or ""
-            warning = bare_prompt_template_warning(canonical, template)
-            if warning:
-                print(warning, file=sys.stderr)
+            error = chat_template_error(canonical, template)
+            if error:
+                raise ValueError(error)
             selected.append({"name": canonical, "digest": model.digest,
                              "capabilities": capabilities, "chat_template": template})
         except Exception as error:

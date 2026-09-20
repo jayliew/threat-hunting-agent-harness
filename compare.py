@@ -28,25 +28,31 @@ TEST_LOGS = [
 ]
 OUTPUT_ROOT = Path(__file__).parent / "results"
 EASTERN = ZoneInfo("America/New_York")
-WEEKDAYS = (
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday",
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+MONTHS = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
 )
 
 
 def results_directory_name(when: datetime) -> str:
-    """Readable US Eastern folder name: weekday, mm-dd-yy, and hh-mm am/pm."""
+    """Readable US Eastern folder name: weekday, dd-Mon-yy, and hh-mm am/pm."""
     eastern = when.astimezone(EASTERN)
     hour12 = eastern.hour % 12 or 12
     meridiem = "am" if eastern.hour < 12 else "pm"
     return (
         f"{WEEKDAYS[eastern.weekday()]}-"
-        f"{eastern.month:02d}-{eastern.day:02d}-{eastern.year % 100:02d}_"
+        f"{eastern.day:02d}-{MONTHS[eastern.month - 1]}-{eastern.year % 100:02d}_"
         f"{hour12:02d}-{eastern.minute:02d}{meridiem}-ET"
     )
 

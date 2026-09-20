@@ -1,3 +1,9 @@
+"""Single-scenario threat-hunting CLI.
+
+Load one JSONL event file, send it to a local Ollama model, and print a
+structured hunt result. To compare several installed models on the same
+scenarios, run compare_models.py.
+"""
 from __future__ import annotations
 
 import argparse

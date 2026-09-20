@@ -1,3 +1,8 @@
+"""Tests for the comparison runner and the shared hunt contract.
+
+Hunt-contract tests live here because both CLIs share run_hunt() from main.py.
+The rest of the file covers the comparison matrix and HTML report.
+"""
 from __future__ import annotations
 
 import contextlib
@@ -13,7 +18,7 @@ from unittest.mock import Mock, patch
 
 from ollama import ChatResponse, Message
 
-import compare
+import compare_models
 import main as harness
 
 
@@ -98,14 +103,14 @@ class ResultsDirectoryNameTests(unittest.TestCase):
     def test_eastern_daylight_sunday_morning(self):
         when = datetime(2026, 9, 20, 13, 28, tzinfo=timezone.utc)
         self.assertEqual(
-            compare.results_directory_name(when),
+            compare_models.results_directory_name(when),
             "20-Sep-2026-Sun_09-28am-ET",
         )
 
     def test_eastern_standard_saturday_evening(self):
         when = datetime(2026, 1, 11, 2, 5, tzinfo=timezone.utc)
         self.assertEqual(
-            compare.results_directory_name(when),
+            compare_models.results_directory_name(when),
             "10-Jan-2026-Sat_09-05pm-ET",
         )
 
@@ -123,7 +128,7 @@ class ComparisonTests(unittest.TestCase):
 
     def run_quietly(self, api):
         with contextlib.redirect_stdout(io.StringIO()):
-            return compare.run_comparison(api, ['alpha', 'beta:1'], self.logs, self.root / 'results')
+            return compare_models.run_comparison(api, ['alpha', 'beta:1'], self.logs, self.root / 'results')
 
     def test_matrix_runs_sequentially_and_continues_after_failure(self):
         api = client()
@@ -148,7 +153,7 @@ class ComparisonTests(unittest.TestCase):
     def test_missing_models_reported_together_without_starting_run(self):
         api = client()
         with self.assertRaises(ValueError) as error:
-            compare.run_comparison(api, ['missing-one', 'missing-two'], self.logs, self.root/'results')
+            compare_models.run_comparison(api, ['missing-one', 'missing-two'], self.logs, self.root/'results')
         self.assertIn('missing-one', str(error.exception))
         self.assertIn('missing-two', str(error.exception))
         self.assertFalse(api.chat.called)
@@ -161,13 +166,13 @@ class ComparisonTests(unittest.TestCase):
         malformed.write_text('not-json\n')
         api = client()
         with self.assertRaises(ValueError) as error:
-            compare.prepare_comparison(api, ['alpha'], [str(empty), str(malformed)])
+            compare_models.prepare_comparison(api, ['alpha'], [str(empty), str(malformed)])
         self.assertIn('empty.jsonl', str(error.exception))
         self.assertIn('bad.jsonl', str(error.exception))
         self.assertFalse(api.chat.called)
 
     def test_duplicate_aliases_and_paths_run_once(self):
-        models, logs = compare.prepare_comparison(client(), ['alpha', 'alpha:latest'], self.logs*2)
+        models, logs = compare_models.prepare_comparison(client(), ['alpha', 'alpha:latest'], self.logs*2)
         self.assertEqual(len(models), 1)
         self.assertEqual(len(logs), 2)
         self.assertIn("<|system|>", models[0]["chat_template"])
@@ -176,7 +181,7 @@ class ComparisonTests(unittest.TestCase):
         api = client()
         api.show.return_value.template = "{{ .Prompt }}"
         with contextlib.redirect_stderr(io.StringIO()) as err:
-            selected, _cases = compare.prepare_comparison(api, ['alpha'], self.logs[:1])
+            selected, _cases = compare_models.prepare_comparison(api, ['alpha'], self.logs[:1])
         self.assertEqual(selected[0]["chat_template"], "{{ .Prompt }}")
         self.assertIn("{{ .Prompt }}", err.getvalue())
         self.assertNotIn("<|system|>", err.getvalue())
@@ -207,7 +212,7 @@ class ComparisonTests(unittest.TestCase):
 
     def test_output_directory_uses_readable_eastern_name(self):
         when = datetime(2026, 9, 20, 13, 28, tzinfo=timezone.utc)
-        with patch.object(compare, "eastern_now", return_value=when):
+        with patch.object(compare_models, "eastern_now", return_value=when):
             first = self.run_quietly(client())
             second = self.run_quietly(client())
         self.assertEqual(first.name, "20-Sep-2026-Sun_09-28am-ET")
@@ -217,8 +222,8 @@ class ComparisonTests(unittest.TestCase):
     def test_cli_exits_nonzero_after_recording_invalid_runs(self):
         api = client()
         api.chat.return_value = response('bad answer')
-        with patch.object(compare, 'Client', return_value=api), patch.object(sys, 'argv', ['compare.py', '--models', 'alpha', '--logs', self.logs[0], '--output-dir', str(self.root/'results')]), contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as exit:
-            compare.main()
+        with patch.object(compare_models, 'Client', return_value=api), patch.object(sys, 'argv', ['compare_models.py', '--models', 'alpha', '--logs', self.logs[0], '--output-dir', str(self.root/'results')]), contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as exit:
+            compare_models.main()
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(len(list((self.root/'results').glob('*/report.html'))), 1)
 

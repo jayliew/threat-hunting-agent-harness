@@ -17,7 +17,7 @@ It is intentionally small. Prefer a few files you can hold in your head over a p
 
 `main.py` is a single-pass harness:
 
-1. Load events from a JSONL file (`logs/password-spray.jsonl` by default)
+1. Load events from a JSONL file (`logs/http-beaconing.jsonl` by default)
 2. Sort them by timestamp
 3. Send them to a local [Ollama](https://ollama.com) model with a defensive analyst prompt
 4. Print a fixed-format answer: verdict, threat type, summary, and evidence IDs
@@ -87,9 +87,9 @@ ollama list
 ollama pull hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF
 ```
 
-That name is the script default. Any other installed name is fine; pass it with `--model`.
+That installs as `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest`, which is the script default. Any other installed name is fine; pass it with `--model`.
 
-3. From this repo, install Python deps and run a hunt. Default is the password-spray file and the suggested model:
+3. From this repo, install Python deps and run a hunt. Default is the HTTP-beaconing file and the suggested Foundation-Sec model:
 
 ```bash
 uv sync
@@ -160,8 +160,8 @@ uv run python -m unittest -v
 | Path | Role |
 | --- | --- |
 | `main.py` | Prompt, log loading, one Ollama chat call (think only if supported), output and evidence-ID validation |
-| `logs/password-spray.jsonl` | Default demo: synthetic login / password-spray events |
-| `logs/http-beaconing.jsonl` | Optional demo: GELF 1.1 HTTP beaconing among legitimate traffic |
+| `logs/password-spray.jsonl` | Optional demo: synthetic login / password-spray events |
+| `logs/http-beaconing.jsonl` | Default demo: GELF 1.1 HTTP beaconing among legitimate traffic |
 | `logs/internal-network-scan.jsonl` | Optional demo: internal scanning among legitimate traffic |
 | `test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |
 | `pyproject.toml` | Project metadata and the `ollama` client |

@@ -137,7 +137,7 @@ uv run python compare.py --models qwen3:32b mistral-small3.2:24b --logs logs/pas
 uv run python compare.py --models mistral-small3.2:24b --timeout 600 --output-dir results
 ```
 
-Log paths are relative to the script (or absolute); a supplied output directory is relative to your current working directory. Each invocation creates a unique timestamped subdirectory containing:
+Log paths are relative to the script (or absolute); a supplied output directory is relative to your current working directory. Each invocation creates a unique US Eastern Time subdirectory named with weekday, mm-dd-yy, and hh-mm am/pm (for example `Sunday-09-20-26_09-28am-ET`) containing:
 
 - `report.html`: open in a browser for a summary table and full answers side by side, grouped by case. Thinking traces can be expanded when present. Output and error text are HTML-escaped.
 - `results.jsonl`: one row per attempted model/case pair, saved immediately. Includes full raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages/options, prompt and input hashes, model digest, and timings.

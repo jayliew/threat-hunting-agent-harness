@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime
 import hashlib
 from html import escape
 import json
 import os
 from pathlib import Path
 import sys
-from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from ollama import Client
 
@@ -27,6 +27,43 @@ TEST_LOGS = [
     "logs/internal-network-scan.jsonl",
 ]
 OUTPUT_ROOT = Path(__file__).parent / "results"
+EASTERN = ZoneInfo("America/New_York")
+WEEKDAYS = (
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+)
+
+
+def results_directory_name(when: datetime) -> str:
+    """Readable US Eastern folder name: weekday, mm-dd-yy, and hh-mm am/pm."""
+    eastern = when.astimezone(EASTERN)
+    hour12 = eastern.hour % 12 or 12
+    meridiem = "am" if eastern.hour < 12 else "pm"
+    return (
+        f"{WEEKDAYS[eastern.weekday()]}-"
+        f"{eastern.month:02d}-{eastern.day:02d}-{eastern.year % 100:02d}_"
+        f"{hour12:02d}-{eastern.minute:02d}{meridiem}-ET"
+    )
+
+
+def eastern_now() -> datetime:
+    return datetime.now(EASTERN)
+
+
+def allocate_results_directory(output_root: Path, when: datetime) -> Path:
+    base = results_directory_name(when)
+    directory = output_root / base
+    suffix = 2
+    while directory.exists():
+        directory = output_root / f"{base}-{suffix}"
+        suffix += 1
+    directory.mkdir(parents=True, exist_ok=False)
+    return directory
 
 
 def prepare_comparison(client: Client, models: list[str], logs: list[str]) -> tuple[list[dict], list[dict]]:
@@ -138,9 +175,8 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
 
 def run_comparison(client: Client, models: list[str], logs: list[str], output_root: Path) -> Path:
     selected, cases = prepare_comparison(client, models, logs)
-    now = datetime.now(timezone.utc)
-    directory = output_root / (now.strftime("%Y%m%dT%H%M%S.%fZ") + "-" + uuid4().hex[:8])
-    directory.mkdir(parents=True, exist_ok=False)
+    now = eastern_now()
+    directory = allocate_results_directory(output_root, now)
     manifest = {"schema_version": 1, "created_at": now.isoformat(), "models": selected,
                 "cases": [{k: v for k, v in case.items() if k != "events"} for case in cases]}
     (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -176,7 +212,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--models", nargs="+", default=MODELS, help="Installed Ollama names (default: MODELS in compare.py)")
     parser.add_argument("--logs", nargs="+", default=TEST_LOGS, help="JSONL paths relative to the script, or absolute paths")
-    parser.add_argument("--output-dir", type=Path, default=OUTPUT_ROOT, help="Parent for a new timestamped results directory")
+    parser.add_argument("--output-dir", type=Path, default=OUTPUT_ROOT, help="Parent for a new US Eastern Time named results directory")
     parser.add_argument("--timeout", type=positive_timeout, default=300, help="HTTP operation timeout in seconds (default: 300)")
     args = parser.parse_args()
     try:

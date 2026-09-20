@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 import tempfile
@@ -90,6 +91,22 @@ class HuntTests(unittest.TestCase):
             self.assertEqual(exit.exception.code, 1)
 
 
+class ResultsDirectoryNameTests(unittest.TestCase):
+    def test_eastern_daylight_sunday_morning(self):
+        when = datetime(2026, 9, 20, 13, 28, tzinfo=timezone.utc)
+        self.assertEqual(
+            compare.results_directory_name(when),
+            "Sunday-09-20-26_09-28am-ET",
+        )
+
+    def test_eastern_standard_saturday_evening(self):
+        when = datetime(2026, 1, 11, 2, 5, tzinfo=timezone.utc)
+        self.assertEqual(
+            compare.results_directory_name(when),
+            "Saturday-01-10-26_09-05pm-ET",
+        )
+
+
 class ComparisonTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -175,11 +192,14 @@ class ComparisonTests(unittest.TestCase):
         with self.assertRaises(KeyboardInterrupt):
             self.run_quietly(api)
 
-    def test_output_directory_is_unique_for_each_comparison(self):
-        first = self.run_quietly(client())
-        second = self.run_quietly(client())
-        self.assertNotEqual(first, second)
-        self.assertTrue((first/'results.jsonl').exists())
+    def test_output_directory_uses_readable_eastern_name(self):
+        when = datetime(2026, 9, 20, 13, 28, tzinfo=timezone.utc)
+        with patch.object(compare, "eastern_now", return_value=when):
+            first = self.run_quietly(client())
+            second = self.run_quietly(client())
+        self.assertEqual(first.name, "Sunday-09-20-26_09-28am-ET")
+        self.assertEqual(second.name, "Sunday-09-20-26_09-28am-ET-2")
+        self.assertTrue((first / "results.jsonl").exists())
 
     def test_cli_exits_nonzero_after_recording_invalid_runs(self):
         api = client()

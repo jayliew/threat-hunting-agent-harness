@@ -208,7 +208,7 @@ def run_hunt(
     keep_alive: str | int = "5m",
 ) -> dict:
     """Run one fresh conversation; retain answers and failures for inspection."""
-    client = client if client is not None else Client(timeout=300)
+    client = client if client is not None else Client()
     messages = build_messages(events)
     options = {"temperature": 0, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT}
     result = {

@@ -177,7 +177,7 @@ def main() -> None:
     parser.add_argument("--models", nargs="+", default=MODELS, help="Installed Ollama names (default: MODELS in compare.py)")
     parser.add_argument("--logs", nargs="+", default=TEST_LOGS, help="JSONL paths relative to the script, or absolute paths")
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_ROOT, help="Parent for a new timestamped results directory")
-    parser.add_argument("--timeout", type=positive_timeout, default=300, help="HTTP operation timeout in seconds (default: 300)")
+    parser.add_argument("--timeout", type=positive_timeout, default=600, help="HTTP operation timeout in seconds (default: 600)")
     args = parser.parse_args()
     try:
         directory = run_comparison(Client(timeout=args.timeout), args.models, args.logs, args.output_dir)

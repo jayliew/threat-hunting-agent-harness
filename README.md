@@ -126,7 +126,7 @@ You can override the lists without editing code:
 
 ```bash
 uv run python compare.py --models qwen3:32b mistral-small3.2:24b --logs logs/password-spray.jsonl logs/http-beaconing.jsonl
-uv run python compare.py --models mistral-small3.2:24b --timeout 600 --output-dir results
+uv run python compare.py --models mistral-small3.2:24b --timeout 900 --output-dir results
 ```
 
 Log paths are relative to the script (or absolute); a supplied output directory is relative to your current working directory. Each invocation creates a unique timestamped subdirectory containing:
@@ -135,7 +135,7 @@ Log paths are relative to the script (or absolute); a supplied output directory 
 - `results.jsonl`: one row per attempted model/case pair, saved immediately. Includes full raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages/options, prompt and input hashes, model digest, and timings.
 - `manifest.json`: selected models/digests and input file identities. Pending cases remain visible in the report if the process is interrupted.
 
-Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Temperature, context size, answer budget, and the requested thinking mode come from `main.py`; capability-aware handling omits `think` for models without that capability. The last case for each model requests unloading afterward. The configurable HTTP operation timeout defaults to 300 seconds; it is not a total batch deadline.
+Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Temperature, context size, answer budget, and the requested thinking mode come from `main.py`; capability-aware handling omits `think` for models without that capability. The last case for each model requests unloading afterward. The configurable HTTP operation timeout defaults to 600 seconds (10 minutes); it is not a total batch deadline.
 
 Invalid, empty, truncated, and failed responses are retained. An individual inference error does not stop the remaining cases. The report updates after every saved result. Exit status is nonzero if any run is invalid or failed, preflight fails, or execution is interrupted; completed results remain available.
 

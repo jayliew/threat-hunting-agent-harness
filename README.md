@@ -33,12 +33,16 @@ The current script calls `get_security_events()` itself. That function is the ob
 
 ### Password spray (`logs/password-spray.jsonl`)
 
-Default hunt. Synthetic login events mixing ordinary internal logins with a short spray from `198.51.100.7` (a documentation IP) across several accounts, then a success for `bob` from that same source.
+Default hunt. Fourteen synthetic [GELF 1.1](https://go2docs.graylog.org/current/getting_in_log_data/gelf_format.html) authentication messages from `auth-01.corp.internal`, one JSON object per line. Timestamps are UNIX seconds in UTC; custom fields are underscore-prefixed. Cite `_event_id` (`e1` … `e14`), not GELF's reserved `_id`.
+
+All events concern password authentication to the same `employee-portal` service. The single suspicious sequence is six failures from `198.51.100.7` (a documentation IP) against six different accounts in 150 seconds (`e5` … `e10`), followed by a success for `bob` from that same source (`e11`). The seven benign events are ordinary internal logins and two isolated failure-then-success pairs (`e3`/`e4` and `e13`/`e14`). The original IDs, times, users, source IPs, and outcomes are preserved.
+
+Ground truth for instructors (not present in the logs): the intended scenario is one password spray; verdict `suspicious`; attack-sequence evidence = `e5` … `e11`. The observable pattern is consistent with spraying and possible compromise. Because the logs do not record attempted passwords or credential provenance, they cannot prove password reuse, distinguish spraying conclusively from credential stuffing, or establish account takeover from the subsequent success alone. No passwords or attack labels are embedded in the events.
 
 Use it to check whether the model:
 
-- names the right pattern (password spray / credential stuffing, then likely account takeover)
-- cites real event IDs
+- recognizes the many-account, low-attempt-count pattern and treats the later success as suspicious
+- cites real `_event_id` values and distinguishes observations from hypotheses
 - ignores the benign typo-and-retry noise
 
 ### HTTP beaconing (`logs/http-beaconing.jsonl`)

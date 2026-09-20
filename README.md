@@ -29,6 +29,14 @@ The harness then machine-checks that contract: `Verdict` must be `suspicious`, `
 
 The single-hunt command and comparison runner share `run_hunt(model, events)`. Each call starts a fresh conversation with the same prompt and serialized events. The loader could become a tool later if you want the model to request data instead of receiving the full dump up front.
 
+## Prompt portability
+
+`build_messages()` sends standard `role`/`content` dictionaries: the system message contains the analyst instructions, evidence rules, verdict definitions, and output contract; the user message contains the task and a JSON array inside `<security_events>` delimiters. Markdown headings and these XML-style delimiters are ordinary application text, not a universal model-specific prompt format. The four answer fields (`Verdict`, `Threat type`, `Summary`, `Evidence`) are this harness's output contract, not reserved LLM fields.
+
+Let the installed model's [Ollama chat template](https://docs.ollama.com/modelfile#template) supply its native role/turn tokens. Do not manually add ChatML tokens, Llama headers, Mistral `[INST]` markers, or Gemma turn markers to these prompts. [Chat templates differ even between models derived from the same base](https://huggingface.co/docs/transformers/chat_templating). For models whose native format lacks a separate system role, verify that the installed template incorporates those instructions appropriately; a portable message API does not imply identical role support. Inspect imported GGUF models with `ollama show --modelfile MODEL`: a bare `{{ .Prompt }}` template does not provide native chat framing and must be checked against that model's intended instruction template before comparing results.
+
+The evidence serializer escapes `<`, `>`, and `&` using JSON Unicode escapes. This prevents a field containing `</security_events>` from literally ending the outer evidence block while preserving its exact decoded value. These delimiters are not a security boundary or a guarantee of instruction-following. Existing completion, output-format, and evidence-ID checks still apply. Prompt structure is tested offline; response quality and compatibility must be evaluated per installed model/template.
+
 ## Demo scenarios
 
 ### Password spray (`logs/password-spray.jsonl`)

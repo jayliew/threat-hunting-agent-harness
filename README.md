@@ -29,6 +29,8 @@ The harness then machine-checks that contract: `Verdict` must be `suspicious`, `
 
 The single-hunt command and comparison runner share `run_hunt(model, events)`. Each call starts a fresh conversation with the same prompt and serialized events. The loader could become a tool later if you want the model to request data instead of receiving the full dump up front.
 
+`compare_models.py` runs that same hunt across several installed Ollama models and writes a side-by-side report under `results/`.
+
 ## Prompt portability
 
 `build_messages()` sends standard `role`/`content` dictionaries: the system message contains the analyst instructions, evidence rules, verdict definitions, and output contract; the user message contains the task and a JSON array inside `<security_events>` delimiters. Markdown headings and these XML-style delimiters are ordinary application text, not a universal model-specific prompt format. The four answer fields (`Verdict`, `Threat type`, `Summary`, `Evidence`) are this harness's output contract, not reserved LLM fields.
@@ -41,7 +43,7 @@ The evidence serializer escapes `<`, `>`, and `&` using JSON Unicode escapes. Th
 
 ### Password spray (`logs/password-spray.jsonl`)
 
-Default hunt. Fourteen synthetic [GELF 1.1](https://go2docs.graylog.org/current/getting_in_log_data/gelf_format.html) authentication messages from `auth-01.corp.internal`, one JSON object per line. Timestamps are UNIX seconds in UTC; custom fields are underscore-prefixed. Cite `_event_id` (`e1` … `e14`), not GELF's reserved `_id`.
+Fourteen synthetic [GELF 1.1](https://go2docs.graylog.org/current/getting_in_log_data/gelf_format.html) authentication messages from `auth-01.corp.internal`, one JSON object per line. Timestamps are UNIX seconds in UTC; custom fields are underscore-prefixed. Cite `_event_id` (`e1` … `e14`), not GELF's reserved `_id`.
 
 All events concern password authentication to the same `employee-portal` service. The single suspicious sequence is six failures from `198.51.100.7` (a documentation IP) against six different accounts in 150 seconds (`e5` … `e10`), followed by a success for `bob` from that same source (`e11`). The seven benign events are ordinary internal logins and two isolated failure-then-success pairs (`e3`/`e4` and `e13`/`e14`). The original IDs, times, users, source IPs, and outcomes are preserved.
 
@@ -55,7 +57,7 @@ Use it to check whether the model:
 
 ### HTTP beaconing (`logs/http-beaconing.jsonl`)
 
-Synthetic [GELF 1.1](https://go2docs.graylog.org/current/getting_in_log_data/gelf.html) JSONL (Graylog’s native ingest format). Each line is one firewall/proxy message with underscore-prefixed extra fields. Cite `_event_id` (`e1` … `e43`); GELF reserves `_id`, so it is not used.
+Default single-hunt file for `main.py`. Synthetic [GELF 1.1](https://go2docs.graylog.org/current/getting_in_log_data/gelf.html) JSONL (Graylog’s native ingest format). Each line is one firewall/proxy message with underscore-prefixed extra fields. Cite `_event_id` (`e1` … `e43`); GELF reserves `_id`, so it is not used.
 
 The hour of traffic mixes ordinary work with a low-and-slow HTTP check-in:
 
@@ -120,12 +122,12 @@ The harness queries Ollama (`/api/show`) and sends `think` only when the model l
 
 Thinking tokens and the final answer share the 1,024-token `num_predict` budget; with thinking on, the model can hit that limit mid-trace and return an empty or truncated analysis.
 
-## Compare models
+## Compare models across scenarios
 
-Edit the `MODELS` and `TEST_LOGS` lists at the top of `compare.py`, then run:
+Edit the `MODELS` and `DEFAULT_SCENARIO_LOGS` lists at the top of `compare_models.py`, then run:
 
 ```bash
-uv run python compare.py
+uv run python compare_models.py
 ```
 
 The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across password spray, HTTP beaconing, and internal network scanning: nine runs. Use names from `ollama list`. All configured models and input files are checked before inference starts; missing models are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
@@ -133,8 +135,8 @@ The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B acr
 You can override the lists without editing code:
 
 ```bash
-uv run python compare.py --models qwen3:32b mistral-small3.2:24b --logs logs/password-spray.jsonl logs/http-beaconing.jsonl
-uv run python compare.py --models mistral-small3.2:24b --timeout 600 --output-dir results
+uv run python compare_models.py --models qwen3:32b mistral-small3.2:24b --logs logs/password-spray.jsonl logs/http-beaconing.jsonl
+uv run python compare_models.py --models mistral-small3.2:24b --timeout 600 --output-dir results
 ```
 
 Log paths are relative to the script (or absolute); a supplied output directory is relative to your current working directory. Each invocation creates a unique US Eastern Time subdirectory named with dd-Mon-yyyy, weekday, and hh-mm am/pm (for example `20-Sep-2026-Sun_09-28am-ET`) containing:
@@ -159,11 +161,13 @@ uv run python -m unittest -v
 
 | Path | Role |
 | --- | --- |
-| `main.py` | Prompt, log loading, one Ollama chat call (think only if supported), output and evidence-ID validation |
+| `main.py` | Single-hunt CLI: prompt, log loading, one Ollama chat call (think only if supported), output and evidence-ID validation |
+| `compare_models.py` | Compare installed Ollama models across the same JSONL scenarios and write a report under `results/` |
 | `logs/password-spray.jsonl` | Optional demo: synthetic login / password-spray events |
 | `logs/http-beaconing.jsonl` | Default demo: GELF 1.1 HTTP beaconing among legitimate traffic |
 | `logs/internal-network-scan.jsonl` | Optional demo: internal scanning among legitimate traffic |
 | `test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |
+| `test_compare_models.py` | Unit tests for the comparison matrix, HTML report, and the shared hunt runner |
 | `pyproject.toml` | Project metadata and the `ollama` client |
 
 Keep the harness thin so the lesson stays in the open.

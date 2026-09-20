@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 from ollama import ChatResponse, Message
 
@@ -11,11 +12,12 @@ from main import (
     EVIDENCE_START,
     SYSTEM_PROMPT,
     USER_TASK,
-    bare_prompt_template_warning,
     build_messages,
     allowed_evidence_ids,
+    chat_template_error,
     chat_think_kwargs,
     incomplete_response_message,
+    inspect_installed_model,
     invalid_hunt_output_message,
     is_bare_prompt_template,
     load_security_events,
@@ -266,31 +268,59 @@ class ChatTemplateTests(unittest.TestCase):
     def test_bare_prompt_templates_are_detected(self) -> None:
         self.assertTrue(is_bare_prompt_template("{{ .Prompt }}"))
         self.assertTrue(is_bare_prompt_template("{{.Prompt}}{{ .Response }}"))
-        self.assertFalse(is_bare_prompt_template(""))
+        self.assertTrue(is_bare_prompt_template(""))
         self.assertFalse(
             is_bare_prompt_template("<|system|>\n{{ .System }}\n<|user|>\n{{ .Content }}")
         )
 
-    def test_foundation_sec_warning_points_at_modelfile(self) -> None:
-        warning = bare_prompt_template_warning(
+    def test_foundation_sec_requires_native_markers(self) -> None:
+        error = chat_template_error(
             "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest",
             "{{ .Prompt }}",
         )
-        self.assertIsNotNone(warning)
-        self.assertIn("{{ .Prompt }}", warning)
-        self.assertIn("<|system|>", warning)
-        self.assertIn("Modelfile.foundation-sec-8b-instruct", warning)
-        self.assertIsNone(bare_prompt_template_warning("qwen3:32b", "{{ .System }}{{ .Prompt }}"))
+        self.assertIsNotNone(error)
+        self.assertIn("{{ .Prompt }}", error)
+        self.assertIn("<|system|>", error)
+        self.assertIn("Modelfile.foundation-sec-8b-instruct", error)
+        llama_headers = chat_template_error(
+            "foundation-sec-8b-instruct",
+            "{{ range .Messages }}<|start_header_id|>{{ .Role }}<|end_header_id|>\n{{ .Content }}{{ end }}",
+        )
+        self.assertIsNotNone(llama_headers)
+        self.assertIn("<|system|>", llama_headers)
 
-    def test_modelfile_matches_official_role_markers_not_llama_headers(self) -> None:
+    def test_generic_models_need_messages_or_role_markers(self) -> None:
+        self.assertIsNotNone(chat_template_error("qwen3:32b", "{{ .Prompt }}"))
+        self.assertIsNotNone(
+            chat_template_error("FenkoHQ/other:latest", "{{ if .System }}{{ .System }}{{ end }}{{ .Prompt }}")
+        )
+        self.assertIsNone(
+            chat_template_error("qwen3:32b", "{{- range .Messages }}{{ .Role }}: {{ .Content }}{{- end }}")
+        )
+        self.assertIsNone(
+            chat_template_error("mistral-small3.2:24b", "[INST] {{ .Prompt }} [/INST]")
+        )
+
+    def test_modelfile_passes_preflight(self) -> None:
         text = (REPO_ROOT / "Modelfile.foundation-sec-8b-instruct").read_text()
+        template = text.split("TEMPLATE", 1)[1].split("PARAMETER", 1)[0]
+        self.assertIsNone(chat_template_error("foundation-sec-8b-instruct", template))
         self.assertIn("FROM hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest", text)
         self.assertIn("<|system|>", text)
         self.assertIn("<|user|>", text)
         self.assertIn("<|assistant|>", text)
         self.assertIn("PARAMETER stop <|end_of_text|>", text)
         self.assertNotIn("<|start_header_id|>", text)
-        self.assertNotIn("{{ .Prompt }}", text.split("TEMPLATE", 1)[1])
+        self.assertNotIn("{{ .Prompt }}", template)
+
+    def test_inspect_installed_model_blocks_before_chat(self) -> None:
+        api = Mock()
+        api.show.return_value.template = "{{ .Prompt }}"
+        api.show.return_value.capabilities = ["completion"]
+        with self.assertRaises(ValueError) as error:
+            inspect_installed_model(api, "alpha:latest")
+        self.assertIn("{{ .Prompt }}", str(error.exception))
+        self.assertFalse(api.chat.called)
 
     def test_ollama_bare_prompt_drops_system_and_role_markers(self) -> None:
         messages = build_messages([{"id": "e1", "timestamp": 1}])

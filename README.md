@@ -37,7 +37,9 @@ The single-hunt command and comparison runner share `run_hunt(model, events)`. E
 
 Let the installed model's [Ollama chat template](https://docs.ollama.com/modelfile#template) supply its native role/turn tokens. Do not manually add ChatML tokens, Llama headers, Mistral `[INST]` markers, or Gemma turn markers to these prompts. [Chat templates differ even between models derived from the same base](https://huggingface.co/docs/transformers/chat_templating). For models whose native format lacks a separate system role, verify that the installed template incorporates those instructions appropriately; a portable message API does not imply identical role support. Inspect imported GGUF models with `ollama show --modelfile MODEL`: a bare `{{ .Prompt }}` template does not provide native chat framing and must be checked against that model's intended instruction template before comparing results.
 
-The Hugging Face GGUF `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest` is that case. The GGUF has no `tokenizer.chat_template`, the Hub repo has no Ollama `template` file, and Ollama therefore installs `TEMPLATE {{ .Prompt }}`. That path sends only the user text. It omits `<|system|>`, `<|user|>`, and `<|assistant|>` from [`chat_template.jinja`](https://huggingface.co/fdtn-ai/Foundation-Sec-8B-Instruct/blob/main/chat_template.jinja), and it does not interpolate the harness system message. The weights are Llama 3.1–based, but this instruct checkpoint was not trained on Llama `<|start_header_id|>` headers; those tokens are still in the tokenizer and are the wrong framing. The script default is `foundation-sec-8b-instruct`, created from `Modelfile.foundation-sec-8b-instruct`. If you pass the raw `hf.co/...` import, the CLI prints a warning.
+The Hugging Face GGUF `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest` is that case. The GGUF has no `tokenizer.chat_template`, the Hub repo has no Ollama `template` file, and Ollama therefore installs `TEMPLATE {{ .Prompt }}`. That path sends only the user text. It omits `<|system|>`, `<|user|>`, and `<|assistant|>` from [`chat_template.jinja`](https://huggingface.co/fdtn-ai/Foundation-Sec-8B-Instruct/blob/main/chat_template.jinja), and it does not interpolate the harness system message. The weights are Llama 3.1–based, but this instruct checkpoint was not trained on Llama `<|start_header_id|>` headers; those tokens are still in the tokenizer and are the wrong framing. The script default is `foundation-sec-8b-instruct`, created from `Modelfile.foundation-sec-8b-instruct`.
+
+Before any chat call, both CLIs inspect the installed template via Ollama `/api/show` (the same data as `ollama show --template MODEL`). Inference does not start if the template is `{{ .Prompt }}`, has no `.Messages` loop and no role/turn markers, or, for Foundation-Sec names, is missing `<|system|>`, `<|user|>`, or `<|assistant|>`. Passing the raw `hf.co/...` import now exits with that error instead of hunting.
 
 The evidence serializer escapes `<`, `>`, and `&` using JSON Unicode escapes. This prevents a field containing `</security_events>` from literally ending the outer evidence block while preserving its exact decoded value. These delimiters are not a security boundary or a guarantee of instruction-following. Existing completion, output-format, and evidence-ID checks still apply. Prompt structure is tested offline; response quality and compatibility must be evaluated per installed model/template.
 
@@ -108,8 +110,9 @@ uv run python main.py --model qwen3:32b
 uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
 ```
 
-The script prints the model name, thinking on/off/unsupported, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It exits with an error instead of looking like a successful hunt when:
+The script prints the model name, the installed chat template, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It exits with an error instead of looking like a successful hunt when:
 
+- the installed Ollama template cannot frame chat roles (`{{ .Prompt }}`, no `.Messages`/role markers, or a Foundation-Sec name without `<|system|>/<|user|>/<|assistant|>`)
 - generation hits the token limit (`done_reason=length`) or returns empty content
 - a required section is missing or empty
 - the verdict is not `suspicious`, `benign`, or `inconclusive`
@@ -133,7 +136,7 @@ Edit the `MODELS` and `DEFAULT_SCENARIO_LOGS` lists at the top of `compare_model
 uv run python compare_models.py
 ```
 
-The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across password spray, HTTP beaconing, and internal network scanning: nine runs. Use names from `ollama list`. All configured models and input files are checked before inference starts; missing models are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
+The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across password spray, HTTP beaconing, and internal network scanning: nine runs. Use names from `ollama list`. All configured models and input files are checked before inference starts, including the installed Ollama chat template; missing models and models with unusable templates are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
 
 You can override the lists without editing code:
 

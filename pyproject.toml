@@ -1,7 +1,7 @@
 [project]
 name = "threat-hunting-agent-harness"
 version = "0.1.0"
-description = "Add your description here"
+description = "A small local Ollama harness for education and proof-of-concept threat hunting."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [

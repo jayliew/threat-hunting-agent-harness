@@ -1,4 +1,9 @@
-"""Compare installed Ollama models across the same synthetic scenarios."""
+"""Compare already-installed Ollama models on the same synthetic hunt scenarios.
+
+Runs each selected model against each JSONL log file, then writes a timestamped
+directory under results/ with report.html, results.jsonl, and manifest.json.
+Models are never downloaded; names must already appear in `ollama list`.
+"""
 from __future__ import annotations
 
 import argparse
@@ -26,7 +31,7 @@ MODELS = [
     "mistral-small3.2:24b",
     "foundation-sec-8b-instruct",
 ]
-TEST_LOGS = [
+DEFAULT_SCENARIO_LOGS = [
     "logs/password-spray.jsonl",
     "logs/http-beaconing.jsonl",
     "logs/internal-network-scan.jsonl",
@@ -226,8 +231,8 @@ def positive_timeout(value: str) -> float:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--models", nargs="+", default=MODELS, help="Installed Ollama names (default: MODELS in compare.py)")
-    parser.add_argument("--logs", nargs="+", default=TEST_LOGS, help="JSONL paths relative to the script, or absolute paths")
+    parser.add_argument("--models", nargs="+", default=MODELS, help="Installed Ollama names (default: MODELS in compare_models.py)")
+    parser.add_argument("--logs", nargs="+", default=DEFAULT_SCENARIO_LOGS, help="JSONL paths relative to the script, or absolute paths")
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_ROOT, help="Parent for a new US Eastern Time named results directory")
     parser.add_argument("--timeout", type=positive_timeout, default=300, help="HTTP operation timeout in seconds (default: 300)")
     args = parser.parse_args()

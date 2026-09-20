@@ -113,15 +113,16 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
     total = len(manifest["models"]) * len(manifest["cases"])
     html = '''<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Threat hunt model comparison</title><style>
-*{box-sizing:border-box}body{margin:0;padding:32px;font:15px/1.6 system-ui,sans-serif;background:#f3f5f8;color:#172432}
+*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;padding:32px;font:15px/1.6 system-ui,sans-serif;background:#0f1419;color:#e8eef4}
 main{max-width:1800px;margin:auto}h1{font-size:30px;margin-bottom:4px}h2{margin-top:36px;font-size:21px}
-h3{font-size:15px;overflow-wrap:anywhere}p{color:#445468}table{width:100%;border-collapse:collapse;background:white}
-th,td{text-align:left;padding:10px 14px;border-bottom:1px solid #dbe1e8}th{background:#e7edf3}
+h3{font-size:15px;overflow-wrap:anywhere}p{color:#9aa8b8}table{width:100%;border-collapse:collapse;background:#161d26}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid #2a3544}th{background:#1c2530}
 .scroll{overflow:auto}.answers{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(300px,1fr);gap:16px;overflow-x:auto;padding-bottom:12px}
-article{padding:20px;border:1px solid #dbe1e8;border-radius:10px;background:white;min-width:0}
-pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,monospace}
-.ok{color:#13663f}.invalid,.error{color:#a12620}.pending{color:#586678}summary{cursor:pointer}
+article{padding:20px;border:1px solid #2a3544;border-radius:10px;background:#161d26;min-width:0}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,monospace;color:#d7e0ea}
+.ok{color:#3ecf8e}.invalid,.error{color:#f07178}.pending{color:#7d8b99}summary{cursor:pointer}
 @media(max-width:600px){body{padding:16px}.answers{grid-auto-flow:row;grid-template-columns:1fr}}
 </style></head><body><main>'''
     html += (f'<h1>Threat hunt model comparison</h1><p>{e(manifest["created_at"])} · '

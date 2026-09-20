@@ -121,6 +121,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(rows[0]['prompt_sha256'], rows[2]['prompt_sha256'])
         html = (directory / 'report.html').read_text()
         self.assertIn('4 / 4 runs recorded', html)
+        self.assertIn('color-scheme:dark', html.replace(' ', ''))
         self.assertIn('TimeoutError', html)
         self.assertIn('e999', html)
         self.assertTrue((directory / 'manifest.json').exists())

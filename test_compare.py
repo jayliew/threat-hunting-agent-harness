@@ -56,6 +56,15 @@ class HuntTests(unittest.TestCase):
         harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion'])
         self.assertNotIn('think', api.chat.call_args.kwargs)
 
+    def test_hunt_think_override_does_not_change_capability_gating(self):
+        api = client()
+        harness.run_hunt('alpha:latest', EVENTS, client=api,
+                         capabilities=['completion', 'thinking'], think=True)
+        self.assertTrue(api.chat.call_args.kwargs['think'])
+        harness.run_hunt('alpha:latest', EVENTS, client=api,
+                         capabilities=['completion'], think=True)
+        self.assertNotIn('think', api.chat.call_args.kwargs)
+
     def test_invalid_evidence_and_partial_answer_are_preserved(self):
         api = client()
         api.chat.return_value = response(ANSWER.replace('e1', 'e999'), 'length')
@@ -125,6 +134,17 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('TimeoutError', html)
         self.assertIn('e999', html)
         self.assertTrue((directory / 'manifest.json').exists())
+
+    def test_comparison_enables_thinking_when_supported(self):
+        api = client()
+        def show(name):
+            if name == 'alpha:latest':
+                return SimpleNamespace(capabilities=['completion', 'thinking'])
+            return SimpleNamespace(capabilities=['completion'])
+        api.show.side_effect = show
+        self.run_quietly(api)
+        requests = [c.kwargs for c in api.chat.call_args_list]
+        self.assertEqual([r.get('think') for r in requests], [True, True, None, None])
 
     def test_missing_models_reported_together_without_starting_run(self):
         api = client()

@@ -23,7 +23,7 @@ It is intentionally small. Prefer a few files you can hold in your head over a p
 4. Print a fixed-format answer: verdict, threat type, summary, and evidence IDs
 5. Reject replies that are incomplete, missing required sections, use an illegal verdict, or cite event IDs that are not in the supplied events
 
-The prompt treats log contents as untrusted evidence, not instructions, and forbids inventing users, IPs, timestamps, or event IDs. Cite `id` or `_event_id`, depending on the file.
+The system prompt holds the analyst role, grounding rules, and output contract. The user prompt holds the task and the events in a delimited untrusted-evidence block. Event contents are treated as evidence, not instructions. The prompt forbids inventing users, IPs, timestamps, or event IDs. Cite `id` or `_event_id`, depending on the file.
 
 The harness then machine-checks that contract: `Verdict` must be `suspicious`, `benign`, or `inconclusive`; all four sections must be present; every cited evidence ID must appear on a supplied event. Valid IDs do not prove the summary or threat type is correct.
 

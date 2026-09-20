@@ -40,6 +40,9 @@ def client():
         SimpleNamespace(model="beta:1", digest="digest-beta"),
     ]
     result.show.return_value.capabilities = ["completion"]
+    result.show.return_value.template = (
+        "<|system|>\n{{ .System }}\n<|user|>\n{{ .Content }}\n<|assistant|>\n"
+    )
     result.chat.return_value = response()
     return result
 
@@ -172,6 +175,16 @@ class ComparisonTests(unittest.TestCase):
         models, logs = compare_models.prepare_comparison(client(), ['alpha', 'alpha:latest'], self.logs*2)
         self.assertEqual(len(models), 1)
         self.assertEqual(len(logs), 2)
+        self.assertIn("<|system|>", models[0]["chat_template"])
+
+    def test_bare_prompt_template_is_warned_during_preflight(self):
+        api = client()
+        api.show.return_value.template = "{{ .Prompt }}"
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            selected, _cases = compare_models.prepare_comparison(api, ['alpha'], self.logs[:1])
+        self.assertEqual(selected[0]["chat_template"], "{{ .Prompt }}")
+        self.assertIn("{{ .Prompt }}", err.getvalue())
+        self.assertNotIn("<|system|>", err.getvalue())
 
     def test_report_escapes_model_output(self):
         api = client()

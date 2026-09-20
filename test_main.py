@@ -117,7 +117,26 @@ class HuntOutputValidationTests(unittest.TestCase):
         )
         cls.beaconing_ids = allowed_evidence_ids(load_security_events(HTTP_BEACONING))
 
-    def test_allowed_ids_use_id_from_password_spray(self) -> None:
+    def test_password_spray_uses_gelf_fields(self) -> None:
+        events = load_security_events(PASSWORD_SPRAY)
+        core_fields = {"version", "host", "short_message", "timestamp", "level"}
+        for event in events:
+            with self.subTest(event_id=event.get("_event_id")):
+                self.assertEqual(event["version"], "1.1")
+                self.assertTrue(event["host"].strip())
+                self.assertTrue(event["short_message"].strip())
+                self.assertIsInstance(event["timestamp"], (int, float))
+                self.assertIsInstance(event["level"], int)
+                self.assertIn(event["level"], range(8))
+                self.assertTrue(event["_event_id"])
+                self.assertNotIn("_id", event)
+                self.assertNotIn("id", event)
+                for key, value in event.items():
+                    if key not in core_fields:
+                        self.assertTrue(key.startswith("_"), key)
+                        self.assertIsInstance(value, (str, int, float))
+
+    def test_allowed_ids_use_event_id_from_password_spray(self) -> None:
         self.assertIn("e1", self.password_spray_ids)
         self.assertIn("e14", self.password_spray_ids)
         self.assertNotIn("e999", self.password_spray_ids)

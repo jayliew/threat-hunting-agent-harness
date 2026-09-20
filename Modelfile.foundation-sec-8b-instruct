@@ -1,0 +1,29 @@
+# Native chat framing for the Hugging Face GGUF import
+# hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest
+#
+# That import has no tokenizer.chat_template in the GGUF and no Ollama
+# template layer, so Ollama falls back to {{ .Prompt }} and drops role
+# markers. The instruct model was trained with the Jinja template in
+# fdtn-ai/Foundation-Sec-8B-Instruct/chat_template.jinja:
+#   <|system|> / <|user|> / <|assistant|>
+# plus BOS (<|begin_of_text|>, added automatically: add_bos_token=true)
+# and EOS (<|end_of_text|>) after completed assistant turns.
+#
+# The official template injects a default "Metis" system prompt when no
+# system message is supplied. This Modelfile does not bake that in; the
+# harness always sends its own system message, which overrides it.
+#
+#   ollama create foundation-sec-8b-instruct -f Modelfile.foundation-sec-8b-instruct
+
+FROM hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest
+
+TEMPLATE """{{- if .System }}<|system|>
+{{ .System }}
+{{ end }}{{- range .Messages }}{{- if eq .Role "user" }}<|user|>
+{{ .Content }}
+{{ else if eq .Role "assistant" }}<|assistant|>
+{{ .Content }}
+{{ end }}{{- end }}<|assistant|>
+"""
+
+PARAMETER stop <|end_of_text|>

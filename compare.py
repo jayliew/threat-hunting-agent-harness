@@ -13,13 +13,18 @@ from zoneinfo import ZoneInfo
 
 from ollama import Client
 
-from main import load_security_events, resolve_log_path, run_hunt
+from main import (
+    bare_prompt_template_warning,
+    load_security_events,
+    resolve_log_path,
+    run_hunt,
+)
 
 # Copy exact names from `ollama list`. These are never downloaded automatically.
 MODELS = [
     "qwen3:32b",
     "mistral-small3.2:24b",
-    "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest",
+    "foundation-sec-8b-instruct",
 ]
 TEST_LOGS = [
     "logs/password-spray.jsonl",
@@ -92,8 +97,12 @@ def prepare_comparison(client: Client, models: list[str], logs: list[str]) -> tu
             capabilities = info.capabilities or []
             if capabilities and "completion" not in capabilities:
                 raise ValueError("model does not support text completion")
+            template = info.template or ""
+            warning = bare_prompt_template_warning(canonical, template)
+            if warning:
+                print(warning, file=sys.stderr)
             selected.append({"name": canonical, "digest": model.digest,
-                             "capabilities": capabilities})
+                             "capabilities": capabilities, "chat_template": template})
         except Exception as error:
             problems.append(f"Cannot use {name}: {error}")
     cases, seen_paths = [], set()
@@ -195,6 +204,7 @@ def run_comparison(client: Client, models: list[str], logs: list[str], output_ro
                 print(f'[{len(results)+1}/{len(selected)*len(cases)}] {model["name"]} · {case["name"]}', flush=True)
                 result = run_hunt(model["name"], case["events"], client=client,
                                   capabilities=model["capabilities"],
+                                  chat_template=model.get("chat_template"),
                                   keep_alive=0 if index == len(cases)-1 else "5m")
                 result.update({"schema_version": 1, "case": case["name"], "log_path": case["path"],
                                "events_sha256": case["events_sha256"], "model_digest": model["digest"]})

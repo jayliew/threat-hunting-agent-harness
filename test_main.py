@@ -11,11 +11,13 @@ from main import (
     EVIDENCE_START,
     SYSTEM_PROMPT,
     USER_TASK,
+    bare_prompt_template_warning,
     build_messages,
     allowed_evidence_ids,
     chat_think_kwargs,
     incomplete_response_message,
     invalid_hunt_output_message,
+    is_bare_prompt_template,
     load_security_events,
 )
 
@@ -258,6 +260,57 @@ class HuntOutputValidationTests(unittest.TestCase):
         self.assertIsNone(
             invalid_hunt_output_message(content, self.password_spray_ids)
         )
+
+
+class ChatTemplateTests(unittest.TestCase):
+    def test_bare_prompt_templates_are_detected(self) -> None:
+        self.assertTrue(is_bare_prompt_template("{{ .Prompt }}"))
+        self.assertTrue(is_bare_prompt_template("{{.Prompt}}{{ .Response }}"))
+        self.assertFalse(is_bare_prompt_template(""))
+        self.assertFalse(
+            is_bare_prompt_template("<|system|>\n{{ .System }}\n<|user|>\n{{ .Content }}")
+        )
+
+    def test_foundation_sec_warning_points_at_modelfile(self) -> None:
+        warning = bare_prompt_template_warning(
+            "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest",
+            "{{ .Prompt }}",
+        )
+        self.assertIsNotNone(warning)
+        self.assertIn("{{ .Prompt }}", warning)
+        self.assertIn("<|system|>", warning)
+        self.assertIn("Modelfile.foundation-sec-8b-instruct", warning)
+        self.assertIsNone(bare_prompt_template_warning("qwen3:32b", "{{ .System }}{{ .Prompt }}"))
+
+    def test_modelfile_matches_official_role_markers_not_llama_headers(self) -> None:
+        text = (REPO_ROOT / "Modelfile.foundation-sec-8b-instruct").read_text()
+        self.assertIn("FROM hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest", text)
+        self.assertIn("<|system|>", text)
+        self.assertIn("<|user|>", text)
+        self.assertIn("<|assistant|>", text)
+        self.assertIn("PARAMETER stop <|end_of_text|>", text)
+        self.assertNotIn("<|start_header_id|>", text)
+        self.assertNotIn("{{ .Prompt }}", text.split("TEMPLATE", 1)[1])
+
+    def test_ollama_bare_prompt_drops_system_and_role_markers(self) -> None:
+        messages = build_messages([{"id": "e1", "timestamp": 1}])
+        # Ollama DefaultTemplate {{ .Prompt }} interpolates only the last user
+        # turn. The HuggingFace instruct template wraps system and user in
+        # <|system|> / <|user|> / <|assistant|> and prepends BOS.
+        ollama_sent = next(m["content"] for m in reversed(messages) if m["role"] == "user")
+        expected = (
+            "<|begin_of_text|>\n<|system|>\n"
+            + SYSTEM_PROMPT
+            + "\n\n<|user|>\n"
+            + messages[1]["content"]
+            + "\n<|assistant|>\n"
+        )
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertNotIn(SYSTEM_PROMPT, ollama_sent)
+        self.assertNotIn("<|system|>", ollama_sent)
+        self.assertIn(SYSTEM_PROMPT, expected)
+        self.assertIn("<|user|>", expected)
+        self.assertNotEqual(ollama_sent, expected)
 
 
 if __name__ == "__main__":

@@ -184,9 +184,10 @@ class ComparisonTests(unittest.TestCase):
     def test_cli_exits_nonzero_after_recording_invalid_runs(self):
         api = client()
         api.chat.return_value = response('bad answer')
-        with patch.object(compare, 'Client', return_value=api), patch.object(sys, 'argv', ['compare.py', '--models', 'alpha', '--logs', self.logs[0], '--output-dir', str(self.root/'results')]), contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as exit:
+        with patch.object(compare, 'Client', return_value=api) as make_client, patch.object(sys, 'argv', ['compare.py', '--models', 'alpha', '--logs', self.logs[0], '--output-dir', str(self.root/'results')]), contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as exit:
             compare.main()
         self.assertEqual(exit.exception.code, 1)
+        make_client.assert_called_once_with(timeout=600)
         self.assertEqual(len(list((self.root/'results').glob('*/report.html'))), 1)
 
 

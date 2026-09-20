@@ -27,7 +27,7 @@ The prompt treats log contents as untrusted evidence, not instructions, and forb
 
 The harness then machine-checks that contract: `Verdict` must be `suspicious`, `benign`, or `inconclusive`; all four sections must be present; every cited evidence ID must appear on a supplied event. Valid IDs do not prove the summary or threat type is correct.
 
-The current script calls `get_security_events()` itself. That function is the obvious next “tool” if you want the model to request data instead of receiving the full dump up front.
+The single-hunt command and comparison runner share `run_hunt(model, events)`. Each call starts a fresh conversation with the same prompt and serialized events. The loader could become a tool later if you want the model to request data instead of receiving the full dump up front.
 
 ## Demo scenarios
 
@@ -112,6 +112,41 @@ The harness queries Ollama (`/api/show`) and sends `think` only when the model l
 
 Thinking tokens and the final answer share the 1,024-token `num_predict` budget; with thinking on, the model can hit that limit mid-trace and return an empty or truncated analysis.
 
+## Compare models
+
+Edit the `MODELS` and `TEST_LOGS` lists at the top of `compare.py`, then run:
+
+```bash
+uv run python compare.py
+```
+
+The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across password spray, HTTP beaconing, and internal network scanning: nine runs. Use names from `ollama list`. All configured models and input files are checked before inference starts; missing models are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
+
+You can override the lists without editing code:
+
+```bash
+uv run python compare.py --models qwen3:32b mistral-small3.2:24b --logs logs/password-spray.jsonl logs/http-beaconing.jsonl
+uv run python compare.py --models mistral-small3.2:24b --timeout 600 --output-dir results
+```
+
+Log paths are relative to the script (or absolute); a supplied output directory is relative to your current working directory. Each invocation creates a unique timestamped subdirectory containing:
+
+- `report.html`: open in a browser for a summary table and full answers side by side, grouped by case. Thinking traces can be expanded when present. Output and error text are HTML-escaped.
+- `results.jsonl`: one row per attempted model/case pair, saved immediately. Includes full raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages/options, prompt and input hashes, model digest, and timings.
+- `manifest.json`: selected models/digests and input file identities. Pending cases remain visible in the report if the process is interrupted.
+
+Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Temperature, context size, answer budget, and the requested thinking mode come from `main.py`; capability-aware handling omits `think` for models without that capability. The last case for each model requests unloading afterward. The configurable HTTP operation timeout defaults to 300 seconds; it is not a total batch deadline.
+
+Invalid, empty, truncated, and failed responses are retained. An individual inference error does not stop the remaining cases. The report updates after every saved result. Exit status is nonzero if any run is invalid or failed, preflight fails, or execution is interrupted; completed results remain available.
+
+`ok` means the answer passed format and evidence-ID checks, not that its diagnosis is correct. Compare the full answers against each scenario's instructor notes. This first version performs one run per pair and does not assign detection-accuracy scores. Timing separates model loading, prompt processing, and generation; wall time includes loading and request overhead. These are observed timings, not a controlled cold/warm performance benchmark. Identical context settings do not guarantee that different model tokenizers or native context limits see identical effective context; use inputs that fit every selected model.
+
+Run offline checks with:
+
+```bash
+uv run python -m unittest -v
+```
+
 ## Layout
 
 | Path | Role |
@@ -119,6 +154,7 @@ Thinking tokens and the final answer share the 1,024-token `num_predict` budget;
 | `main.py` | Prompt, log loading, one Ollama chat call (think only if supported), output and evidence-ID validation |
 | `logs/password-spray.jsonl` | Default demo: synthetic login / password-spray events |
 | `logs/http-beaconing.jsonl` | Optional demo: GELF 1.1 HTTP beaconing among legitimate traffic |
+| `logs/internal-network-scan.jsonl` | Optional demo: internal scanning among legitimate traffic |
 | `test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |
 | `pyproject.toml` | Project metadata and the `ollama` client |
 

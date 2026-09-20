@@ -46,13 +46,13 @@ MONTHS = (
 
 
 def results_directory_name(when: datetime) -> str:
-    """Readable US Eastern folder name: weekday, dd-Mon-yy, and hh-mm am/pm."""
+    """Readable US Eastern folder name: weekday, dd-Mon-yyyy, and hh-mm am/pm."""
     eastern = when.astimezone(EASTERN)
     hour12 = eastern.hour % 12 or 12
     meridiem = "am" if eastern.hour < 12 else "pm"
     return (
         f"{WEEKDAYS[eastern.weekday()]}-"
-        f"{eastern.day:02d}-{MONTHS[eastern.month - 1]}-{eastern.year % 100:02d}_"
+        f"{eastern.day:02d}-{MONTHS[eastern.month - 1]}-{eastern.year}_"
         f"{hour12:02d}-{eastern.minute:02d}{meridiem}-ET"
     )
 

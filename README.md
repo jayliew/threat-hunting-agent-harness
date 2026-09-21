@@ -23,7 +23,7 @@ It is intentionally small. Prefer a few files you can hold in your head over a p
 4. Print a fixed-format answer: verdict, threat type, summary, and evidence IDs
 5. Reject replies that are incomplete, missing required sections, use an illegal verdict, or cite event IDs that are not in the supplied events
 
-The prompt treats log contents as untrusted evidence, not instructions, and forbids inventing users, IPs, timestamps, or event IDs. Cite `id` or `_event_id`, depending on the file.
+The prompt treats log contents as untrusted evidence, not instructions, and forbids inventing users, IPs, timestamps, or event IDs. Cite `event.id`.
 
 The harness then machine-checks that contract: `Verdict` must be `suspicious`, `benign`, or `inconclusive`; all four sections must be present; every cited evidence ID must appear on a supplied event. Valid IDs do not prove the summary or threat type is correct.
 
@@ -47,7 +47,7 @@ The evidence serializer escapes `<`, `>`, and `&` using JSON Unicode escapes. Th
 
 ### Password spray (`logs/password-spray.jsonl`)
 
-Fourteen synthetic [GELF 1.1](https://go2docs.graylog.org/current/getting_in_log_data/gelf_format.html) authentication messages from `auth-01.corp.internal`, one JSON object per line. Timestamps are UNIX seconds in UTC; custom fields are underscore-prefixed. Cite `_event_id` (`e1` … `e14`), not GELF's reserved `_id`.
+Fourteen synthetic [Elastic Common Schema](https://www.elastic.co/docs/reference/ecs) authentication documents from `auth-01.corp.internal`, one nested JSON object per line. `@timestamp` is ISO-8601 UTC. Cite `event.id` (`e1` … `e14`).
 
 All events concern password authentication to the same `employee-portal` service. The single suspicious sequence is six failures from `198.51.100.7` (a documentation IP) against six different accounts in 150 seconds (`e5` … `e10`), followed by a success for `bob` from that same source (`e11`). The seven benign events are ordinary internal logins and two isolated failure-then-success pairs (`e3`/`e4` and `e13`/`e14`). The original IDs, times, users, source IPs, and outcomes are preserved.
 
@@ -56,12 +56,12 @@ Ground truth for instructors (not present in the logs): the intended scenario is
 Use it to check whether the model:
 
 - recognizes the many-account, low-attempt-count pattern and treats the later success as suspicious
-- cites real `_event_id` values and distinguishes observations from hypotheses
+- cites real `event.id` values and distinguishes observations from hypotheses
 - ignores the benign typo-and-retry noise
 
 ### HTTP beaconing (`logs/http-beaconing.jsonl`)
 
-Default single-hunt file for `main.py`. Synthetic [GELF 1.1](https://go2docs.graylog.org/current/getting_in_log_data/gelf.html) JSONL (Graylog’s native ingest format). Each line is one firewall/proxy message with underscore-prefixed extra fields. Cite `_event_id` (`e1` … `e43`); GELF reserves `_id`, so it is not used.
+Default single-hunt file for `main.py`. Synthetic [ECS](https://www.elastic.co/docs/reference/ecs) JSONL (the nested document shape Filebeat/Logstash write into Elasticsearch). Each line is one firewall/proxy event. Cite `event.id` (`e1` … `e43`).
 
 The hour of traffic mixes ordinary work with a low-and-slow HTTP check-in:
 
@@ -69,12 +69,12 @@ The hour of traffic mixes ordinary work with a low-and-slow HTTP check-in:
 - The same host also issues `GET /api/heartbeat` to `203.0.113.77:443` (a documentation IP, no hostname) about every 300 seconds with a few seconds of jitter, tiny stable byte counts, and an identical short user-agent. Those twelve events are `e6`, `e11`, `e16`, `e20`, `e23`, `e24`, `e27`, `e31`, `e35`, `e38`, `e41`, and `e43`.
 - Cover traffic that can look periodic if you only glance at timestamps: Windows Update from `asmith` / `ws-022` (large, variable bodies), Slack presence polls from `bnguyen` / `ws-008` (~15 minutes apart with high jitter and changing sizes), plus DNS, NTP, and SMB.
 
-Ground truth for instructors (not present in the logs): verdict `suspicious`, threat type HTTP/C2 beaconing, evidence = the twelve `_event_id`s to `203.0.113.77`.
+Ground truth for instructors (not present in the logs): verdict `suspicious`, threat type HTTP/C2 beaconing, evidence = the twelve `event.id`s to `203.0.113.77`.
 
 Use it to check whether the model:
 
 - names beaconing (regular interval, low jitter, consistent small payloads, odd destination) rather than “lots of HTTPS”
-- cites those real `_event_id` values
+- cites those real `event.id` values
 - ignores Update, Outlook, and Slack lookalikes
 
 ## How to run
@@ -170,9 +170,9 @@ uv run python -m unittest -v
 | `main.py` | Single-hunt CLI: prompt, log loading, one Ollama chat call (think only if supported), output and evidence-ID validation |
 | `compare_models.py` | Compare installed Ollama models across the same JSONL scenarios and write a report under `results/` |
 | `Modelfile.foundation-sec-8b-instruct` | Native `<|system|>/<|user|>/<|assistant|>` template for the Foundation-Sec GGUF import |
-| `logs/password-spray.jsonl` | Optional demo: synthetic login / password-spray events |
-| `logs/http-beaconing.jsonl` | Default demo: GELF 1.1 HTTP beaconing among legitimate traffic |
-| `logs/internal-network-scan.jsonl` | Optional demo: internal scanning among legitimate traffic |
+| `logs/password-spray.jsonl` | Optional demo: ECS login / password-spray events |
+| `logs/http-beaconing.jsonl` | Default demo: ECS HTTP beaconing among legitimate traffic |
+| `logs/internal-network-scan.jsonl` | Optional demo: ECS internal scanning among legitimate traffic |
 | `test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |
 | `test_compare_models.py` | Unit tests for the comparison matrix, HTML report, and the shared hunt runner |
 | `pyproject.toml` | Project metadata and the `ollama` client |

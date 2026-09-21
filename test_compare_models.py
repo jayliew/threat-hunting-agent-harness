@@ -201,6 +201,21 @@ class ResultsDirectoryNameTests(unittest.TestCase):
         )
 
 
+class DefaultScenarioLogsTests(unittest.TestCase):
+    def test_default_scenario_logs_include_all_six_fixtures(self):
+        self.assertEqual(
+            compare_models.DEFAULT_SCENARIO_LOGS,
+            [
+                "logs/password-spray.jsonl",
+                "logs/http-beaconing.jsonl",
+                "logs/internal-network-scan.jsonl",
+                "logs/shared-vpn-logins.ecs.jsonl",
+                "logs/managed-telemetry.ecs.jsonl",
+                "logs/scheduled-discovery.ecs.jsonl",
+            ],
+        )
+
+
 class ComparisonTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

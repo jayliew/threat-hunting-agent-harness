@@ -15,6 +15,8 @@ from main import (
     USER_TASK,
     build_messages,
     allowed_evidence_ids,
+    event_id,
+    event_sort_key,
     chat_template_error,
     chat_think_kwargs,
     context_usage,
@@ -34,6 +36,8 @@ NUM_PREDICT = 1024
 REPO_ROOT = Path(__file__).resolve().parent
 PASSWORD_SPRAY = REPO_ROOT / "logs" / "password-spray.jsonl"
 HTTP_BEACONING = REPO_ROOT / "logs" / "http-beaconing.jsonl"
+INTERNAL_NETWORK_SCAN = REPO_ROOT / "logs" / "internal-network-scan.jsonl"
+GELF_KEYS = {"version", "short_message", "timestamp", "level", "_event_id"}
 
 
 def make_response(
@@ -63,6 +67,21 @@ def hunt_output(
         f"Summary: {summary}\n"
         f"Evidence: {evidence}"
     )
+
+
+class EventIdAndSortTests(unittest.TestCase):
+    def test_event_id_prefers_nested_ecs_id(self) -> None:
+        self.assertEqual(event_id({"event": {"id": "e9"}, "id": "flat"}), "e9")
+        self.assertEqual(event_id({"id": "e1"}), "e1")
+        self.assertEqual(event_id({"_event_id": "e2"}), "e2")
+        self.assertIsNone(event_id({"message": "none"}))
+
+    def test_sort_key_prefers_at_timestamp(self) -> None:
+        self.assertEqual(
+            event_sort_key({"@timestamp": "2026-09-14T09:45:00.000Z", "timestamp": 1}),
+            "2026-09-14T09:45:00.000Z",
+        )
+        self.assertEqual(event_sort_key({"timestamp": 3}), 3)
 
 
 class BuildMessagesTests(unittest.TestCase):
@@ -160,24 +179,57 @@ class HuntOutputValidationTests(unittest.TestCase):
         )
         cls.beaconing_ids = allowed_evidence_ids(load_security_events(HTTP_BEACONING))
 
-    def test_password_spray_uses_gelf_fields(self) -> None:
+    def assert_ecs_envelope(self, event: dict) -> None:
+        self.assertRegex(event["@timestamp"], r"^\d{4}-\d{2}-\d{2}T")
+        self.assertTrue(event["message"].strip())
+        self.assertTrue(event["event"]["id"])
+        self.assertTrue(event["event"]["category"])
+        host_name = (event.get("host") or {}).get("name")
+        observer_name = (event.get("observer") or {}).get("hostname")
+        self.assertTrue(host_name or observer_name)
+        self.assertIn("ip", event["source"])
+        for key in GELF_KEYS:
+            self.assertNotIn(key, event)
+        self.assertNotIn("id", event)
+        self.assertNotIn("_id", event)
+
+    def test_password_spray_uses_ecs_fields(self) -> None:
         events = load_security_events(PASSWORD_SPRAY)
-        core_fields = {"version", "host", "short_message", "timestamp", "level"}
         for event in events:
-            with self.subTest(event_id=event.get("_event_id")):
-                self.assertEqual(event["version"], "1.1")
-                self.assertTrue(event["host"].strip())
-                self.assertTrue(event["short_message"].strip())
-                self.assertIsInstance(event["timestamp"], (int, float))
-                self.assertIsInstance(event["level"], int)
-                self.assertIn(event["level"], range(8))
-                self.assertTrue(event["_event_id"])
-                self.assertNotIn("_id", event)
-                self.assertNotIn("id", event)
-                for key, value in event.items():
-                    if key not in core_fields:
-                        self.assertTrue(key.startswith("_"), key)
-                        self.assertIsInstance(value, (str, int, float))
+            with self.subTest(event_id=event["event"]["id"]):
+                self.assert_ecs_envelope(event)
+                self.assertEqual(event["host"]["name"], "auth-01.corp.internal")
+                self.assertEqual(event["event"]["category"], ["authentication"])
+                self.assertEqual(event["event"]["action"], "logon")
+                self.assertIn(event["event"]["outcome"], {"success", "failure"})
+                self.assertTrue(event["user"]["name"])
+                self.assertTrue(event["source"]["ip"])
+                self.assertEqual(event["service"]["name"], "employee-portal")
+
+    def test_beaconing_uses_ecs_fields(self) -> None:
+        events = load_security_events(HTTP_BEACONING)
+        for event in events:
+            with self.subTest(event_id=event["event"]["id"]):
+                self.assert_ecs_envelope(event)
+                self.assertEqual(event["observer"]["hostname"], "fw-edge-01.corp.internal")
+                self.assertEqual(event["observer"]["type"], "firewall")
+                self.assertIn("network", event["event"]["category"])
+                self.assertTrue(event["source"]["ip"])
+                self.assertTrue(event["destination"]["ip"])
+
+    def test_internal_scan_uses_ecs_fields(self) -> None:
+        events = load_security_events(INTERNAL_NETWORK_SCAN)
+        for event in events:
+            with self.subTest(event_id=event["event"]["id"]):
+                self.assert_ecs_envelope(event)
+                self.assertEqual(
+                    event["observer"]["hostname"], "fw-segment-01.corp.internal"
+                )
+                self.assertEqual(event["event"]["type"], ["connection"])
+                self.assertTrue(event["event"]["reason"])
+                self.assertIsInstance(event["event"]["duration"], int)
+                self.assertTrue(event["source"]["ip"])
+                self.assertTrue(event["destination"]["ip"])
 
     def test_allowed_ids_use_event_id_from_password_spray(self) -> None:
         self.assertIn("e1", self.password_spray_ids)

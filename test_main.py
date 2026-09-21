@@ -78,7 +78,7 @@ def hunt_output(
     verdict: str = "suspicious",
     threat_type: str = "password spray",
     summary: str = "External source sprayed several accounts then succeeded.",
-    evidence: str = "e5, e11",
+    evidence: str = "c04-e005, c04-e011",
 ) -> str:
     return (
         f"Verdict: {verdict}\n"
@@ -264,18 +264,18 @@ class HuntOutputValidationTests(unittest.TestCase):
                     self.assertEqual(event["ecs"]["version"], "8.17.0")
 
     def test_allowed_ids_use_event_id_from_password_spray(self) -> None:
-        self.assertIn("e1", self.password_spray_ids)
-        self.assertIn("e14", self.password_spray_ids)
-        self.assertNotIn("e999", self.password_spray_ids)
+        self.assertIn("c04-e001", self.password_spray_ids)
+        self.assertIn("c04-e014", self.password_spray_ids)
+        self.assertNotIn("c04-e999", self.password_spray_ids)
         self.assertNotIn("nonexistent-id", self.password_spray_ids)
 
     def test_allowed_ids_use_event_id_from_beaconing(self) -> None:
-        self.assertIn("e6", self.beaconing_ids)
-        self.assertIn("e43", self.beaconing_ids)
-        self.assertNotIn("e999", self.beaconing_ids)
+        self.assertIn("c01-e006", self.beaconing_ids)
+        self.assertIn("c01-e043", self.beaconing_ids)
+        self.assertNotIn("c01-e999", self.beaconing_ids)
 
     def test_valid_password_spray_sections(self) -> None:
-        content = hunt_output(evidence="e5, e11")
+        content = hunt_output(evidence="c04-e005, c04-e011")
         self.assertIsNone(
             invalid_hunt_output_message(content, self.password_spray_ids)
         )
@@ -284,7 +284,7 @@ class HuntOutputValidationTests(unittest.TestCase):
         content = hunt_output(
             threat_type="HTTP beaconing",
             summary="Periodic heartbeats to 203.0.113.77.",
-            evidence="e6, e43",
+            evidence="c01-e006, c01-e043",
         )
         self.assertIsNone(invalid_hunt_output_message(content, self.beaconing_ids))
 
@@ -294,7 +294,7 @@ class HuntOutputValidationTests(unittest.TestCase):
             "Threat type: HTTP C2 beaconing\n"
             "Summary: Host ws-014 sent periodic GET /api/heartbeat requests\n"
             "to 203.0.113.77 with low jitter.\n"
-            "Evidence: e6, e43"
+            "Evidence: c01-e006, c01-e043"
         )
         self.assertIsNone(invalid_hunt_output_message(content, self.beaconing_ids))
 
@@ -308,7 +308,7 @@ class HuntOutputValidationTests(unittest.TestCase):
         content = (
             "Verdict: suspicious\n"
             "Threat type: password spray\n"
-            "Evidence: e5"
+            "Evidence: c04-e005"
         )
         message = invalid_hunt_output_message(content, self.password_spray_ids)
         self.assertIsNotNone(message)
@@ -337,11 +337,11 @@ class HuntOutputValidationTests(unittest.TestCase):
         self.assertIn("nonexistent-id", message)
 
     def test_mixed_unknown_evidence_id_is_rejected(self) -> None:
-        content = hunt_output(evidence="e5, nonexistent-id")
+        content = hunt_output(evidence="c04-e005, nonexistent-id")
         message = invalid_hunt_output_message(content, self.password_spray_ids)
         self.assertIsNotNone(message)
         self.assertIn("nonexistent-id", message)
-        self.assertNotIn("e5,", message)
+        self.assertNotIn("c04-e005,", message)
 
     def test_truncated_valid_sections_report_token_limit_first(self) -> None:
         content = hunt_output()

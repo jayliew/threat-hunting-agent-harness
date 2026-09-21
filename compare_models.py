@@ -19,8 +19,13 @@ from zoneinfo import ZoneInfo
 from ollama import Client
 
 from main import (
+    NUM_CTX,
+    NUM_PREDICT,
+    THINK,
     chat_template_error,
     load_security_events,
+    model_detail_fields,
+    native_context_length,
     resolve_log_path,
     run_hunt,
 )
@@ -106,8 +111,14 @@ def prepare_comparison(client: Client, models: list[str], logs: list[str]) -> tu
             error = chat_template_error(canonical, template)
             if error:
                 raise ValueError(error)
-            selected.append({"name": canonical, "digest": model.digest,
-                             "capabilities": capabilities, "chat_template": template})
+            selected.append({
+                "name": canonical,
+                "digest": model.digest,
+                "capabilities": capabilities,
+                "chat_template": template,
+                "context_length": native_context_length(info),
+                **model_detail_fields(info, model),
+            })
         except Exception as error:
             problems.append(f"Cannot use {name}: {error}")
     cases, seen_paths = [], set()
@@ -135,9 +146,51 @@ def seconds(value: float | None) -> str:
     return "—" if value is None else f"{value:.2f}s"
 
 
+def display(value) -> str:
+    return "—" if value is None or value == "" else str(value)
+
+
+def quantization_label(model: dict) -> str:
+    parts = [
+        model.get("quantization_level"),
+        model.get("parameter_size"),
+        model.get("format"),
+    ]
+    return " · ".join(part for part in parts if part) or "—"
+
+
+def thinking_label(result: dict | None, model: dict, settings: dict) -> str:
+    if result is not None:
+        if "think" in result.get("request", {}):
+            return "enabled" if result["request"]["think"] else "disabled"
+        return "not supported"
+    if "thinking" not in (model.get("capabilities") or []):
+        return "not supported"
+    return "enabled" if settings.get("think") else "disabled"
+
+
+def context_label(allocated, used, model_max) -> str:
+    text = f"used {display(used)} / allocated {display(allocated)}"
+    if model_max is not None:
+        text += f" (model max {model_max})"
+    return text
+
+
+def tokens_label(tokens: dict | None, thinking_enabled: bool) -> str:
+    tokens = tokens or {}
+    output_note = " (includes thinking)" if thinking_enabled else ""
+    return (
+        f"Input: {display(tokens.get('prompt_eval_count'))} · "
+        f"Cached: {display(tokens.get('prompt_eval_cached_count'))} · "
+        f"Uncached: {display(tokens.get('prompt_uncached_count'))} · "
+        f"Output: {display(tokens.get('eval_count'))}{output_note}"
+    )
+
+
 def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
     """Static, escaped HTML: model responses are displayed only as text."""
     e = lambda value: escape(str(value))
+    settings = manifest.get("request_settings") or {}
     by_pair = {(r["case"], r["model"]): r for r in results}
     rows, sections = [], []
     for case in manifest["cases"]:
@@ -145,27 +198,51 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
         for model in manifest["models"]:
             result = by_pair.get((case["name"], model["name"]))
             name = e(model["name"])
+            think = thinking_label(result, model, settings)
+            quant = quantization_label(model)
             if result is None:
-                cards.append(f'<article><h3>{name}</h3><p class="pending">Pending</p></article>')
+                cards.append(
+                    f'<article><h3>{name}</h3><p class="pending">Pending</p>'
+                    f'<p>{e(context_label(settings.get("num_ctx"), None, model.get("context_length")))}<br>'
+                    f'Quantization: {e(quant)}<br>Thinking: {e(think)}<br>'
+                    f'{e(tokens_label(None, False))}</p></article>'
+                )
                 continue
             status = result["status"]
             verdict = result["sections"].get("Verdict", "—")
             timing = result["timing"]
             wall = seconds(timing.get("wall_seconds"))
             load = seconds(timing.get("load_duration_seconds"))
-            rows.append(f'<tr><td>{e(case["name"])}</td><td>{name}</td>'
-                        f'<td>{e(verdict)}</td><td class="{e(status)}">{e(status)}</td>'
-                        f'<td>{len(result["unknown_evidence_ids"])}</td><td>{wall}</td><td>{load}</td></tr>')
+            tokens = result.get("tokens") or {}
+            context = result.get("context") or {}
+            allocated = context.get("allocated", settings.get("num_ctx"))
+            used = context.get("used")
+            model_max = context.get("model_max", model.get("context_length"))
+            thinking_enabled = think == "enabled"
+            rows.append(
+                f'<tr><td>{e(case["name"])}</td><td>{name}</td>'
+                f'<td>{e(verdict)}</td><td class="{e(status)}">{e(status)}</td>'
+                f'<td>{len(result["unknown_evidence_ids"])}</td><td>{wall}</td><td>{load}</td>'
+                f'<td>{e(quant)}</td><td>{e(think)}</td>'
+                f'<td>{e(display(used))}</td><td>{e(display(allocated))}</td>'
+                f'<td>{e(display(tokens.get("prompt_eval_count")))}</td>'
+                f'<td>{e(display(tokens.get("prompt_eval_cached_count")))}</td>'
+                f'<td>{e(display(tokens.get("eval_count")))}</td></tr>'
+            )
             errors = result["validation_errors"] + ([result["error"]] if result["error"] else [])
             error_html = ''.join(f'<p class="error">{e(error)}</p>' for error in errors)
             thinking = (f'<details><summary>Thinking trace</summary><pre>{e(result["thinking"])}</pre></details>'
                         if result["thinking"] else '')
-            think = result["request"].get("think", "unsupported / unavailable")
-            cards.append(f'<article><h3>{name}</h3><p class="{e(status)}">{e(status)} · {wall}</p>'
-                         f'<p>Thinking: {e(think)} · Load: {load}<br>'
-                         f'Prompt processing: {seconds(timing.get("prompt_eval_duration_seconds"))} · '
-                         f'Generation: {seconds(timing.get("eval_duration_seconds"))}</p>'
-                         f'{error_html}<pre>{e(result["raw_content"]) or "No answer returned."}</pre>{thinking}</article>')
+            cards.append(
+                f'<article><h3>{name}</h3><p class="{e(status)}">{e(status)} · {wall}</p>'
+                f'<p>{e(context_label(allocated, used, model_max))}<br>'
+                f'Quantization: {e(quant)}<br>'
+                f'Thinking: {e(think)} · Load: {load}<br>'
+                f'{e(tokens_label(tokens, thinking_enabled))}<br>'
+                f'Prompt processing: {seconds(timing.get("prompt_eval_duration_seconds"))} · '
+                f'Generation: {seconds(timing.get("eval_duration_seconds"))}</p>'
+                f'{error_html}<pre>{e(result["raw_content"]) or "No answer returned."}</pre>{thinking}</article>'
+            )
         sections.append(f'<section><h2>{e(case["name"])}</h2><div class="answers">{"".join(cards)}</div></section>')
     total = len(manifest["models"]) * len(manifest["cases"])
     html = '''<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -184,9 +261,13 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
     html += (f'<h1>Threat hunt model comparison</h1><p>{e(manifest["created_at"])} · '
              f'{len(results)} / {total} runs recorded</p><p>Output validity checks format and cited IDs; '
              'it does not establish detection accuracy. Wall time includes model loading. '
-             'Runs are sequential, with a fresh conversation for every case.</p>'
+             'Runs are sequential, with a fresh conversation for every case. '
+             'Context used is prompt tokens plus generated tokens. Output tokens include thinking when thinking is enabled. '
+             'A missing cached-token count is unknown, not zero.</p>'
              '<div class="scroll"><table><thead><tr><th>Case</th><th>Model</th><th>Verdict</th>'
              '<th>Output status</th><th>Unknown IDs</th><th>Wall time</th><th>Load time</th>'
+             '<th>Quantization</th><th>Thinking</th><th>Context used</th><th>Context allocated</th>'
+             '<th>Input tokens</th><th>Cached tokens</th><th>Output tokens</th>'
              f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>{"".join(sections)}</main></body></html>')
     temp = directory / "report.html.tmp"
     temp.write_text(html, encoding="utf-8")
@@ -197,8 +278,17 @@ def run_comparison(client: Client, models: list[str], logs: list[str], output_ro
     selected, cases = prepare_comparison(client, models, logs)
     now = eastern_now()
     directory = allocate_results_directory(output_root, now)
-    manifest = {"schema_version": 1, "created_at": now.isoformat(), "models": selected,
-                "cases": [{k: v for k, v in case.items() if k != "events"} for case in cases]}
+    manifest = {
+        "schema_version": 1,
+        "created_at": now.isoformat(),
+        "request_settings": {
+            "num_ctx": NUM_CTX,
+            "num_predict": NUM_PREDICT,
+            "think": THINK,
+        },
+        "models": selected,
+        "cases": [{k: v for k, v in case.items() if k != "events"} for case in cases],
+    }
     (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     results = []
     write_report(directory, manifest, results)
@@ -210,6 +300,7 @@ def run_comparison(client: Client, models: list[str], logs: list[str], output_ro
                 result = run_hunt(model["name"], case["events"], client=client,
                                   capabilities=model["capabilities"],
                                   chat_template=model.get("chat_template"),
+                                  model_max=model.get("context_length"),
                                   keep_alive=0 if index == len(cases)-1 else "5m")
                 result.update({"schema_version": 1, "case": case["name"], "log_path": case["path"],
                                "events_sha256": case["events_sha256"], "model_digest": model["digest"]})

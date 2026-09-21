@@ -136,7 +136,7 @@ Edit the `MODELS` and `DEFAULT_SCENARIO_LOGS` lists at the top of `compare_model
 uv run python compare_models.py
 ```
 
-The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across password spray, HTTP beaconing, and internal network scanning: nine runs. Use names from `ollama list`. All configured models and input files are checked before inference starts, including the installed Ollama chat template; missing models and models with unusable templates are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
+The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all six scenarios: password spray, HTTP beaconing, internal network scanning, shared VPN logins (`logs/shared-vpn-logins.ecs.jsonl`), managed telemetry (`logs/managed-telemetry.ecs.jsonl`), and scheduled discovery (`logs/scheduled-discovery.ecs.jsonl`): 18 runs. Use names from `ollama list`. All configured models and input files are checked before inference starts, including the installed Ollama chat template; missing models and models with unusable templates are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
 
 You can override the lists without editing code:
 
@@ -173,6 +173,9 @@ uv run python -m unittest -v
 | `logs/password-spray.jsonl` | Optional demo: ECS login / password-spray events |
 | `logs/http-beaconing.jsonl` | Default demo: ECS HTTP beaconing among legitimate traffic |
 | `logs/internal-network-scan.jsonl` | Optional demo: ECS internal scanning among legitimate traffic |
+| `logs/shared-vpn-logins.ecs.jsonl` | Optional demo: ECS shared-VPN logins that look like spraying |
+| `logs/managed-telemetry.ecs.jsonl` | Optional demo: ECS managed check-ins that look like beaconing |
+| `logs/scheduled-discovery.ecs.jsonl` | Optional demo: ECS authorized scanning that looks like an internal scan |
 | `test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |
 | `test_compare_models.py` | Unit tests for the comparison matrix, HTML report, and the shared hunt runner |
 | `pyproject.toml` | Project metadata and the `ollama` client |

@@ -23,7 +23,11 @@ import main as harness
 
 
 ANSWER = 'Verdict: benign\nThreat type: none\nSummary: Normal activity.\nEvidence: e1'
-EVENTS = [{"id": "e1", "timestamp": 1}]
+EVENTS = [{
+    "@timestamp": "2026-09-14T09:45:00.000Z",
+    "event": {"id": "e1"},
+    "message": "test",
+}]
 
 
 def response(content=ANSWER, reason="stop"):

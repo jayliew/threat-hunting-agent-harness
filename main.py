@@ -94,6 +94,99 @@ def chat_think_kwargs(
     return {"think": think}
 
 
+def optional_field(obj, name: str):
+    """Return a dict key or object attribute, treating empty as missing."""
+    if obj is None:
+        return None
+    value = obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+    if value is None or value == "":
+        return None
+    return value
+
+
+def optional_scalar(obj, name: str):
+    value = optional_field(obj, name)
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return None
+    return value
+
+
+def optional_int(value) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def native_context_length(info) -> int | None:
+    """Read the model's native max context from /api/show model_info."""
+    model_info = optional_field(info, "modelinfo")
+    if not isinstance(model_info, dict):
+        model_info = optional_field(info, "model_info")
+    if not isinstance(model_info, dict):
+        return None
+    for key, value in model_info.items():
+        if str(key).endswith(".context_length"):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def model_detail_fields(info, listed=None) -> dict:
+    """Quantization and size fields from list/show details, if present."""
+    details = optional_field(info, "details")
+    if details is None:
+        details = optional_field(listed, "details")
+    return {
+        "quantization_level": optional_scalar(details, "quantization_level"),
+        "parameter_size": optional_scalar(details, "parameter_size"),
+        "format": optional_scalar(details, "format"),
+        "family": optional_scalar(details, "family"),
+    }
+
+
+def empty_tokens() -> dict:
+    return {
+        "prompt_eval_count": None,
+        "prompt_eval_cached_count": None,
+        "prompt_uncached_count": None,
+        "eval_count": None,
+    }
+
+
+def usage_tokens(response) -> dict:
+    """Copy Ollama usage counts. Missing fields stay null, not zero."""
+    tokens = empty_tokens()
+    if response is None:
+        return tokens
+    prompt = optional_int(getattr(response, "prompt_eval_count", None))
+    cached = optional_int(getattr(response, "prompt_eval_cached_count", None))
+    output = optional_int(getattr(response, "eval_count", None))
+    tokens["prompt_eval_count"] = prompt
+    tokens["prompt_eval_cached_count"] = cached
+    tokens["eval_count"] = output
+    if prompt is not None and cached is not None:
+        tokens["prompt_uncached_count"] = prompt - cached
+    return tokens
+
+
+def context_usage(
+    allocated: int, tokens: dict, model_max: int | None = None
+) -> dict:
+    """Allocated is num_ctx; used is prompt plus generated tokens when known."""
+    prompt = tokens.get("prompt_eval_count")
+    output = tokens.get("eval_count")
+    used = None
+    if prompt is not None and output is not None:
+        used = prompt + output
+    elif prompt is not None:
+        used = prompt
+    elif output is not None:
+        used = output
+    return {"allocated": allocated, "used": used, "model_max": model_max}
+
+
 FOUNDATION_SEC_MARKERS = ("<|system|>", "<|user|>", "<|assistant|>")
 CHAT_ROLE_MARKERS = FOUNDATION_SEC_MARKERS + (
     "<|im_start|>",
@@ -293,11 +386,13 @@ def run_hunt(
     capabilities: list[str] | None = None,
     chat_template: str | None = None,
     keep_alive: str | int = "5m",
+    model_max: int | None = None,
 ) -> dict:
     """Run one fresh conversation; retain answers and failures for inspection."""
     client = client if client is not None else Client(timeout=300)
     messages = build_messages(events)
     options = {"temperature": 0, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT}
+    tokens = empty_tokens()
     result = {
         "model": model,
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -316,6 +411,8 @@ def run_hunt(
             json.dumps(messages, sort_keys=True).encode()
         ).hexdigest(),
         "timing": {},
+        "tokens": tokens,
+        "context": context_usage(NUM_CTX, tokens, model_max),
     }
     started = perf_counter()
     inspected_template = chat_template is not None
@@ -326,6 +423,9 @@ def run_hunt(
             if not inspected_template:
                 result["chat_template"] = info.template or ""
                 inspected_template = True
+            if model_max is None:
+                model_max = native_context_length(info)
+                result["context"]["model_max"] = model_max
         result["capabilities"] = capabilities
         result["request"].update(chat_think_kwargs(THINK, capabilities))
         if inspected_template:
@@ -339,6 +439,8 @@ def run_hunt(
         result["response"] = response.model_dump(mode="json")
         result["raw_content"] = content
         result["thinking"] = response.message.thinking or ""
+        result["tokens"] = usage_tokens(response)
+        result["context"] = context_usage(NUM_CTX, result["tokens"], model_max)
         result["sections"] = parse_hunt_sections(content)
         allowed = allowed_evidence_ids(events)
         result["unknown_evidence_ids"] = sorted(set(

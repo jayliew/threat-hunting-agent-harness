@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 from ollama import ChatResponse, Message
@@ -16,11 +17,16 @@ from main import (
     allowed_evidence_ids,
     chat_template_error,
     chat_think_kwargs,
+    context_usage,
+    empty_tokens,
     incomplete_response_message,
     inspect_installed_model,
     invalid_hunt_output_message,
     is_bare_prompt_template,
     load_security_events,
+    model_detail_fields,
+    native_context_length,
+    usage_tokens,
 )
 
 
@@ -341,6 +347,77 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertIn(SYSTEM_PROMPT, expected)
         self.assertIn("<|user|>", expected)
         self.assertNotEqual(ollama_sent, expected)
+
+
+class UsageAndContextTests(unittest.TestCase):
+    def test_usage_tokens_derives_uncached_when_cached_is_present(self) -> None:
+        response = SimpleNamespace(
+            prompt_eval_count=80, prompt_eval_cached_count=20, eval_count=40
+        )
+        self.assertEqual(
+            usage_tokens(response),
+            {
+                "prompt_eval_count": 80,
+                "prompt_eval_cached_count": 20,
+                "prompt_uncached_count": 60,
+                "eval_count": 40,
+            },
+        )
+
+    def test_missing_usage_fields_stay_none(self) -> None:
+        self.assertEqual(usage_tokens(SimpleNamespace()), empty_tokens())
+        self.assertEqual(usage_tokens(None), empty_tokens())
+
+    def test_context_used_is_input_plus_output(self) -> None:
+        tokens = {"prompt_eval_count": 80, "eval_count": 40}
+        self.assertEqual(
+            context_usage(32768, tokens, 131072),
+            {"allocated": 32768, "used": 120, "model_max": 131072},
+        )
+
+    def test_context_used_falls_back_to_whichever_count_is_known(self) -> None:
+        self.assertEqual(
+            context_usage(32768, {"prompt_eval_count": 80, "eval_count": None})["used"],
+            80,
+        )
+        self.assertEqual(
+            context_usage(32768, {"prompt_eval_count": None, "eval_count": 40})["used"],
+            40,
+        )
+        self.assertIsNone(context_usage(32768, empty_tokens())["used"])
+
+    def test_native_context_length_reads_model_info(self) -> None:
+        info = SimpleNamespace(modelinfo={"qwen3.context_length": 40960})
+        self.assertEqual(native_context_length(info), 40960)
+        self.assertIsNone(native_context_length(SimpleNamespace()))
+
+    def test_model_detail_fields_ignore_spec_less_mocks(self) -> None:
+        self.assertEqual(
+            model_detail_fields(Mock()),
+            {
+                "quantization_level": None,
+                "parameter_size": None,
+                "format": None,
+                "family": None,
+            },
+        )
+        listed = SimpleNamespace(
+            details=SimpleNamespace(
+                quantization_level="Q8_0",
+                parameter_size="8B",
+                format="gguf",
+                family="llama",
+            )
+        )
+        self.assertEqual(
+            model_detail_fields(SimpleNamespace(), listed),
+            {
+                "quantization_level": "Q8_0",
+                "parameter_size": "8B",
+                "format": "gguf",
+                "family": "llama",
+            },
+        )
 
 
 if __name__ == "__main__":

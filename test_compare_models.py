@@ -28,7 +28,8 @@ EVENTS = [{"id": "e1", "timestamp": 1}]
 
 def response(content=ANSWER, reason="stop"):
     return ChatResponse(message=Message(role="assistant", content=content),
-                        done_reason=reason, eval_count=40, total_duration=2_000_000_000,
+                        done_reason=reason, eval_count=40, prompt_eval_count=80,
+                        total_duration=2_000_000_000,
                         load_duration=500_000_000, prompt_eval_duration=200_000_000,
                         eval_duration=1_300_000_000)
 
@@ -59,6 +60,11 @@ class HuntTests(unittest.TestCase):
         self.assertEqual(api.chat.call_args.kwargs['think'], harness.THINK)
         self.assertEqual(len(api.chat.call_args.kwargs['messages']), 2)
         self.assertFalse(api.show.called)
+        self.assertEqual(result['tokens']['prompt_eval_count'], 80)
+        self.assertEqual(result['tokens']['eval_count'], 40)
+        self.assertIsNone(result['tokens']['prompt_eval_cached_count'])
+        self.assertEqual(result['context']['allocated'], harness.NUM_CTX)
+        self.assertEqual(result['context']['used'], 120)
 
     def test_non_thinking_model_omits_think(self):
         api = client()
@@ -82,6 +88,9 @@ class HuntTests(unittest.TestCase):
         self.assertIn('TimeoutError', result['error'])
         self.assertIsNone(result['response'])
         self.assertGreaterEqual(result['timing']['wall_seconds'], 0)
+        self.assertEqual(result['tokens'], harness.empty_tokens())
+        self.assertEqual(result['context']['allocated'], harness.NUM_CTX)
+        self.assertIsNone(result['context']['used'])
 
     def test_run_hunt_skips_chat_when_show_template_is_bare(self):
         api = client()
@@ -90,6 +99,44 @@ class HuntTests(unittest.TestCase):
         self.assertEqual(result['status'], 'error')
         self.assertIn("{{ .Prompt }}", result['error'])
         self.assertFalse(api.chat.called)
+        self.assertEqual(result['tokens'], harness.empty_tokens())
+        self.assertIsNone(result['context']['used'])
+
+    def test_run_hunt_records_native_context_from_show(self):
+        api = client()
+        api.show.return_value.modelinfo = {"llama.context_length": 131072}
+        result = harness.run_hunt('alpha:latest', EVENTS, client=api)
+        self.assertEqual(result['context']['model_max'], 131072)
+
+    def test_cached_prompt_tokens_are_recorded_when_present(self):
+        api = client()
+        chat = response()
+        api.chat.return_value = SimpleNamespace(
+            message=chat.message,
+            done_reason=chat.done_reason,
+            eval_count=40,
+            prompt_eval_count=80,
+            prompt_eval_cached_count=20,
+            total_duration=chat.total_duration,
+            load_duration=chat.load_duration,
+            prompt_eval_duration=chat.prompt_eval_duration,
+            eval_duration=chat.eval_duration,
+            model_dump=lambda mode="json": chat.model_dump(mode=mode),
+        )
+        result = harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion'])
+        self.assertEqual(result['tokens']['prompt_eval_cached_count'], 20)
+        self.assertEqual(result['tokens']['prompt_uncached_count'], 60)
+        self.assertEqual(result['context']['used'], 120)
+
+    def test_hunt_without_usage_fields_records_null_tokens(self):
+        api = client()
+        api.chat.return_value = ChatResponse(
+            message=Message(role="assistant", content=ANSWER), done_reason="stop"
+        )
+        result = harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion'])
+        self.assertEqual(result['tokens'], harness.empty_tokens())
+        self.assertIsNone(result['context']['used'])
+        self.assertEqual(result['context']['allocated'], harness.NUM_CTX)
 
     def test_single_hunt_cli_uses_shared_runner(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -252,6 +299,124 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(first.name, "20-Sep-2026-Sun_09-28am-ET")
         self.assertEqual(second.name, "20-Sep-2026-Sun_09-28am-ET-2")
         self.assertTrue((first / "results.jsonl").exists())
+
+    def test_missing_details_render_as_unknown(self):
+        directory = self.run_quietly(client())
+        html = (directory / 'report.html').read_text()
+        self.assertIn('Quantization: —', html)
+        self.assertIn('Thinking: not supported', html)
+        self.assertIn(f'used 120 / allocated {harness.NUM_CTX}', html)
+        rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
+        self.assertEqual(rows[0]['tokens']['prompt_eval_count'], 80)
+        self.assertEqual(rows[0]['tokens']['eval_count'], 40)
+        self.assertIsNone(rows[0]['tokens']['prompt_eval_cached_count'])
+        self.assertEqual(rows[0]['context']['used'], 120)
+        self.assertEqual(rows[0]['context']['allocated'], harness.NUM_CTX)
+        manifest = json.loads((directory / 'manifest.json').read_text())
+        self.assertEqual(manifest['request_settings']['num_ctx'], harness.NUM_CTX)
+        self.assertIsNone(manifest['models'][0]['quantization_level'])
+
+    def test_report_includes_model_settings_tokens_and_context(self):
+        api = client()
+        template = api.show.return_value.template
+
+        def show(name):
+            thinking = name.startswith('alpha')
+            return SimpleNamespace(
+                capabilities=['completion', 'thinking'] if thinking else ['completion'],
+                template=template,
+                details=SimpleNamespace(
+                    quantization_level='Q4_K_M' if thinking else 'Q8_0',
+                    parameter_size='32.8B' if thinking else '8B',
+                    format='gguf',
+                    family='qwen' if thinking else 'llama',
+                ),
+                modelinfo=(
+                    {'qwen3.context_length': 40960} if thinking
+                    else {'llama.context_length': 131072}
+                ),
+            )
+
+        api.show.side_effect = show
+        directory = self.run_quietly(api)
+        manifest = json.loads((directory / 'manifest.json').read_text())
+        by_name = {model['name']: model for model in manifest['models']}
+        self.assertEqual(by_name['alpha:latest']['quantization_level'], 'Q4_K_M')
+        self.assertEqual(by_name['alpha:latest']['context_length'], 40960)
+        self.assertEqual(by_name['beta:1']['quantization_level'], 'Q8_0')
+        self.assertEqual(by_name['beta:1']['context_length'], 131072)
+        html = (directory / 'report.html').read_text()
+        self.assertIn('Q4_K_M · 32.8B · gguf', html)
+        self.assertIn('Q8_0 · 8B · gguf', html)
+        self.assertIn('Thinking: disabled', html)
+        self.assertIn('Thinking: not supported', html)
+        self.assertIn(f'used 120 / allocated {harness.NUM_CTX} (model max 40960)', html)
+        self.assertIn(f'used 120 / allocated {harness.NUM_CTX} (model max 131072)', html)
+        self.assertIn('Input: 80', html)
+        self.assertIn('Output: 40', html)
+        rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
+        self.assertEqual(rows[0]['context']['model_max'], 40960)
+        self.assertEqual(rows[2]['context']['model_max'], 131072)
+
+    def test_pending_cards_show_settings_without_tokens(self):
+        directory = self.root / 'pending'
+        directory.mkdir()
+        manifest = {
+            'created_at': 'now',
+            'request_settings': {'num_ctx': 32768, 'num_predict': 1024, 'think': False},
+            'models': [{
+                'name': 'alpha:latest',
+                'capabilities': ['completion', 'thinking'],
+                'quantization_level': 'Q4_K_M',
+                'parameter_size': '7B',
+                'format': 'gguf',
+                'context_length': 40960,
+            }],
+            'cases': [{'name': 'one.jsonl'}],
+        }
+        compare_models.write_report(directory, manifest, [])
+        html = (directory / 'report.html').read_text()
+        self.assertIn('Pending', html)
+        self.assertIn('used — / allocated 32768', html)
+        self.assertIn('model max 40960', html)
+        self.assertIn('Quantization: Q4_K_M · 7B · gguf', html)
+        self.assertIn('Thinking: disabled', html)
+        self.assertIn('Input: —', html)
+
+    def test_report_labels_thinking_enabled_and_output_includes_thinking(self):
+        directory = self.root / 'think'
+        directory.mkdir()
+        manifest = {
+            'created_at': 'now',
+            'request_settings': {'num_ctx': 32768, 'think': True},
+            'models': [{'name': 'alpha:latest', 'capabilities': ['completion', 'thinking']}],
+            'cases': [{'name': 'one.jsonl'}],
+        }
+        result = {
+            'case': 'one.jsonl',
+            'model': 'alpha:latest',
+            'status': 'ok',
+            'sections': {'Verdict': 'benign'},
+            'timing': {},
+            'unknown_evidence_ids': [],
+            'validation_errors': [],
+            'error': None,
+            'thinking': 'trace',
+            'raw_content': ANSWER,
+            'request': {'think': True},
+            'tokens': {
+                'prompt_eval_count': 80,
+                'prompt_eval_cached_count': 20,
+                'prompt_uncached_count': 60,
+                'eval_count': 40,
+            },
+            'context': {'allocated': 32768, 'used': 120, 'model_max': None},
+        }
+        compare_models.write_report(directory, manifest, [result])
+        html = (directory / 'report.html').read_text()
+        self.assertIn('Thinking: enabled', html)
+        self.assertIn('Output: 40 (includes thinking)', html)
+        self.assertIn('Cached: 20', html)
 
     def test_cli_exits_nonzero_after_recording_invalid_runs(self):
         api = client()

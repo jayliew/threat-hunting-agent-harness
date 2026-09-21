@@ -45,13 +45,15 @@ The evidence serializer escapes `<`, `>`, and `&` using JSON Unicode escapes. Th
 
 ## Demo scenarios
 
+Use the [private MVP answer keys](evals/answer-keys.md) to grade all six cases manually. They define expected assessments, supporting evidence, and unsupported claims; keep them out of the model prompt.
+
 ### Password spray (`logs/password-spray.jsonl`)
 
-Fourteen synthetic [Elastic Common Schema](https://www.elastic.co/docs/reference/ecs) authentication documents from `auth-01.corp.internal`, one nested JSON object per line. `@timestamp` is ISO-8601 UTC. Cite `event.id` (`e1` … `e14`).
+Fourteen synthetic [Elastic Common Schema](https://www.elastic.co/docs/reference/ecs) authentication documents from `auth-01.corp.internal`, one nested JSON object per line. `@timestamp` is ISO-8601 UTC. Cite `event.id` (`c04-e001` … `c04-e014`).
 
-All events concern password authentication to the same `employee-portal` service. The single suspicious sequence is six failures from `198.51.100.7` (a documentation IP) against six different accounts in 150 seconds (`e5` … `e10`), followed by a success for `bob` from that same source (`e11`). The seven benign events are ordinary internal logins and two isolated failure-then-success pairs (`e3`/`e4` and `e13`/`e14`). The original IDs, times, users, source IPs, and outcomes are preserved.
+All events concern password authentication to the same `employee-portal` service. The single suspicious sequence is six failures from `198.51.100.7` (a documentation IP) against six different accounts in 150 seconds (`c04-e005` … `c04-e010`), followed by a success for `bob` from that same source (`c04-e011`). The seven benign events are ordinary internal logins and two isolated failure-then-success pairs (`c04-e003`/`c04-e004` and `c04-e013`/`c04-e014`). The original times, users, source IPs, and authentication outcomes are preserved.
 
-Ground truth for instructors (not present in the logs): the intended scenario is one password spray; verdict `suspicious`; attack-sequence evidence = `e5` … `e11`. The observable pattern is consistent with spraying and possible compromise. Because the logs do not record attempted passwords or credential provenance, they cannot prove password reuse, distinguish spraying conclusively from credential stuffing, or establish account takeover from the subsequent success alone. No passwords or attack labels are embedded in the events.
+Ground truth for instructors (not present in the logs): the intended scenario is one password spray; verdict `suspicious`; attack-sequence evidence = `c04-e005` … `c04-e011`. The observable pattern is consistent with spraying and possible compromise. Because the logs do not record attempted passwords or credential provenance, they cannot prove password reuse, distinguish spraying conclusively from credential stuffing, or establish account takeover from the subsequent success alone. No passwords or attack labels are embedded in the events.
 
 Use it to check whether the model:
 
@@ -61,12 +63,12 @@ Use it to check whether the model:
 
 ### HTTP beaconing (`logs/http-beaconing.jsonl`)
 
-Default single-hunt file for `main.py`. Synthetic [ECS](https://www.elastic.co/docs/reference/ecs) JSONL (the nested document shape Filebeat/Logstash write into Elasticsearch). Each line is one firewall/proxy event. Cite `event.id` (`e1` … `e43`).
+Default single-hunt file for `main.py`. Synthetic [ECS](https://www.elastic.co/docs/reference/ecs) JSONL (the nested document shape Filebeat/Logstash write into Elasticsearch). Each line is one firewall/proxy event. Cite `event.id` (`c01-e001` … `c01-e043`).
 
 The hour of traffic mixes ordinary work with a low-and-slow HTTP check-in:
 
 - `jlee` on `ws-014.corp.internal` (`10.47.12.88`) browses Office, GitHub, and LinkedIn, and syncs Outlook (`outlook.office365.com` / `198.51.100.30`) on an irregular schedule with varying payload sizes.
-- The same host also issues `GET /api/heartbeat` to `203.0.113.77:443` (a documentation IP, no hostname) about every 300 seconds with a few seconds of jitter, tiny stable byte counts, and an identical short user-agent. Those twelve events are `e6`, `e11`, `e16`, `e20`, `e23`, `e24`, `e27`, `e31`, `e35`, `e38`, `e41`, and `e43`.
+- The same host also issues `GET /api/heartbeat` to `203.0.113.77:443` (a documentation IP, no hostname) about every 300 seconds with a few seconds of jitter, tiny stable byte counts, and an identical short user-agent. Those twelve events are `c01-e006`, `c01-e011`, `c01-e016`, `c01-e020`, `c01-e023`, `c01-e024`, `c01-e027`, `c01-e031`, `c01-e035`, `c01-e038`, `c01-e041`, and `c01-e043`.
 - Cover traffic that can look periodic if you only glance at timestamps: Windows Update from `asmith` / `ws-022` (large, variable bodies), Slack presence polls from `bnguyen` / `ws-008` (~15 minutes apart with high jitter and changing sizes), plus DNS, NTP, and SMB.
 
 Ground truth for instructors (not present in the logs): verdict `suspicious`, threat type HTTP/C2 beaconing, evidence = the twelve `event.id`s to `203.0.113.77`.

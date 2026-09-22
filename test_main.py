@@ -391,6 +391,48 @@ class ChatTemplateTests(unittest.TestCase):
             chat_template_error("mistral-small3.2:24b", "[INST] {{ .Prompt }} [/INST]")
         )
 
+    def test_huggingface_jinja_without_messages_is_rejected(self) -> None:
+        jinja = (
+            "{#-\n  In addition to the normal inputs of `messages` and `tools`\n#}\n"
+            "{%- for message in messages -%}\n"
+            "{{- message.content }}\n"
+            "{%- endfor %}\n"
+            + ("x" * 500)
+        )
+        error = chat_template_error("imported-gguf:latest", jinja)
+        self.assertIsNotNone(error)
+        self.assertIn("Hugging Face Jinja", error)
+        self.assertIn("…", error)
+        self.assertLess(len(error), 2000)
+
+    def test_cyberpal_requires_harmony_go_template(self) -> None:
+        jinja = (
+            "{#-\n  In addition to the normal inputs of `messages` and `tools`\n#}\n"
+            '{{- "<|start|>system<|message|>" }}\n'
+            "{%- for message in messages -%}\n"
+            '{{- "<|start|>user<|message|>" + message.content + "<|end|>" }}\n'
+            "{%- endfor %}\n"
+            + ("x" * 500)
+        )
+        modelfile = (
+            "FROM /tmp/weights\n"
+            "TEMPLATE {{ .Prompt }}\n"
+            "PARAMETER num_ctx 32768\n"
+        )
+        error = chat_template_error("cyberpal2:20b-bf16", jinja, modelfile)
+        self.assertIsNotNone(error)
+        self.assertIn("Harmony", error)
+        self.assertIn("Modelfile.cyberpal2-20b", error)
+        self.assertIn("{{ .Prompt }}", error)
+        self.assertIn("…", error)
+        llama_headers = chat_template_error(
+            "cyberpal2-20b",
+            "{{ range .Messages }}<|start_header_id|>{{ .Role }}<|end_header_id|>\n"
+            "{{ .Content }}{{ end }}",
+        )
+        self.assertIsNotNone(llama_headers)
+        self.assertIn("<|start|>", llama_headers)
+
     def test_modelfile_passes_preflight(self) -> None:
         text = (REPO_ROOT / "Modelfile.foundation-sec-8b-instruct").read_text()
         template = text.split("TEMPLATE", 1)[1].split("PARAMETER", 1)[0]
@@ -403,6 +445,19 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertNotIn("<|start_header_id|>", text)
         self.assertNotIn("{{ .Prompt }}", template)
 
+    def test_cyberpal_modelfile_passes_preflight(self) -> None:
+        text = (REPO_ROOT / "Modelfile.cyberpal2-20b").read_text()
+        template = text.split('TEMPLATE """', 1)[1].split('"""', 1)[0]
+        self.assertIsNone(chat_template_error("cyberpal2-20b", template))
+        self.assertIn("FROM cyberpal2:20b-bf16", text)
+        self.assertIn("<|start|>", text)
+        self.assertIn("<|message|>", text)
+        self.assertIn("<|end|>", text)
+        self.assertIn("{{ .System }}", text)
+        self.assertIn("range .Messages", text)
+        self.assertIn("PARAMETER stop <|return|>", text)
+        self.assertNotIn("{{ .Prompt }}", template)
+
     def test_inspect_installed_model_blocks_before_chat(self) -> None:
         api = Mock()
         api.show.return_value.template = "{{ .Prompt }}"
@@ -410,6 +465,22 @@ class ChatTemplateTests(unittest.TestCase):
         with self.assertRaises(ValueError) as error:
             inspect_installed_model(api, "alpha:latest")
         self.assertIn("{{ .Prompt }}", str(error.exception))
+        self.assertFalse(api.chat.called)
+
+    def test_inspect_installed_model_blocks_cyberpal_jinja_metadata(self) -> None:
+        api = Mock()
+        api.show.return_value.template = (
+            "{#-\n  Harmony tokenizer.chat_template\n#}\n"
+            '{{- "<|start|>system<|message|>" }}\n'
+            "{%- for message in messages %}{{ message.content }}{% endfor %}\n"
+        )
+        api.show.return_value.modelfile = (
+            "FROM /tmp/weights\nTEMPLATE {{ .Prompt }}\nPARAMETER num_ctx 32768\n"
+        )
+        api.show.return_value.capabilities = ["completion", "thinking"]
+        with self.assertRaises(ValueError) as error:
+            inspect_installed_model(api, "cyberpal2:20b-bf16")
+        self.assertIn("Modelfile.cyberpal2-20b", str(error.exception))
         self.assertFalse(api.chat.called)
 
     def test_ollama_bare_prompt_drops_system_and_role_markers(self) -> None:

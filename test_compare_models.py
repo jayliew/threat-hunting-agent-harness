@@ -286,6 +286,24 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn("{{ .Prompt }}", str(error.exception))
         self.assertFalse(api.chat.called)
 
+    def test_cyberpal_jinja_metadata_fails_preflight_without_inference(self):
+        api = client()
+        api.list.return_value.models = [
+            SimpleNamespace(model="cyberpal2:20b-bf16", digest="digest-cyberpal"),
+        ]
+        api.show.return_value.template = (
+            "{#-\n  Harmony tokenizer.chat_template\n#}\n"
+            '{{- "<|start|>system<|message|>" }}\n'
+            "{%- for message in messages %}{{ message.content }}{% endfor %}\n"
+        )
+        api.show.return_value.modelfile = (
+            "FROM /tmp/weights\nTEMPLATE {{ .Prompt }}\n"
+        )
+        with self.assertRaises(ValueError) as error:
+            compare_models.prepare_comparison(api, ['cyberpal2:20b-bf16'], self.logs[:1])
+        self.assertIn("Modelfile.cyberpal2-20b", str(error.exception))
+        self.assertFalse(api.chat.called)
+
     def test_report_escapes_model_output(self):
         api = client()
         api.chat.return_value = response(ANSWER.replace('Normal activity.', '<script>alert("x")</script> & text'))

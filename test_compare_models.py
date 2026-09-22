@@ -249,6 +249,8 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('4 / 4 runs recorded', html)
         self.assertIn('TimeoutError', html)
         self.assertIn('e999', html)
+        self.assertIn('color-scheme:dark', html)
+        self.assertIn('background:#0f1419', html)
         self.assertTrue((directory / 'manifest.json').exists())
 
     def test_missing_models_reported_together_without_starting_run(self):

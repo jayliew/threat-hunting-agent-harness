@@ -28,6 +28,7 @@ from main import (
     native_context_length,
     resolve_log_path,
     run_hunt,
+    show_modelfile,
 )
 
 # Copy exact names from `ollama list`. These are never downloaded automatically.
@@ -35,6 +36,8 @@ MODELS = [
     "qwen3:32b",
     "mistral-small3.2:24b",
     "foundation-sec-8b-instruct",
+    # After: ollama create cyberpal2-20b -f Modelfile.cyberpal2-20b
+    # "cyberpal2-20b",
 ]
 DEFAULT_SCENARIO_LOGS = [
     "logs/password-spray.jsonl",
@@ -111,7 +114,9 @@ def prepare_comparison(client: Client, models: list[str], logs: list[str]) -> tu
             if capabilities and "completion" not in capabilities:
                 raise ValueError("model does not support text completion")
             template = info.template or ""
-            error = chat_template_error(canonical, template)
+            error = chat_template_error(
+                canonical, template, show_modelfile(info)
+            )
             if error:
                 raise ValueError(error)
             selected.append({

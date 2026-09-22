@@ -39,7 +39,9 @@ Let the installed model's [Ollama chat template](https://docs.ollama.com/modelfi
 
 The Hugging Face GGUF `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest` is that case. The GGUF has no `tokenizer.chat_template`, the Hub repo has no Ollama `template` file, and Ollama therefore installs `TEMPLATE {{ .Prompt }}`. That path sends only the user text. It omits `<|system|>`, `<|user|>`, and `<|assistant|>` from [`chat_template.jinja`](https://huggingface.co/fdtn-ai/Foundation-Sec-8B-Instruct/blob/main/chat_template.jinja), and it does not interpolate the harness system message. The weights are Llama 3.1–based, but this instruct checkpoint was not trained on Llama `<|start_header_id|>` headers; those tokens are still in the tokenizer and are the wrong framing. The script default is `foundation-sec-8b-instruct`, created from `Modelfile.foundation-sec-8b-instruct`.
 
-Before any chat call, both CLIs inspect the installed template via Ollama `/api/show` (the same data as `ollama show --template MODEL`). Inference does not start if the template is `{{ .Prompt }}`, has no `.Messages` loop and no role/turn markers, or, for Foundation-Sec names, is missing `<|system|>`, `<|user|>`, or `<|assistant|>`. Passing the raw `hf.co/...` import now exits with that error instead of hunting.
+`cyberpal2:20b-bf16` is the Harmony variant of the same import gap. CyberPal 2.0 is fine-tuned from `gpt-oss-20b`. The GGUF *does* embed OpenAI's Harmony `tokenizer.chat_template` as Hugging Face Jinja (`<|start|>` / `<|message|>` / `<|end|>`), so `ollama show --template` looks complete. `ollama show --modelfile` still reports `TEMPLATE {{ .Prompt }}`. Ollama executes that Go template, not the unused Jinja metadata, and the Harmony response parser stays off unless the Go template contains those tags. Create `cyberpal2-20b` from `Modelfile.cyberpal2-20b` before comparing; the raw import is rejected at preflight.
+
+Before any chat call, both CLIs inspect the installed template via Ollama `/api/show` (the same data as `ollama show --template MODEL`, plus the reconstructed Modelfile). Inference does not start if the executed Go template is `{{ .Prompt }}`, the shown blob is Hugging Face Jinja with no `.Messages` loop, there are no role/turn markers, a Foundation-Sec name is missing `<|system|>/<|user|>/<|assistant|>`, or a CyberPal name is missing Harmony `<|start|>` framing. Passing the raw `hf.co/...` or `cyberpal2:20b-bf16` import now exits with that error instead of hunting.
 
 The evidence serializer escapes `<`, `>`, and `&` using JSON Unicode escapes. This prevents a field containing `</security_events>` from literally ending the outer evidence block while preserving its exact decoded value. These delimiters are not a security boundary or a guarantee of instruction-following. Existing completion, output-format, and evidence-ID checks still apply. Prompt structure is tested offline; response quality and compatibility must be evaluated per installed model/template.
 
@@ -98,6 +100,12 @@ ollama create foundation-sec-8b-instruct -f Modelfile.foundation-sec-8b-instruct
 
 The pull installs `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest`. That name has no native chat template (`{{ .Prompt }}`). The `ollama create` step is required so the script default `foundation-sec-8b-instruct` sends `<|system|>`, `<|user|>`, and `<|assistant|>`. Any other installed name is fine; pass it with `--model`.
 
+If you already imported `cyberpal2:20b-bf16`, wrap it the same way. That name's GGUF Jinja is unused; chat still uses `{{ .Prompt }}`:
+
+```bash
+ollama create cyberpal2-20b -f Modelfile.cyberpal2-20b
+```
+
 3. From this repo, install Python deps and run a hunt. Default is the HTTP-beaconing file and `foundation-sec-8b-instruct`:
 
 ```bash
@@ -114,7 +122,7 @@ uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
 
 The script prints the model name, the installed chat template, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It exits with an error instead of looking like a successful hunt when:
 
-- the installed Ollama template cannot frame chat roles (`{{ .Prompt }}`, no `.Messages`/role markers, or a Foundation-Sec name without `<|system|>/<|user|>/<|assistant|>`)
+- the installed Ollama template cannot frame chat roles (`{{ .Prompt }}`, Hugging Face Jinja with no `.Messages` loop, no role/turn markers, a Foundation-Sec name without `<|system|>/<|user|>/<|assistant|>`, or a CyberPal name without Harmony `<|start|>` framing)
 - generation hits the token limit (`done_reason=length`) or returns empty content
 - a required section is missing or empty
 - the verdict is not `suspicious`, `benign`, or `inconclusive`
@@ -144,6 +152,7 @@ You can override the lists without editing code:
 
 ```bash
 uv run python compare_models.py --models qwen3:32b mistral-small3.2:24b --logs logs/password-spray.jsonl logs/http-beaconing.jsonl
+uv run python compare_models.py --models cyberpal2-20b --timeout 600 --output-dir results
 uv run python compare_models.py --models mistral-small3.2:24b --timeout 600 --output-dir results
 ```
 
@@ -172,6 +181,7 @@ uv run python -m unittest -v
 | `main.py` | Single-hunt CLI: prompt, log loading, one Ollama chat call (think only if supported), output and evidence-ID validation |
 | `compare_models.py` | Compare installed Ollama models across the same JSONL scenarios and write a report under `results/` |
 | `Modelfile.foundation-sec-8b-instruct` | Native `<|system|>/<|user|>/<|assistant|>` template for the Foundation-Sec GGUF import |
+| `Modelfile.cyberpal2-20b` | Native Harmony `<|start|>/<|message|>/<|end|>` template for the CyberPal 2.0 GGUF import |
 | `logs/password-spray.jsonl` | Optional demo: ECS login / password-spray events |
 | `logs/http-beaconing.jsonl` | Default demo: ECS HTTP beaconing among legitimate traffic |
 | `logs/internal-network-scan.jsonl` | Optional demo: ECS internal scanning among legitimate traffic |

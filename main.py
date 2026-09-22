@@ -193,12 +193,25 @@ def context_usage(
 
 
 FOUNDATION_SEC_MARKERS = ("<|system|>", "<|user|>", "<|assistant|>")
+HARMONY_MARKERS = ("<|start|>", "<|message|>", "<|end|>")
 CHAT_ROLE_MARKERS = FOUNDATION_SEC_MARKERS + (
     "<|im_start|>",
     "<|start_header_id|>",
     "[INST]",
     "<start_of_turn>",
 )
+TEMPLATE_PREVIEW_LIMIT = 400
+BARE_MODELFILE_TEMPLATE = re.compile(
+    r"(?m)^TEMPLATE\s+\{\{\s*\.Prompt\s*\}\}\s*$"
+)
+
+
+def template_preview(template: str | None) -> str:
+    """Short installed-template excerpt for errors; Jinja blobs are huge."""
+    installed = (template or "").strip() or "(empty)"
+    if len(installed) > TEMPLATE_PREVIEW_LIMIT:
+        return installed[:TEMPLATE_PREVIEW_LIMIT] + "…"
+    return installed
 
 
 def is_bare_prompt_template(template: str | None) -> bool:
@@ -207,37 +220,105 @@ def is_bare_prompt_template(template: str | None) -> bool:
     return collapsed in {"{{.Prompt}}", "{{.Prompt}}{{.Response}}", ""}
 
 
+def is_huggingface_jinja_template(template: str | None) -> bool:
+    """True when /api/show template is Hugging Face Jinja, not Ollama Go."""
+    text = template or ""
+    return "{%" in text or "{#-" in text
+
+
+def is_bare_modelfile_template(modelfile: str | None) -> bool:
+    """True when the Modelfile Go TEMPLATE Ollama executes is {{ .Prompt }}."""
+    return isinstance(modelfile, str) and bool(
+        BARE_MODELFILE_TEMPLATE.search(modelfile)
+    )
+
+
+def executed_chat_template(
+    template: str | None, modelfile: str | None = None
+) -> str:
+    """Return the Go template Ollama executes for chat rendering.
+
+    /api/show `template` can be GGUF tokenizer.chat_template (Hugging Face
+    Jinja) even when the Modelfile TEMPLATE is {{ .Prompt }}. Chat uses the
+    Go TEMPLATE, not the unused Jinja metadata.
+    """
+    if is_bare_modelfile_template(modelfile):
+        return "{{ .Prompt }}"
+    return template or ""
+
+
+def show_modelfile(info) -> str:
+    value = optional_field(info, "modelfile")
+    return value if isinstance(value, str) else ""
+
+
 def is_foundation_sec_model(model: str) -> bool:
     return "foundation-sec" in model.lower()
 
 
-def chat_template_error(model: str, template: str | None) -> str | None:
+def is_cyberpal_model(model: str) -> bool:
+    return "cyberpal" in model.lower()
+
+
+def chat_template_error(
+    model: str, template: str | None, modelfile: str | None = None
+) -> str | None:
     """Return an error if the installed Ollama template cannot frame this chat."""
-    text = template or ""
+    shown = template or ""
+    text = executed_chat_template(shown, modelfile)
+    preview = template_preview(shown)
     if is_foundation_sec_model(model):
         missing = [marker for marker in FOUNDATION_SEC_MARKERS if marker not in text]
         if missing:
-            installed = text.strip() or "(empty)"
             return (
                 f"Installed Ollama template for {model!r} is missing "
                 f"{', '.join(missing)}. Foundation-Sec-8B-Instruct expects "
                 "<|system|>, <|user|>, and <|assistant|>. Create a local model "
                 "from Modelfile.foundation-sec-8b-instruct before running. "
-                f"Installed template: {installed}"
+                f"Installed template: {preview}"
+            )
+        return None
+    if is_cyberpal_model(model):
+        if ".Messages" not in text or any(
+            marker not in text for marker in HARMONY_MARKERS
+        ):
+            return (
+                f"Installed Ollama template for {model!r} does not apply Harmony "
+                "chat framing. CyberPal 2.0 is fine-tuned from gpt-oss-20b and "
+                "expects <|start|> / <|message|> / <|end|> from an Ollama Go "
+                "template that ranges .Messages. /api/show may list the GGUF "
+                "Hugging Face Jinja chat_template, but chat rendering uses the "
+                "Modelfile TEMPLATE (often {{ .Prompt }}), which drops system "
+                "instructions. Create a local model from Modelfile.cyberpal2-20b "
+                f"before running. Installed template: {preview}"
             )
         return None
     if is_bare_prompt_template(text):
-        installed = text.strip() or "(empty)"
+        extra = ""
+        if is_huggingface_jinja_template(shown):
+            extra = (
+                " /api/show lists a Hugging Face Jinja chat_template, but the "
+                "installed Modelfile TEMPLATE is {{ .Prompt }} and will not apply it."
+            )
         return (
-            f"Installed Ollama template for {model!r} is {installed}. "
+            f"Installed Ollama template for {model!r} is {text}.{extra} "
             "This harness sends chat roles; {{ .Prompt }} sends only the user "
-            "text and drops system instructions."
+            "text and drops system instructions. "
+            f"Installed template: {preview}"
         )
-    if ".Messages" not in text and not any(marker in text for marker in CHAT_ROLE_MARKERS):
+    if is_huggingface_jinja_template(text) and ".Messages" not in text:
+        return (
+            f"Installed Ollama template for {model!r} is Hugging Face Jinja, not "
+            "an Ollama Go template that ranges .Messages, so chat framing will "
+            f"not be applied. Installed template: {preview}"
+        )
+    if ".Messages" not in text and not any(
+        marker in text for marker in CHAT_ROLE_MARKERS
+    ):
         return (
             f"Installed Ollama template for {model!r} has no role/turn markers "
             "and does not range .Messages, so chat framing will not be applied. "
-            f"Installed template: {text.strip()}"
+            f"Installed template: {preview}"
         )
     return None
 
@@ -247,7 +328,7 @@ def inspect_installed_model(client: Client, model: str) -> tuple[str, list[str]]
     info = client.show(model)
     template = info.template or ""
     capabilities = list(info.capabilities or [])
-    error = chat_template_error(model, template)
+    error = chat_template_error(model, template, show_modelfile(info))
     if error:
         raise ValueError(error)
     return template, capabilities
@@ -421,10 +502,12 @@ def run_hunt(
     }
     started = perf_counter()
     inspected_template = chat_template is not None
+    inspected_modelfile = ""
     try:
         if capabilities is None:
             info = client.show(model)
             capabilities = info.capabilities or []
+            inspected_modelfile = show_modelfile(info)
             if not inspected_template:
                 result["chat_template"] = info.template or ""
                 inspected_template = True
@@ -434,7 +517,9 @@ def run_hunt(
         result["capabilities"] = capabilities
         result["request"].update(chat_think_kwargs(THINK, capabilities))
         if inspected_template:
-            error = chat_template_error(model, result["chat_template"])
+            error = chat_template_error(
+                model, result["chat_template"], inspected_modelfile or None
+            )
             if error:
                 result["error"] = error
                 result["timing"]["wall_seconds"] = perf_counter() - started

@@ -149,7 +149,7 @@ uv run python compare_models.py --models mistral-small3.2:24b --timeout 600 --ou
 
 Log paths are relative to the script (or absolute); a supplied output directory is relative to your current working directory. Each invocation creates a unique US Eastern Time subdirectory named with dd-Mon-yyyy, weekday, and hh-mm am/pm (for example `20-Sep-2026-Sun_09-28am-ET`) containing:
 
-- `report.html`: open in a browser for a summary table and full answers side by side, grouped by case. Each model card and the summary table include quantization, thinking mode (enabled / disabled / not supported), context used vs allocated, and token counts (input, cached, uncached, output). Thinking traces can be expanded when present. Output and error text are HTML-escaped.
+- `report.html`: open in a browser for a dark-themed summary table and full answers side by side, grouped by case. Each model card and the summary table include quantization, thinking mode (enabled / disabled / not supported), context used vs allocated, and token counts (input, cached, uncached, output). Thinking traces can be expanded when present. Output and error text are HTML-escaped.
 - `results.jsonl`: one row per attempted model/case pair, saved immediately. Includes full raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages/options, prompt and input hashes, model digest, timings, token counts, and context allocated/used.
 - `manifest.json`: selected models (digest, capabilities, quantization, native context) plus shared request settings (`num_ctx`, `num_predict`, `think`) and input file identities. Pending cases remain visible in the report if the process is interrupted.
 

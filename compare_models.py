@@ -251,14 +251,14 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
     html = '''<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Threat hunt model comparison</title><style>
-*{box-sizing:border-box}body{margin:0;padding:32px;font:15px/1.6 system-ui,sans-serif;background:#f3f5f8;color:#172432}
+html{color-scheme:dark}*{box-sizing:border-box}body{margin:0;padding:32px;font:15px/1.6 system-ui,sans-serif;background:#0f1419;color:#e7edf3}
 main{max-width:1800px;margin:auto}h1{font-size:30px;margin-bottom:4px}h2{margin-top:36px;font-size:21px}
-h3{font-size:15px;overflow-wrap:anywhere}p{color:#445468}table{width:100%;border-collapse:collapse;background:white}
-th,td{text-align:left;padding:10px 14px;border-bottom:1px solid #dbe1e8}th{background:#e7edf3}
+h3{font-size:15px;overflow-wrap:anywhere}p{color:#9aa8b5}table{width:100%;border-collapse:collapse;background:#1a222c}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid #2e3a48}th{background:#222c38}
 .scroll{overflow:auto}.answers{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(300px,1fr);gap:16px;overflow-x:auto;padding-bottom:12px}
-article{padding:20px;border:1px solid #dbe1e8;border-radius:10px;background:white;min-width:0}
+article{padding:20px;border:1px solid #2e3a48;border-radius:10px;background:#1a222c;min-width:0}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,monospace}
-.ok{color:#13663f}.invalid,.error{color:#a12620}.pending{color:#586678}summary{cursor:pointer}
+.ok{color:#3dd68c}.invalid,.error{color:#f07178}.pending{color:#8b9aab}summary{cursor:pointer}
 @media(max-width:600px){body{padding:16px}.answers{grid-auto-flow:row;grid-template-columns:1fr}}
 </style></head><body><main>'''
     html += (f'<h1>Threat hunt model comparison</h1><p>{e(manifest["created_at"])} · '

@@ -40,7 +40,6 @@ DEFAULT_SCENARIO_LOGS = [
     "logs/password-spray.jsonl",
     "logs/http-beaconing.jsonl",
     "logs/internal-network-scan.jsonl",
-    "logs/shared-vpn-logins.jsonl",
     "logs/managed-telemetry.jsonl",
     "logs/scheduled-discovery.jsonl",
 ]

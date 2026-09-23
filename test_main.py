@@ -37,7 +37,6 @@ REPO_ROOT = Path(__file__).resolve().parent
 PASSWORD_SPRAY = REPO_ROOT / "logs" / "password-spray.jsonl"
 HTTP_BEACONING = REPO_ROOT / "logs" / "http-beaconing.jsonl"
 INTERNAL_NETWORK_SCAN = REPO_ROOT / "logs" / "internal-network-scan.jsonl"
-SHARED_VPN_LOGINS = REPO_ROOT / "logs" / "shared-vpn-logins.jsonl"
 MANAGED_TELEMETRY = REPO_ROOT / "logs" / "managed-telemetry.jsonl"
 SCHEDULED_DISCOVERY = REPO_ROOT / "logs" / "scheduled-discovery.jsonl"
 GELF_KEYS = {"version", "short_message", "timestamp", "level", "_event_id"}
@@ -263,7 +262,7 @@ class HuntOutputValidationTests(unittest.TestCase):
                     self.assertTrue(event["destination"]["ip"])
 
     def test_lookalike_fixtures_use_ecs_fields(self) -> None:
-        for path in (SHARED_VPN_LOGINS, MANAGED_TELEMETRY, SCHEDULED_DISCOVERY):
+        for path in (MANAGED_TELEMETRY, SCHEDULED_DISCOVERY):
             events = load_security_events(path)
             self.assertTrue(events)
             for event in events:

@@ -49,9 +49,9 @@ Use the [private MVP answer keys](evals/answer-keys.md) to grade all six cases m
 
 ### Password spray (`logs/password-spray.jsonl`)
 
-Fourteen synthetic [Elastic Common Schema](https://www.elastic.co/docs/reference/ecs) authentication documents from `auth-01.corp.internal`, one nested JSON object per line. `@timestamp` is ISO-8601 UTC. Cite `event.id` (`c04-e001` … `c04-e014`).
+Twenty-six synthetic [Elastic Common Schema](https://www.elastic.co/docs/reference/ecs) documents: fourteen password checks, one VPN tunnel, ten background MFA/session records, and a challenge after Bob's password success. `@timestamp` is ISO-8601 UTC. Cite `event.id` (`c04-e001` … `c04-e026`).
 
-All events concern password authentication to the same `employee-portal` service. The single suspicious sequence is six failures from `198.51.100.7` (a documentation IP) against six different accounts in 150 seconds (`c04-e005` … `c04-e010`), followed by a success for `bob` from that same source (`c04-e011`). The seven benign events are ordinary internal logins and two isolated failure-then-success pairs (`c04-e003`/`c04-e004` and `c04-e013`/`c04-e014`). The original times, users, source IPs, and authentication outcomes are preserved.
+The fourteen original password checks concern the same `employee-portal` service. The single suspicious sequence is six failures from `198.51.100.7` (a documentation IP) against six different accounts in 150 seconds (`c04-e005` … `c04-e010`), followed by a success for `bob` from that same source (`c04-e011`). The seven benign events are ordinary internal logins and two isolated failure-then-success pairs (`c04-e003`/`c04-e004` and `c04-e013`/`c04-e014`). The original times, users, source IPs, and authentication outcomes are preserved. Added VPN context binds the multi-account sequence to one device/tunnel authenticated as Morgan; it does not show six independent user devices. Background successes have FIDO2/session corroboration. Bob has a recorded MFA challenge, with no completed application session supplied.
 
 Ground truth for instructors (not present in the logs): the intended scenario is one password spray; verdict `suspicious`; attack-sequence evidence = `c04-e005` … `c04-e011`. The observable pattern is consistent with spraying and possible compromise. Because the logs do not record attempted passwords or credential provenance, they cannot prove password reuse, distinguish spraying conclusively from credential stuffing, or establish account takeover from the subsequent success alone. No passwords or attack labels are embedded in the events.
 
@@ -59,11 +59,11 @@ Use it to check whether the model:
 
 - recognizes the many-account, low-attempt-count pattern and treats the later success as suspicious
 - cites real `event.id` values and distinguishes observations from hypotheses
-- ignores the benign typo-and-retry noise
+- distinguishes background failure/retry/MFA sequences without inventing the cause of a password failure
 
 ### HTTP beaconing (`logs/http-beaconing.jsonl`)
 
-Default single-hunt file for `main.py`. Synthetic [ECS](https://www.elastic.co/docs/reference/ecs) JSONL (the nested document shape Filebeat/Logstash write into Elasticsearch). Each line is one firewall/proxy event. Cite `event.id` (`c01-e001` … `c01-e043`).
+Default single-hunt file for `main.py`. Synthetic [ECS](https://www.elastic.co/docs/reference/ecs) JSONL (the nested document shape Filebeat/Logstash write into Elasticsearch). Sixty events include proxy/firewall traffic, an applied deployment, two process starts and endpoint connections. Cite `event.id` (`c01-e001` … `c01-e060`). HTTP byte counts describe application headers plus body, not TLS wire totals.
 
 The hour of traffic mixes ordinary work with a low-and-slow HTTP check-in:
 
@@ -71,13 +71,16 @@ The hour of traffic mixes ordinary work with a low-and-slow HTTP check-in:
 - The same host also issues `GET /api/heartbeat` to `203.0.113.77:443` (a documentation IP, no hostname) about every 300 seconds with a few seconds of jitter, tiny stable byte counts, and an identical short user-agent. Those twelve events are `c01-e006`, `c01-e011`, `c01-e016`, `c01-e020`, `c01-e023`, `c01-e024`, `c01-e027`, `c01-e031`, `c01-e035`, `c01-e038`, `c01-e041`, and `c01-e043`.
 - Cover traffic that can look periodic if you only glance at timestamps: Windows Update from `asmith` / `ws-022` (large, variable bodies), Slack presence polls from `bnguyen` / `ws-008` (~15 minutes apart with high jitter and changing sizes), plus DNS, NTP, and SMB.
 
-Ground truth for instructors (not present in the logs): verdict `suspicious`, threat type HTTP/C2 beaconing, evidence = the twelve `event.id`s to `203.0.113.77`.
+Ground truth for instructors (not present in the logs): verdict `suspicious`, threat type HTTP/C2 beaconing, evidence = representative recurring `/api/heartbeat` requests plus their process attribution and the differing approved configuration. The approved service also contacts `203.0.113.77`, so the IP alone does not distinguish the two.
 
 Use it to check whether the model:
 
 - names beaconing (regular interval, low jitter, consistent small payloads, odd destination) rather than “lots of HTTPS”
 - cites those real `event.id` values
+- distinguishes the deployed service and its `/v1/status` check-in from the recurring requests made by a different executable/hash under an interactive user
 - ignores Update, Outlook, and Slack lookalikes
+
+The internal scan fixture likewise includes approval and job records, but its observed 14:30 UTC probes fall outside the supplied 15:30–15:40 window. All six fixtures contain collection metadata and custom context; see [collection semantics and scenario details](logs/README.md).
 
 ## How to run
 

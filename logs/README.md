@@ -1,10 +1,10 @@
-# ECS lookalike evidence packages
+# ECS evidence packages
 
-These three synthetic, selected evidence excerpts are intended to test false positives and evidence-based uncertainty. They are not full captures, authentic vendor exports, or proof that the surrounding environment is safe. All public IPs are documentation addresses; example.net names and organization-specific products are fictional. Filenames and these instructor notes are not sent to the model by the harness.
+These six synthetic, selected evidence excerpts test suspicious-pattern recognition, false positives and evidence-based uncertainty. Both classes include collection metadata and contextual evidence; context must be correlated with the activity rather than treated as a benign label. They are not full captures, authentic vendor exports, or proof that the surrounding environment is safe. All public IPs are documentation addresses; example.net names and organization-specific products are fictional. Filenames and these instructor notes are not sent to the model by the harness.
 
 ## Representation and collection semantics
 
-Each `.ecs.jsonl` line is one JSON event document using nested [Elastic Common Schema 8.17](https://www.elastic.co/guide/en/ecs/8.17/index.html) fields. These are document bodies, not Elasticsearch Bulk API action/document pairs; use a JSON/NDJSON ingestion pipeline and ECS-compatible mappings for Elasticsearch. No cluster or index setup is included.
+Each `.jsonl` line is one JSON event document using nested [Elastic Common Schema 8.17](https://www.elastic.co/guide/en/ecs/8.17/index.html) fields. These are document bodies, not Elasticsearch Bulk API action/document pairs; use a JSON/NDJSON ingestion pipeline and ECS-compatible mappings for Elasticsearch. No cluster or index setup is included.
 
 - `@timestamp`: UTC ISO 8601 occurrence time with milliseconds. For firewall flow summaries it is the flow end time; `event.start`, `event.end`, and `event.duration` supply the interval. Durations are integer **nanoseconds**.
 - `event.id`: short string in the form `c01-e001`, with a neutral case prefix and an event number. IDs are unique across the six files; prefixes do not encode the expected verdict. Keep existing IDs stable when reordering or extending a case. `event.created`: later collector read time. `event.category` and `event.type` are arrays. `event.outcome` describes the operation, not whether the activity is malicious.
@@ -12,7 +12,7 @@ Each `.ecs.jsonl` line is one JSON event document using nested [Elastic Common S
 - `event.dataset` identifies the simulated source; `observer` identifies the observing appliance or management system. `host` identifies the endpoint or server on which the recorded event occurred.
 - `http.request.bytes` and `http.response.bytes` count application headers plus body, excluding TCP/TLS overhead. A `204` has zero response-body bytes. The proxy records decrypted HTTPS transactions and explicitly records inspection under `corp.proxy.tls_inspected`.
 - Firewall `source.bytes` and `destination.bytes` count IP packet bytes, including IP/TCP headers, from initiator to responder and back. `network.bytes`/`network.packets` are directional totals. Endpoint connection-start records do not claim complete byte counts.
-- Custom, non-ECS fields live exclusively under `corp`. The `corp.vpn` and `corp.auth` objects contain identity/session/device-binding observations; `corp.deployment` contains applied package configuration; `corp.endpoint` contains a deployment reference; `corp.proxy` contains TLS inspection status; `corp.change`, `corp.asset`, and `corp.scan` contain approval, asset, and job records; `corp.flow` contains normalized state and observed TCP flag unions. These require custom mappings if indexed. The executable SHA-256 is a synthetic fixture value, not a real software reputation indicator.
+- Custom, non-ECS fields live exclusively under `corp`. The `corp.vpn` and `corp.auth` objects contain identity/session/device-binding observations; `corp.deployment` contains applied package configuration; `corp.endpoint` contains a deployment reference; `corp.proxy` contains TLS inspection status; `corp.change`, `corp.asset`, and `corp.scan` contain approval, asset, and job records; `corp.flow` contains normalized state and observed TCP flag unions. These require custom mappings if indexed. Executable SHA-256 values are synthetic fixture values, not real software reputation indicators.
 
 ## Evidence ID prefixes
 
@@ -26,6 +26,24 @@ Each `.ecs.jsonl` line is one JSON event document using nested [Elastic Common S
 | `shared-vpn-logins.ecs.jsonl` | `c06` |
 
 Cite IDs verbatim, for example `c01-e006`. Historical reports retain the IDs in their saved input; rerun the updated fixtures when comparing current evidence citations.
+
+## HTTP beaconing: `http-beaconing.jsonl`
+
+60 events: the original 43 traffic observations plus an applied deployment, two process starts, twelve endpoint connections for the recurring requests, and one endpoint/proxy pair for the deployed service. Existing event IDs, traffic timestamps and recurring-request pattern are preserved. HTTPS observations now use the same proxy schema as managed telemetry; former directional byte counts are explicitly HTTP application bytes.
+
+Expected assessment: **suspicious**, suspected beaconing. Deployment `c01-e044` and service `c01-e045` explain `/v1/status`, including the observed pair `c01-e059`/`c01-e060`. The twelve `/api/heartbeat` requests instead correlate to process `c01-e046` through connections `c01-e047`–`c01-e058`. It has the same basename but a different executable path/hash, user and parent. Neither deployment presence nor a familiar process name establishes legitimacy; these differences also do not prove malware.
+
+## Internal network scan: `internal-network-scan.jsonl`
+
+53 events: the original 49 flows plus approval, inventory, job-start and job-completion records. Original probe IDs, timestamps, scope and connection outcomes are retained. TCP observations are normalized under `corp.flow`; flow intervals use `event.start`/`event.end`/`event.duration`.
+
+Expected assessment: **suspicious**, scanning outside the supplied approval window. Approval `c02-e050` covers the same source, account, targets and ports at 15:30–15:40 UTC. Job `c02-e052` and the 32 probes occur around 14:30 UTC. Inventory and a job's change reference do not override the actual approval window. A scheduling error or another approval is possible; neither compromise nor malicious intent is proven.
+
+## Password spray: `password-spray.jsonl`
+
+26 events: fourteen original password checks, one authenticated VPN tunnel, five background FIDO2/session pairs, and a FIDO2 challenge after Bob's password success. Original password-check IDs, times, users, source addresses and outcomes are preserved. Authentication fields use the same dataset and semantics as shared VPN logins.
+
+Expected assessment: **suspicious**, a possible multi-account credential attack. The six target-account sequences reference one device/tunnel authenticated as Morgan (`c04-e015`), unlike the six independently authenticated devices in the benign case. VPN presence alone is insufficient to dismiss the pattern. Background MFA/session pairs are `c04-e016`–`c04-e025`; Bob's challenge is `c04-e026`, with no completion supplied. In authentication events `user` is the account being checked; in a VPN event it is the tunnel's authenticated identity. Device binding is independently observed and does not assert that the target user owns that device.
 
 ## Shared VPN logins: `shared-vpn-logins.ecs.jsonl`
 
@@ -57,4 +75,4 @@ See the [private answer keys for all six cases](../evals/answer-keys.md) for the
 
 Keep instructor expectations out of the model prompt. Score supporting and conflicting claims, evidence relevance, and uncertainty separately from output-format validity; do not require every event to be cited.
 
-ECS is the target representation for the entire suite. These additions are contextual lookalikes, not strictly matched counterfactual pairs. Normalized copies with context removed can test confidence changes, but label those variants according to the evidence actually retained. Event IDs and usernames can be varied without changing the intended interpretation.
+All six files now contain `event.created`, `event.dataset` and `corp` context. Both suspicious and benign cases contain operational context; the distinction depends on its relationship to the observed activity. This removes those field-presence shortcuts but does not make a six-case synthetic suite free of all presentation artifacts. ECS is the target representation for the entire suite. These additions are contextual lookalikes, not strictly matched counterfactual pairs. Normalized copies with context removed can test confidence changes, but label those variants according to the evidence actually retained. Event IDs and usernames can be varied without changing the intended interpretation.

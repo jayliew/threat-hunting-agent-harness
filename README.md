@@ -45,7 +45,7 @@ The evidence serializer escapes `<`, `>`, and `&` using JSON Unicode escapes. Th
 
 ## Demo scenarios
 
-Use the [private MVP answer keys](evals/answer-keys.md) to grade all five cases manually. They define expected assessments, supporting evidence, and unsupported claims; keep them out of the model prompt.
+Use the [private MVP answer keys](evals/answer-keys.md) to grade all six cases manually. They define expected assessments, supporting evidence, and unsupported claims; keep them out of the model prompt.
 
 ### Password spray (`logs/password-spray.jsonl`)
 
@@ -81,6 +81,14 @@ Use it to check whether the model:
 - ignores Update, Outlook, and Slack lookalikes
 
 The internal scan fixture likewise includes approval and job records, but its observed 14:30 UTC probes fall outside the supplied 15:30–15:40 window. All five fixtures contain collection metadata and custom context; see [collection semantics and scenario details](logs/README.md).
+
+### Endpoint process chain (`logs/endpoint-process-chain.jsonl`)
+
+Twenty-four synthetic Windows endpoint events test process ancestry, file-to-process correlation and scheduled-task persistence. Ordinary inventory PowerShell/task activity and Notepad editing provide background on the same host. The suspicious chain connects Word writing a script and launching PowerShell, a downloaded executable, task registration, and later task-launched execution of the same binary.
+
+Expected assessment is `suspicious`, with uncertainty about initial access, malware identity and subsequent payload behavior. The model must distinguish the user-level chain from the configured SYSTEM inventory workflow. See the [private endpoint answer key](evals/endpoint-answer-key.md); send only the JSONL to the model.
+
+Run this case alone with `uv run python compare_models.py --logs logs/endpoint-process-chain.jsonl`. It is also included in the default comparison suite. Event IDs use `c07`; retired case IDs are not reused.
 
 ## How to run
 
@@ -141,7 +149,7 @@ Edit the `MODELS` and `DEFAULT_SCENARIO_LOGS` lists at the top of `compare_model
 uv run python compare_models.py
 ```
 
-The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all five scenarios: password spray, HTTP beaconing, internal network scanning, managed telemetry (`logs/managed-telemetry.jsonl`), and scheduled discovery (`logs/scheduled-discovery.jsonl`): 15 runs. Use names from `ollama list`. All configured models and input files are checked before inference starts, including the installed Ollama chat template; missing models and models with unusable templates are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
+The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all six scenarios: password spray, HTTP beaconing, internal network scanning, managed telemetry (`logs/managed-telemetry.jsonl`), scheduled discovery (`logs/scheduled-discovery.jsonl`), and endpoint process-chain analysis (`logs/endpoint-process-chain.jsonl`): 18 runs. Use names from `ollama list`. All configured models and input files are checked before inference starts, including the installed Ollama chat template; missing models and models with unusable templates are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
 
 You can override the lists without editing code:
 

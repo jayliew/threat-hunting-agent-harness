@@ -1,6 +1,6 @@
 # MVP answer keys — human grading only
 
-These keys cover the five current ECS evidence packages. Keep this file out of model prompts. The harness sends the selected JSONL events; it does not load these keys. Grade only what the supplied events justify, not the author's hidden scenario intent.
+These keys cover the six current ECS evidence packages. Keep this file out of model prompts. The harness sends the selected JSONL events; it does not load these keys. Grade only what the supplied events justify, not the author's hidden scenario intent.
 
 ## How to grade
 
@@ -14,7 +14,7 @@ For each response, mark three checks **pass** or **fail**, with a short reason:
 
 Record output-format validity separately using the harness. An analytical case passes when all three checks pass. If the answer is invalid or truncated, record that execution/format failure; do not silently omit it from results. Model names can be hidden during grading to reduce bias.
 
-Expected verdicts below are the preferred assessments under the harness's definitions: `suspicious` means potentially malicious, not proven malicious; `benign` applies to the observed activity, not the entire environment. None of these five is designed as an inconclusive case. Review a well-supported alternative manually and record your reason; do not accept generic uncertainty as a substitute for analyzing the available context. Apply the same judgment to every model.
+Expected verdicts below are the preferred assessments under the harness's definitions: `suspicious` means potentially malicious, not proven malicious; `benign` applies to the observed activity, not the entire environment. None of these six is designed as an inconclusive case. Review a well-supported alternative manually and record your reason; do not accept generic uncertainty as a substitute for analyzing the available context. Apply the same judgment to every model.
 
 Exact wording is not required. Threat-type synonyms are acceptable. Counts and precise timing below are reference facts, not requirements to recite every number. Approximate timing is fine. A short paragraph can pass. Representative citations are sufficient when they support the stated relationships; models need not cite every listed event or reproduce an exact evidence set. Distinguish a benign alternative offered as a hypothesis from a benign explanation actually supported by records.
 
@@ -23,7 +23,7 @@ Suggested worksheet:
 | Model/configuration | Case | Format valid | Interpretation | Evidence | Restraint | Failure/review note |
 | --- | --- | --- | --- | --- | --- | --- |
 
-Run each case as a fresh conversation. To select all five from the repository directory, use `uv run python compare_models.py --logs logs/*.jsonl`. The default list may cover fewer cases. All records in a file belong to that case's independent scenario; do not join reused addresses across files.
+Run each case as a fresh conversation. To select all six from the repository directory, use `uv run python compare_models.py --logs logs/*.jsonl`. The default list may cover fewer cases. All records in a file belong to that case's independent scenario; do not join reused addresses across files.
 
 ## c01 — HTTP beaconing
 
@@ -104,3 +104,7 @@ Run each case as a fresh conversation. To select all five from the repository di
 **Appropriate uncertainty:** This observed activity matches the supplied authorization. Authorization for this job does not authorize arbitrary later activity or prove the source is uncompromised.
 
 **Must not claim:** Exploitation, successful authentication, malicious lateral movement, that every reset means a failed connection (some follow completed handshakes), or that connection failures mean the approved scan job failed.
+
+## c07 — Endpoint process chain
+
+See the [private endpoint answer key](endpoint-answer-key.md) for the 24-event case, decisive correlations, the same three-check rubric, unsupported claims and an example response. Expected verdict: `suspicious`. This case is included in the default comparison suite.

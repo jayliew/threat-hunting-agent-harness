@@ -1,13 +1,13 @@
 # ECS evidence packages
 
-These five synthetic, selected evidence excerpts test suspicious-pattern recognition, false positives and evidence-based uncertainty. Both classes include collection metadata and contextual evidence; context must be correlated with the activity rather than treated as a benign label. They are not full captures, authentic vendor exports, or proof that the surrounding environment is safe. All public IPs are documentation addresses; example.net names and organization-specific products are fictional. Filenames and these instructor notes are not sent to the model by the harness.
+These six synthetic, selected evidence excerpts test suspicious-pattern recognition, false positives and evidence-based uncertainty. Both classes include collection metadata and contextual evidence; context must be correlated with the activity rather than treated as a benign label. They are not full captures, authentic vendor exports, or proof that the surrounding environment is safe. All public IPs are documentation addresses; example.net names and organization-specific products are fictional. Filenames and these instructor notes are not sent to the model by the harness.
 
 ## Representation and collection semantics
 
 Each `.jsonl` line is one JSON event document using nested [Elastic Common Schema 8.17](https://www.elastic.co/guide/en/ecs/8.17/index.html) fields. These are document bodies, not Elasticsearch Bulk API action/document pairs; use a JSON/NDJSON ingestion pipeline and ECS-compatible mappings for Elasticsearch. No cluster or index setup is included.
 
 - `@timestamp`: UTC ISO 8601 occurrence time with milliseconds. For firewall flow summaries it is the flow end time; `event.start`, `event.end`, and `event.duration` supply the interval. Durations are integer **nanoseconds**.
-- `event.id`: short string in the form `c01-e001`, with a neutral case prefix and an event number. IDs are unique across the five files; prefixes do not encode the expected verdict. Keep existing IDs stable when reordering or extending a case. `event.created`: later collector read time. `event.category` and `event.type` are arrays. `event.outcome` describes the operation, not whether the activity is malicious.
+- `event.id`: short string in the form `c01-e001`, with a neutral case prefix and an event number. IDs are unique across the six files; prefixes do not encode the expected verdict. Keep existing IDs stable when reordering or extending a case. `event.created`: later collector read time. `event.category` and `event.type` are arrays. `event.outcome` describes the operation, not whether the activity is malicious.
 - Scan connection outcomes (`internal-network-scan.jsonl` and `scheduled-discovery.jsonl`) describe transport connection establishment or a UDP reply: `established`/`replied` → `success`; initial-SYN rejection (`reset`), `timeout`, or `incomplete` handshake → `failure`. Firewall permission is recorded separately by `event.action: allow` or `event.type: allowed`. A SYN/ACK without completion is not an established connection; a reset after a completed handshake does not undo successful establishment. A failed connection does not imply a failed scan job or malicious activity.
 - `event.dataset` identifies the simulated source; `observer` identifies the observing appliance or management system. `host` identifies the endpoint or server on which the recorded event occurred.
 - `http.request.bytes` and `http.response.bytes` count application headers plus body, excluding TCP/TLS overhead. A `204` has zero response-body bytes. The proxy records decrypted HTTPS transactions and explicitly records inspection under `corp.proxy.tls_inspected`.
@@ -23,6 +23,7 @@ Each `.jsonl` line is one JSON event document using nested [Elastic Common Schem
 | `managed-telemetry.jsonl` | `c03` |
 | `password-spray.jsonl` | `c04` |
 | `scheduled-discovery.jsonl` | `c05` |
+| `endpoint-process-chain.jsonl` | `c07` |
 
 Cite IDs verbatim, for example `c01-e006`. Historical reports retain the IDs in their saved input; rerun the updated fixtures when comparing current evidence citations.
 
@@ -60,10 +61,20 @@ Expected assessment: **benign**, threat type **none**, with the summary explicit
 
 Useful evidence includes approval, job start, representative flows across destinations/ports and job completion. Removing approval/execution context should leave scanning visible with authorization unknown. Changing the source, scope, account or time outside the approved window should change the assessment.
 
+## Endpoint process chain: `endpoint-process-chain.jsonl`
+
+24 events on one Windows workstation: applied inventory configuration, scheduler and interactive-shell process records, a normal inventory job, a document-launched execution chain, unrelated Notepad activity, task registration and a later task-launched process. Expected assessment: **suspicious**, document-launched execution with scheduled-task persistence.
+
+Correlate Word's process identity and created script with its PowerShell child; connect the script-block download URL/output path, endpoint/proxy connection tuple and created file; match the executable's path/hash to process creation; then connect the child `schtasks.exe`, registered task and later runtime process. The configured SYSTEM inventory workflow has a different script/task and is separate from the suspicious chain running as `CORP\jlee`.
+
+The simulated workstation and scheduler use UTC. Process entity IDs identify individual lifetimes; the later execution has a new entity ID but the same binary hash. `corp.powershell` contains observed script-block text, which alone does not prove execution succeeded. Separate file/process/network records supply corroboration. `corp.task` contains normalized task definitions and creator/runtime process correlations; these are synthetic collector enrichments, not a claim about native Windows export fields. Task registration and a later process are observed, but no reboot survival, executable completion, privilege escalation, malware identity, C2 or theft is established. The endpoint collector also records file reads to corroborate the inventory script hash.
+
+All hashes are fixture values and all recorded commands are inert data. This case is a basic endpoint sequence-analysis screen; use the [private answer key](../evals/endpoint-answer-key.md) to grade it without including the key in prompts. Case prefix `c07` remains stable; the retired `c06` prefix is not reassigned.
+
 ## Evaluation cautions
 
-See the [private answer keys for all five cases](../evals/answer-keys.md) for the three-check manual grading rubric and current evidence IDs.
+See the [private answer keys for all six cases](../evals/answer-keys.md) for the three-check manual grading rubric and current evidence IDs.
 
 Keep instructor expectations out of the model prompt. Score supporting and conflicting claims, evidence relevance, and uncertainty separately from output-format validity; do not require every event to be cited.
 
-All five files now contain `event.created`, `event.dataset` and `corp` context. Both suspicious and benign cases contain operational context; the distinction depends on its relationship to the observed activity. This removes those field-presence shortcuts but does not make a five-case synthetic suite free of all presentation artifacts. ECS is the target representation for the entire suite. These additions are contextual lookalikes, not strictly matched counterfactual pairs. Normalized copies with context removed can test confidence changes, but label those variants according to the evidence actually retained. Event IDs and usernames can be varied without changing the intended interpretation.
+All six files now contain `event.created`, `event.dataset` and `corp` context. Both suspicious and benign cases contain operational context; the distinction depends on its relationship to the observed activity. This removes those field-presence shortcuts but does not make a six-case synthetic suite free of all presentation artifacts. ECS is the target representation for the entire suite. These additions are contextual lookalikes, not strictly matched counterfactual pairs. Normalized copies with context removed can test confidence changes, but label those variants according to the evidence actually retained. Event IDs and usernames can be varied without changing the intended interpretation.

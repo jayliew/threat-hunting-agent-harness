@@ -8,7 +8,7 @@ Each `.jsonl` line is one JSON event document using nested [Elastic Common Schem
 
 - `@timestamp`: UTC ISO 8601 occurrence time with milliseconds. For firewall flow summaries it is the flow end time; `event.start`, `event.end`, and `event.duration` supply the interval. Durations are integer **nanoseconds**.
 - `event.id`: short string in the form `c01-e001`, with a neutral case prefix and an event number. IDs are unique across the six files; prefixes do not encode the expected verdict. Keep existing IDs stable when reordering or extending a case. `event.created`: later collector read time. `event.category` and `event.type` are arrays. `event.outcome` describes the operation, not whether the activity is malicious.
-- Scan connection outcomes (`internal-network-scan.jsonl` and `scheduled-discovery.ecs.jsonl`) describe transport connection establishment or a UDP reply: `established`/`replied` → `success`; initial-SYN rejection (`reset`), `timeout`, or `incomplete` handshake → `failure`. Firewall permission is recorded separately by `event.action: allow` or `event.type: allowed`. A SYN/ACK without completion is not an established connection; a reset after a completed handshake does not undo successful establishment. A failed connection does not imply a failed scan job or malicious activity.
+- Scan connection outcomes (`internal-network-scan.jsonl` and `scheduled-discovery.jsonl`) describe transport connection establishment or a UDP reply: `established`/`replied` → `success`; initial-SYN rejection (`reset`), `timeout`, or `incomplete` handshake → `failure`. Firewall permission is recorded separately by `event.action: allow` or `event.type: allowed`. A SYN/ACK without completion is not an established connection; a reset after a completed handshake does not undo successful establishment. A failed connection does not imply a failed scan job or malicious activity.
 - `event.dataset` identifies the simulated source; `observer` identifies the observing appliance or management system. `host` identifies the endpoint or server on which the recorded event occurred.
 - `http.request.bytes` and `http.response.bytes` count application headers plus body, excluding TCP/TLS overhead. A `204` has zero response-body bytes. The proxy records decrypted HTTPS transactions and explicitly records inspection under `corp.proxy.tls_inspected`.
 - Firewall `source.bytes` and `destination.bytes` count IP packet bytes, including IP/TCP headers, from initiator to responder and back. `network.bytes`/`network.packets` are directional totals. Endpoint connection-start records do not claim complete byte counts.
@@ -20,10 +20,10 @@ Each `.jsonl` line is one JSON event document using nested [Elastic Common Schem
 | --- | --- |
 | `http-beaconing.jsonl` | `c01` |
 | `internal-network-scan.jsonl` | `c02` |
-| `managed-telemetry.ecs.jsonl` | `c03` |
+| `managed-telemetry.jsonl` | `c03` |
 | `password-spray.jsonl` | `c04` |
-| `scheduled-discovery.ecs.jsonl` | `c05` |
-| `shared-vpn-logins.ecs.jsonl` | `c06` |
+| `scheduled-discovery.jsonl` | `c05` |
+| `shared-vpn-logins.jsonl` | `c06` |
 
 Cite IDs verbatim, for example `c01-e006`. Historical reports retain the IDs in their saved input; rerun the updated fixtures when comparing current evidence citations.
 
@@ -45,7 +45,7 @@ Expected assessment: **suspicious**, scanning outside the supplied approval wind
 
 Expected assessment: **suspicious**, a possible multi-account credential attack. The six target-account sequences reference one device/tunnel authenticated as Morgan (`c04-e015`), unlike the six independently authenticated devices in the benign case. VPN presence alone is insufficient to dismiss the pattern. Background MFA/session pairs are `c04-e016`–`c04-e025`; Bob's challenge is `c04-e026`, with no completion supplied. In authentication events `user` is the account being checked; in a VPN event it is the tunnel's authenticated identity. Device binding is independently observed and does not assert that the target user owns that device.
 
-## Shared VPN logins: `shared-vpn-logins.ecs.jsonl`
+## Shared VPN logins: `shared-vpn-logins.jsonl`
 
 30 events: six device-bound VPN tunnel establishments, six password failures, six successful retries, six FIDO2 validations, and six application-session issuances. Six users appear behind `198.51.100.7`; first failures span 151.4 seconds. Each retries from the same device/session after 8.9–26.1 seconds.
 
@@ -53,7 +53,7 @@ Expected assessment: **benign**, threat type **none**, for the supplied excerpt.
 
 Useful evidence includes VPN records plus representative password/MFA/session sequences. A model should acknowledge that shared egress and MFA do not categorically exclude abuse. Removing the corroborating identity records should reduce confidence; it does not necessarily force a suspicious verdict.
 
-## Managed telemetry: `managed-telemetry.ecs.jsonl`
+## Managed telemetry: `managed-telemetry.jsonl`
 
 28 events: an applied deployment policy, service process start, twelve endpoint connections, twelve proxy transactions, and two unrelated browsing transactions. The check-ins go to the literal IP `203.0.113.77:443` using `/v1/status`, about every five minutes, with small requests and `204` responses.
 
@@ -61,7 +61,7 @@ Expected assessment: **benign**, threat type **none**, for the supplied excerpt.
 
 Useful evidence includes the deployment, service start, and multiple endpoint/proxy pairs. The records support the configured telemetry explanation; they do not prove a trusted process could never be compromised. Removing deployment/process evidence leaves potentially suspicious or inconclusive periodic HTTPS activity.
 
-## Scheduled discovery: `scheduled-discovery.ecs.jsonl`
+## Scheduled discovery: `scheduled-discovery.jsonl`
 
 39 events: approved change, asset inventory snapshot, scan-job start, 32 scan flows, three unrelated flows, and scan-job completion. `10.47.12.66` contacts eight destinations (`10.47.20.20`–`10.47.20.27`) on ports 22, 445, 3389 and 5985. Four connects succeed, 20 receive resets, and eight time out. Successful probes model a TCP connect followed by reset; closed-port and timeout packet counts are separate.
 

@@ -40,9 +40,9 @@ DEFAULT_SCENARIO_LOGS = [
     "logs/password-spray.jsonl",
     "logs/http-beaconing.jsonl",
     "logs/internal-network-scan.jsonl",
-    "logs/shared-vpn-logins.ecs.jsonl",
-    "logs/managed-telemetry.ecs.jsonl",
-    "logs/scheduled-discovery.ecs.jsonl",
+    "logs/shared-vpn-logins.jsonl",
+    "logs/managed-telemetry.jsonl",
+    "logs/scheduled-discovery.jsonl",
 ]
 OUTPUT_ROOT = Path(__file__).parent / "results"
 EASTERN = ZoneInfo("America/New_York")

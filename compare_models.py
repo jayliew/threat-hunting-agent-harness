@@ -42,6 +42,7 @@ DEFAULT_SCENARIO_LOGS = [
     "logs/internal-network-scan.jsonl",
     "logs/managed-telemetry.jsonl",
     "logs/scheduled-discovery.jsonl",
+    "logs/endpoint-process-chain.jsonl",
 ]
 OUTPUT_ROOT = Path(__file__).parent / "results"
 EASTERN = ZoneInfo("America/New_York")

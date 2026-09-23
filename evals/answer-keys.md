@@ -1,6 +1,6 @@
 # MVP answer keys — human grading only
 
-These keys cover the six current ECS evidence packages. Keep this file out of model prompts. The harness sends the selected JSONL events; it does not load these keys. Grade only what the supplied events justify, not the author's hidden scenario intent.
+These keys cover the five current ECS evidence packages. Keep this file out of model prompts. The harness sends the selected JSONL events; it does not load these keys. Grade only what the supplied events justify, not the author's hidden scenario intent.
 
 ## How to grade
 
@@ -14,7 +14,7 @@ For each response, mark three checks **pass** or **fail**, with a short reason:
 
 Record output-format validity separately using the harness. An analytical case passes when all three checks pass. If the answer is invalid or truncated, record that execution/format failure; do not silently omit it from results. Model names can be hidden during grading to reduce bias.
 
-Expected verdicts below are the preferred assessments under the harness's definitions: `suspicious` means potentially malicious, not proven malicious; `benign` applies to the observed activity, not the entire environment. None of these six is designed as an inconclusive case. Review a well-supported alternative manually and record your reason; do not accept generic uncertainty as a substitute for analyzing the available context. Apply the same judgment to every model.
+Expected verdicts below are the preferred assessments under the harness's definitions: `suspicious` means potentially malicious, not proven malicious; `benign` applies to the observed activity, not the entire environment. None of these five is designed as an inconclusive case. Review a well-supported alternative manually and record your reason; do not accept generic uncertainty as a substitute for analyzing the available context. Apply the same judgment to every model.
 
 Exact wording is not required. Threat-type synonyms are acceptable. Counts and precise timing below are reference facts, not requirements to recite every number. Approximate timing is fine. A short paragraph can pass. Representative citations are sufficient when they support the stated relationships; models need not cite every listed event or reproduce an exact evidence set. Distinguish a benign alternative offered as a hypothesis from a benign explanation actually supported by records.
 
@@ -23,7 +23,7 @@ Suggested worksheet:
 | Model/configuration | Case | Format valid | Interpretation | Evidence | Restraint | Failure/review note |
 | --- | --- | --- | --- | --- | --- | --- |
 
-Run each case as a fresh conversation. To select all six from the repository directory, use `uv run python compare_models.py --logs logs/*.jsonl`. The default list may cover fewer cases. All records in a file belong to that case's independent scenario; do not join reused addresses across files.
+Run each case as a fresh conversation. To select all five from the repository directory, use `uv run python compare_models.py --logs logs/*.jsonl`. The default list may cover fewer cases. All records in a file belong to that case's independent scenario; do not join reused addresses across files.
 
 ## c01 — HTTP beaconing
 
@@ -79,7 +79,7 @@ Run each case as a fresh conversation. To select all six from the repository dir
 
 **Expected verdict:** `suspicious`. **Threat type:** suspected password spraying or an automated multi-account credential attack. A cautious broader label is acceptable if the many-account pattern is recognized.
 
-**Must notice:** One source (`198.51.100.7`) fails against six different users, then authenticates successfully as Bob. Distinguish this from isolated same-user failure/retry pairs. VPN context is present, but all six target-account sequences bind to one device and tunnel authenticated as Morgan, rather than six separately authenticated user devices.
+**Must notice:** One source (`198.51.100.7`) fails against six different users, then authenticates successfully as Bob. Distinguish this from isolated same-user failure/retry pairs. VPN context is present, but all six target-account sequences bind to one device and tunnel authenticated as Morgan.
 
 **Reference facts:** One failure each for Alice, Bob, Carol, Dave, Erin and Frank, 30 seconds apart over 150 seconds. Bob's subsequent success occurs 90 seconds after the last failure, from the same source. This pattern differs from high-volume guessing against a single account. `c04-e015` records the Morgan tunnel (`vpn-session-810`, `endpoint-130`) and shared egress. Five background successes have corresponding FIDO2/session records (`c04-e016` through `c04-e025`). Bob receives a FIDO2 challenge (`c04-e026`); no completed MFA or application-session issuance for that sequence is supplied.
 
@@ -104,19 +104,3 @@ Run each case as a fresh conversation. To select all six from the repository dir
 **Appropriate uncertainty:** This observed activity matches the supplied authorization. Authorization for this job does not authorize arbitrary later activity or prove the source is uncompromised.
 
 **Must not claim:** Exploitation, successful authentication, malicious lateral movement, that every reset means a failed connection (some follow completed handshakes), or that connection failures mean the approved scan job failed.
-
-## c06 — Shared VPN logins
-
-**Input:** [shared-vpn-logins.jsonl](../logs/shared-vpn-logins.jsonl) — 30 events.
-
-**Expected verdict:** `benign`. **Threat type:** `none`; explain shared egress and individual retry/session sequences.
-
-**Must notice:** The public source `198.51.100.7` represents several separate device-bound VPN sessions. Each user's failed password check is followed by a successful retry, registered FIDO2 verification and session issuance, tied to the same user/device/session. A single public IP does not imply one actor.
-
-**Reference facts:** Six tunnel records, six failures, six successful password retries, six FIDO2 verifications, and six issued sessions. The first failures span 151.4 seconds. Password retries occur 8.9–26.1 seconds later. VPN records supply the egress IP, device identity and tunnel session referenced by the authentication records.
-
-**Supporting evidence:** `c06-e001` with `c06-e007`, `c06-e008`, `c06-e009`, `c06-e010` shows Erin's tunnel and login sequence. `c06-e002` with `c06-e011`, `c06-e012`, `c06-e013`, `c06-e014` shows Bob's separate tunnel and login sequence. Equivalent sequences for other users are acceptable. Cite enough evidence to establish both separate identities behind the shared IP and successful completion of the observed authentication flow.
-
-**Appropriate uncertainty:** The pattern is consistent with ordinary retries behind shared egress. The actual cause of each failure (such as a typo) is not recorded. MFA and verified device bindings support the explanation but do not categorically exclude abuse.
-
-**Must not claim:** Confirmed spraying solely from shared IP, that MFA proves absence of compromise, password reuse, observed password typos, or that successful password validation alone issued a fully authenticated application session.

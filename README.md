@@ -45,13 +45,13 @@ The evidence serializer escapes `<`, `>`, and `&` using JSON Unicode escapes. Th
 
 ## Demo scenarios
 
-Use the [private MVP answer keys](evals/answer-keys.md) to grade all six cases manually. They define expected assessments, supporting evidence, and unsupported claims; keep them out of the model prompt.
+Use the [private MVP answer keys](evals/answer-keys.md) to grade all five cases manually. They define expected assessments, supporting evidence, and unsupported claims; keep them out of the model prompt.
 
 ### Password spray (`logs/password-spray.jsonl`)
 
 Twenty-six synthetic [Elastic Common Schema](https://www.elastic.co/docs/reference/ecs) documents: fourteen password checks, one VPN tunnel, ten background MFA/session records, and a challenge after Bob's password success. `@timestamp` is ISO-8601 UTC. Cite `event.id` (`c04-e001` … `c04-e026`).
 
-The fourteen original password checks concern the same `employee-portal` service. The single suspicious sequence is six failures from `198.51.100.7` (a documentation IP) against six different accounts in 150 seconds (`c04-e005` … `c04-e010`), followed by a success for `bob` from that same source (`c04-e011`). The seven benign events are ordinary internal logins and two isolated failure-then-success pairs (`c04-e003`/`c04-e004` and `c04-e013`/`c04-e014`). The original times, users, source IPs, and authentication outcomes are preserved. Added VPN context binds the multi-account sequence to one device/tunnel authenticated as Morgan; it does not show six independent user devices. Background successes have FIDO2/session corroboration. Bob has a recorded MFA challenge, with no completed application session supplied.
+The fourteen original password checks concern the same `employee-portal` service. The single suspicious sequence is six failures from `198.51.100.7` (a documentation IP) against six different accounts in 150 seconds (`c04-e005` … `c04-e010`), followed by a success for `bob` from that same source (`c04-e011`). The seven benign events are ordinary internal logins and two isolated failure-then-success pairs (`c04-e003`/`c04-e004` and `c04-e013`/`c04-e014`). The original times, users, source IPs, and authentication outcomes are preserved. Added VPN context binds the multi-account sequence to one device/tunnel authenticated as Morgan. Background successes have FIDO2/session corroboration. Bob has a recorded MFA challenge, with no completed application session supplied.
 
 Ground truth for instructors (not present in the logs): the intended scenario is one password spray; verdict `suspicious`; attack-sequence evidence = `c04-e005` … `c04-e011`. The observable pattern is consistent with spraying and possible compromise. Because the logs do not record attempted passwords or credential provenance, they cannot prove password reuse, distinguish spraying conclusively from credential stuffing, or establish account takeover from the subsequent success alone. No passwords or attack labels are embedded in the events.
 
@@ -80,7 +80,7 @@ Use it to check whether the model:
 - distinguishes the deployed service and its `/v1/status` check-in from the recurring requests made by a different executable/hash under an interactive user
 - ignores Update, Outlook, and Slack lookalikes
 
-The internal scan fixture likewise includes approval and job records, but its observed 14:30 UTC probes fall outside the supplied 15:30–15:40 window. All six fixtures contain collection metadata and custom context; see [collection semantics and scenario details](logs/README.md).
+The internal scan fixture likewise includes approval and job records, but its observed 14:30 UTC probes fall outside the supplied 15:30–15:40 window. All five fixtures contain collection metadata and custom context; see [collection semantics and scenario details](logs/README.md).
 
 ## How to run
 
@@ -141,7 +141,7 @@ Edit the `MODELS` and `DEFAULT_SCENARIO_LOGS` lists at the top of `compare_model
 uv run python compare_models.py
 ```
 
-The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all six scenarios: password spray, HTTP beaconing, internal network scanning, shared VPN logins (`logs/shared-vpn-logins.jsonl`), managed telemetry (`logs/managed-telemetry.jsonl`), and scheduled discovery (`logs/scheduled-discovery.jsonl`): 18 runs. Use names from `ollama list`. All configured models and input files are checked before inference starts, including the installed Ollama chat template; missing models and models with unusable templates are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
+The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all five scenarios: password spray, HTTP beaconing, internal network scanning, managed telemetry (`logs/managed-telemetry.jsonl`), and scheduled discovery (`logs/scheduled-discovery.jsonl`): 15 runs. Use names from `ollama list`. All configured models and input files are checked before inference starts, including the installed Ollama chat template; missing models and models with unusable templates are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
 
 You can override the lists without editing code:
 
@@ -178,7 +178,6 @@ uv run python -m unittest -v
 | `logs/password-spray.jsonl` | Optional demo: ECS login / password-spray events |
 | `logs/http-beaconing.jsonl` | Default demo: ECS HTTP beaconing among legitimate traffic |
 | `logs/internal-network-scan.jsonl` | Optional demo: ECS internal scanning among legitimate traffic |
-| `logs/shared-vpn-logins.jsonl` | Optional demo: ECS shared-VPN logins that look like spraying |
 | `logs/managed-telemetry.jsonl` | Optional demo: ECS managed check-ins that look like beaconing |
 | `logs/scheduled-discovery.jsonl` | Optional demo: ECS authorized scanning that looks like an internal scan |
 | `test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |

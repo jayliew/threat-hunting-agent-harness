@@ -1,13 +1,13 @@
 # ECS evidence packages
 
-These six synthetic, selected evidence excerpts test suspicious-pattern recognition, false positives and evidence-based uncertainty. Both classes include collection metadata and contextual evidence; context must be correlated with the activity rather than treated as a benign label. They are not full captures, authentic vendor exports, or proof that the surrounding environment is safe. All public IPs are documentation addresses; example.net names and organization-specific products are fictional. Filenames and these instructor notes are not sent to the model by the harness.
+These five synthetic, selected evidence excerpts test suspicious-pattern recognition, false positives and evidence-based uncertainty. Both classes include collection metadata and contextual evidence; context must be correlated with the activity rather than treated as a benign label. They are not full captures, authentic vendor exports, or proof that the surrounding environment is safe. All public IPs are documentation addresses; example.net names and organization-specific products are fictional. Filenames and these instructor notes are not sent to the model by the harness.
 
 ## Representation and collection semantics
 
 Each `.jsonl` line is one JSON event document using nested [Elastic Common Schema 8.17](https://www.elastic.co/guide/en/ecs/8.17/index.html) fields. These are document bodies, not Elasticsearch Bulk API action/document pairs; use a JSON/NDJSON ingestion pipeline and ECS-compatible mappings for Elasticsearch. No cluster or index setup is included.
 
 - `@timestamp`: UTC ISO 8601 occurrence time with milliseconds. For firewall flow summaries it is the flow end time; `event.start`, `event.end`, and `event.duration` supply the interval. Durations are integer **nanoseconds**.
-- `event.id`: short string in the form `c01-e001`, with a neutral case prefix and an event number. IDs are unique across the six files; prefixes do not encode the expected verdict. Keep existing IDs stable when reordering or extending a case. `event.created`: later collector read time. `event.category` and `event.type` are arrays. `event.outcome` describes the operation, not whether the activity is malicious.
+- `event.id`: short string in the form `c01-e001`, with a neutral case prefix and an event number. IDs are unique across the five files; prefixes do not encode the expected verdict. Keep existing IDs stable when reordering or extending a case. `event.created`: later collector read time. `event.category` and `event.type` are arrays. `event.outcome` describes the operation, not whether the activity is malicious.
 - Scan connection outcomes (`internal-network-scan.jsonl` and `scheduled-discovery.jsonl`) describe transport connection establishment or a UDP reply: `established`/`replied` → `success`; initial-SYN rejection (`reset`), `timeout`, or `incomplete` handshake → `failure`. Firewall permission is recorded separately by `event.action: allow` or `event.type: allowed`. A SYN/ACK without completion is not an established connection; a reset after a completed handshake does not undo successful establishment. A failed connection does not imply a failed scan job or malicious activity.
 - `event.dataset` identifies the simulated source; `observer` identifies the observing appliance or management system. `host` identifies the endpoint or server on which the recorded event occurred.
 - `http.request.bytes` and `http.response.bytes` count application headers plus body, excluding TCP/TLS overhead. A `204` has zero response-body bytes. The proxy records decrypted HTTPS transactions and explicitly records inspection under `corp.proxy.tls_inspected`.
@@ -23,7 +23,6 @@ Each `.jsonl` line is one JSON event document using nested [Elastic Common Schem
 | `managed-telemetry.jsonl` | `c03` |
 | `password-spray.jsonl` | `c04` |
 | `scheduled-discovery.jsonl` | `c05` |
-| `shared-vpn-logins.jsonl` | `c06` |
 
 Cite IDs verbatim, for example `c01-e006`. Historical reports retain the IDs in their saved input; rerun the updated fixtures when comparing current evidence citations.
 
@@ -41,17 +40,9 @@ Expected assessment: **suspicious**, scanning outside the supplied approval wind
 
 ## Password spray: `password-spray.jsonl`
 
-26 events: fourteen original password checks, one authenticated VPN tunnel, five background FIDO2/session pairs, and a FIDO2 challenge after Bob's password success. Original password-check IDs, times, users, source addresses and outcomes are preserved. Authentication fields use the same dataset and semantics as shared VPN logins.
+26 events: fourteen original password checks, one authenticated VPN tunnel, five background FIDO2/session pairs, and a FIDO2 challenge after Bob's password success. Original password-check IDs, times, users, source addresses and outcomes are preserved.
 
-Expected assessment: **suspicious**, a possible multi-account credential attack. The six target-account sequences reference one device/tunnel authenticated as Morgan (`c04-e015`), unlike the six independently authenticated devices in the benign case. VPN presence alone is insufficient to dismiss the pattern. Background MFA/session pairs are `c04-e016`–`c04-e025`; Bob's challenge is `c04-e026`, with no completion supplied. In authentication events `user` is the account being checked; in a VPN event it is the tunnel's authenticated identity. Device binding is independently observed and does not assert that the target user owns that device.
-
-## Shared VPN logins: `shared-vpn-logins.jsonl`
-
-30 events: six device-bound VPN tunnel establishments, six password failures, six successful retries, six FIDO2 validations, and six application-session issuances. Six users appear behind `198.51.100.7`; first failures span 151.4 seconds. Each retries from the same device/session after 8.9–26.1 seconds.
-
-Expected assessment: **benign**, threat type **none**, for the supplied excerpt. Many accounts sharing a source address resembles spraying. The explanation requires VPN egress mappings, distinct verified devices and tunnel sessions, per-user retry sequences, and registered FIDO2 verification before application sessions are issued. A source address alone must not be treated as a single actor. Successful password validation alone is not a fully authenticated session.
-
-Useful evidence includes VPN records plus representative password/MFA/session sequences. A model should acknowledge that shared egress and MFA do not categorically exclude abuse. Removing the corroborating identity records should reduce confidence; it does not necessarily force a suspicious verdict.
+Expected assessment: **suspicious**, a possible multi-account credential attack. The six target-account sequences reference one device/tunnel authenticated as Morgan (`c04-e015`). VPN presence alone is insufficient to dismiss the pattern. Background MFA/session pairs are `c04-e016`–`c04-e025`; Bob's challenge is `c04-e026`, with no completion supplied. In authentication events `user` is the account being checked; in a VPN event it is the tunnel's authenticated identity. Device binding is independently observed and does not assert that the target user owns that device.
 
 ## Managed telemetry: `managed-telemetry.jsonl`
 
@@ -71,8 +62,8 @@ Useful evidence includes approval, job start, representative flows across destin
 
 ## Evaluation cautions
 
-See the [private answer keys for all six cases](../evals/answer-keys.md) for the three-check manual grading rubric and current evidence IDs.
+See the [private answer keys for all five cases](../evals/answer-keys.md) for the three-check manual grading rubric and current evidence IDs.
 
 Keep instructor expectations out of the model prompt. Score supporting and conflicting claims, evidence relevance, and uncertainty separately from output-format validity; do not require every event to be cited.
 
-All six files now contain `event.created`, `event.dataset` and `corp` context. Both suspicious and benign cases contain operational context; the distinction depends on its relationship to the observed activity. This removes those field-presence shortcuts but does not make a six-case synthetic suite free of all presentation artifacts. ECS is the target representation for the entire suite. These additions are contextual lookalikes, not strictly matched counterfactual pairs. Normalized copies with context removed can test confidence changes, but label those variants according to the evidence actually retained. Event IDs and usernames can be varied without changing the intended interpretation.
+All five files now contain `event.created`, `event.dataset` and `corp` context. Both suspicious and benign cases contain operational context; the distinction depends on its relationship to the observed activity. This removes those field-presence shortcuts but does not make a five-case synthetic suite free of all presentation artifacts. ECS is the target representation for the entire suite. These additions are contextual lookalikes, not strictly matched counterfactual pairs. Normalized copies with context removed can test confidence changes, but label those variants according to the evidence actually retained. Event IDs and usernames can be varied without changing the intended interpretation.

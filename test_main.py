@@ -37,9 +37,9 @@ REPO_ROOT = Path(__file__).resolve().parent
 PASSWORD_SPRAY = REPO_ROOT / "logs" / "password-spray.jsonl"
 HTTP_BEACONING = REPO_ROOT / "logs" / "http-beaconing.jsonl"
 INTERNAL_NETWORK_SCAN = REPO_ROOT / "logs" / "internal-network-scan.jsonl"
-SHARED_VPN_LOGINS = REPO_ROOT / "logs" / "shared-vpn-logins.ecs.jsonl"
-MANAGED_TELEMETRY = REPO_ROOT / "logs" / "managed-telemetry.ecs.jsonl"
-SCHEDULED_DISCOVERY = REPO_ROOT / "logs" / "scheduled-discovery.ecs.jsonl"
+SHARED_VPN_LOGINS = REPO_ROOT / "logs" / "shared-vpn-logins.jsonl"
+MANAGED_TELEMETRY = REPO_ROOT / "logs" / "managed-telemetry.jsonl"
+SCHEDULED_DISCOVERY = REPO_ROOT / "logs" / "scheduled-discovery.jsonl"
 GELF_KEYS = {"version", "short_message", "timestamp", "level", "_event_id"}
 
 

@@ -59,7 +59,7 @@ Run each case as a fresh conversation. To select all six from the repository dir
 
 ## c03 — Managed telemetry
 
-**Input:** [managed-telemetry.ecs.jsonl](../logs/managed-telemetry.ecs.jsonl) — 28 events.
+**Input:** [managed-telemetry.jsonl](../logs/managed-telemetry.jsonl) — 28 events.
 
 **Expected verdict:** `benign`. **Threat type:** `none`; describe managed telemetry in the summary.
 
@@ -91,7 +91,7 @@ Run each case as a fresh conversation. To select all six from the repository dir
 
 ## c05 — Scheduled discovery
 
-**Input:** [scheduled-discovery.ecs.jsonl](../logs/scheduled-discovery.ecs.jsonl) — 39 events.
+**Input:** [scheduled-discovery.jsonl](../logs/scheduled-discovery.jsonl) — 39 events.
 
 **Expected verdict:** `benign`. **Threat type:** `none`; explicitly recognize authorized scanning in the summary.
 
@@ -107,7 +107,7 @@ Run each case as a fresh conversation. To select all six from the repository dir
 
 ## c06 — Shared VPN logins
 
-**Input:** [shared-vpn-logins.ecs.jsonl](../logs/shared-vpn-logins.ecs.jsonl) — 30 events.
+**Input:** [shared-vpn-logins.jsonl](../logs/shared-vpn-logins.jsonl) — 30 events.
 
 **Expected verdict:** `benign`. **Threat type:** `none`; explain shared egress and individual retry/session sequences.
 

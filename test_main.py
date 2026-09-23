@@ -221,38 +221,46 @@ class HuntOutputValidationTests(unittest.TestCase):
         for event in events:
             with self.subTest(event_id=event["event"]["id"]):
                 self.assert_ecs_envelope(event)
-                self.assertEqual(event["host"]["name"], "auth-01.corp.internal")
-                self.assertEqual(event["event"]["category"], ["authentication"])
-                self.assertEqual(event["event"]["action"], "logon")
-                self.assertIn(event["event"]["outcome"], {"success", "failure"})
+                self.assertIn("authentication", event["event"]["category"])
+                self.assertIn(event["event"].get("outcome"), {"success", "failure", None})
                 self.assertTrue(event["user"]["name"])
                 self.assertTrue(event["source"]["ip"])
-                self.assertEqual(event["service"]["name"], "employee-portal")
+                if event["event"]["dataset"] == "corp_idp.authentication":
+                    self.assertEqual(event["host"]["hostname"], "auth-01.corp.internal")
+                    self.assertEqual(event["service"]["name"], "employee-portal")
+                    self.assertIn("auth", event["corp"])
+                else:
+                    self.assertEqual(event["event"]["dataset"], "corp_vpn.audit")
+                    self.assertIn("vpn", event["corp"])
 
     def test_beaconing_uses_ecs_fields(self) -> None:
         events = load_security_events(HTTP_BEACONING)
         for event in events:
             with self.subTest(event_id=event["event"]["id"]):
                 self.assert_ecs_envelope(event)
-                self.assertEqual(event["observer"]["hostname"], "fw-edge-01.corp.internal")
-                self.assertEqual(event["observer"]["type"], "firewall")
-                self.assertIn("network", event["event"]["category"])
-                self.assertTrue(event["source"]["ip"])
-                self.assertTrue(event["destination"]["ip"])
+                self.assertTrue(event["event"]["dataset"])
+                if "network" in event["event"]["category"]:
+                    self.assertTrue(event["source"]["ip"])
+                    self.assertTrue(event["destination"]["ip"])
+                if "http" in event:
+                    self.assertEqual(event["observer"]["type"], "proxy")
+                    self.assertTrue(event["corp"]["proxy"]["tls_inspected"])
 
     def test_internal_scan_uses_ecs_fields(self) -> None:
         events = load_security_events(INTERNAL_NETWORK_SCAN)
         for event in events:
             with self.subTest(event_id=event["event"]["id"]):
                 self.assert_ecs_envelope(event)
-                self.assertEqual(
-                    event["observer"]["hostname"], "fw-segment-01.corp.internal"
-                )
-                self.assertEqual(event["event"]["type"], ["connection"])
-                self.assertTrue(event["event"]["reason"])
-                self.assertIsInstance(event["event"]["duration"], int)
-                self.assertTrue(event["source"]["ip"])
-                self.assertTrue(event["destination"]["ip"])
+                self.assertTrue(event["event"]["dataset"])
+                if event["event"]["dataset"] == "corp_firewall.flow":
+                    self.assertEqual(
+                        event["observer"]["hostname"], "fw-segment-01.corp.internal"
+                    )
+                    self.assertIn("connection", event["event"]["type"])
+                    self.assertTrue(event["event"]["reason"])
+                    self.assertIsInstance(event["event"]["duration"], int)
+                    self.assertTrue(event["source"]["ip"])
+                    self.assertTrue(event["destination"]["ip"])
 
     def test_lookalike_fixtures_use_ecs_fields(self) -> None:
         for path in (SHARED_VPN_LOGINS, MANAGED_TELEMETRY, SCHEDULED_DISCOVERY):

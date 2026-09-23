@@ -27,35 +27,35 @@ Run each case as a fresh conversation. To select all six from the repository dir
 
 ## c01 — HTTP beaconing
 
-**Input:** [http-beaconing.jsonl](../logs/http-beaconing.jsonl) — 43 events.
+**Input:** [http-beaconing.jsonl](../logs/http-beaconing.jsonl) — 60 events.
 
 **Expected verdict:** `suspicious`. **Threat type:** suspected HTTP/HTTPS beaconing or possible C2 beaconing.
 
-**Must notice:** `10.47.12.88` repeatedly contacts `203.0.113.77:443` with near-five-minute timing and small, stable byte counts. The combination supports automated beacon-like behavior distinct from the surrounding traffic. Calling it merely "HTTPS traffic" misses the pattern.
+**Must notice:** `10.47.12.88` repeatedly contacts `203.0.113.77:443` with near-five-minute timing and small, stable byte counts. The combination supports automated beacon-like behavior distinct from the surrounding traffic. Calling it merely "HTTPS traffic" misses the pattern. The applied deployment does not explain these requests: its service executable/hash and `/v1/status` URL differ from the observed interactive process and `/api/heartbeat` requests.
 
-**Reference facts:** Twelve `GET /api/heartbeat` requests, all HTTP 204, with the same user-agent. Intervals average about 300.4 seconds and range from 287.3 to 314.3 seconds. Sent counts are 187–218 bytes and received counts 65–92 bytes.
+**Reference facts:** Twelve `GET /api/heartbeat` requests, all HTTP 204, with the same user-agent. Intervals average about 300.4 seconds and range from 287.3 to 314.3 seconds. Application request counts are 187–218 bytes and response counts 65–92 bytes (headers plus body, excluding transport/TLS overhead).
 
-**Supporting evidence:** `c01-e006`, `c01-e011`, `c01-e016`, `c01-e020`, `c01-e023`, `c01-e024`, `c01-e027`, `c01-e031`, `c01-e035`, `c01-e038`, `c01-e041`, `c01-e043`. For example, several early and later requests support recurrence; a single request does not establish periodicity. Slack traffic (`c01-e003`, `c01-e017`, `c01-e026`, `c01-e036`) is a useful comparison, not required citation material.
+**Supporting evidence:** `c01-e006`, `c01-e011`, `c01-e016`, `c01-e020`, `c01-e023`, `c01-e024`, `c01-e027`, `c01-e031`, `c01-e035`, `c01-e038`, `c01-e041`, `c01-e043`. For example, several early and later requests support recurrence; a single request does not establish periodicity. Deployment `c01-e044` and service start `c01-e045` identify the approved service. Process start `c01-e046` records a different path/hash, user and parent despite the same executable basename. Endpoint connections `c01-e047` through `c01-e058` link this process to the twelve requests by source/destination tuples and timing; cite representative pairs, not an ID range in model output. `c01-e059` and `c01-e060` corroborate one actual check-in by the approved service. A passing explanation must distinguish that service from the process responsible for the recurring requests. Slack traffic is additional background.
 
-**Appropriate uncertainty:** Regular requests can also come from legitimate software. The supplied file does not identify the responsible process or establish destination reputation.
+**Appropriate uncertainty:** Regular requests can also come from legitimate software. The responsible process is recorded, but its differing path/hash and interactive launch do not prove malware. The supplied deployment does not cover its behavior; another legitimate explanation remains possible. Destination reputation is not established.
 
-**Must not claim:** Confirmed malware/C2, a named threat actor or malware family, proven exfiltration, or that the destination is known malicious. Documentation IP space is not malicious reputation. Do not grade wire-level TLS byte accounting as a decisive fact: collection/byte semantics in this fixture are underspecified.
+**Must not claim:** Confirmed malware/C2, a named threat actor or malware family, proven exfiltration, or that the destination is known malicious. Documentation IP space is not malicious reputation. Do not interpret HTTP application bytes as complete TLS wire traffic or treat the approved service's destination as blanket authorization for other processes.
 
 ## c02 — Internal network scanning
 
-**Input:** [internal-network-scan.jsonl](../logs/internal-network-scan.jsonl) — 49 events.
+**Input:** [internal-network-scan.jsonl](../logs/internal-network-scan.jsonl) — 53 events.
 
 **Expected verdict:** `suspicious`. **Threat type:** internal network/port scanning or network-service discovery.
 
-**Must notice:** `10.47.12.66` systematically probes several ports across multiple internal hosts in a short burst. This is scanning behavior; authorization is not supplied. Isolated failed connections from other hosts are not enough to establish another scan.
+**Must notice:** `10.47.12.66` systematically probes several ports across multiple internal hosts in a short burst. This is scanning behavior. The supplied approval covers the same source, targets and ports at 15:30–15:40 UTC, but the job and probes occur around 14:30 UTC. Isolated failed connections from other hosts are not enough to establish another scan.
 
-**Reference facts:** 32 probes to eight hosts (`10.47.20.20`–`10.47.20.27`) on 22, 445, 3389 and 5985, spanning about 22 seconds. Twenty are initially rejected, eight time out, and four receive SYN/ACK without completing the handshake. These probes all have connection outcome `failure`. A probe can discover a listening port even though a connection was not established.
+**Reference facts:** 32 probes to eight hosts (`10.47.20.20`–`10.47.20.27`) on 22, 445, 3389 and 5985, spanning about 22 seconds. Twenty are initially rejected, eight time out, and four receive SYN/ACK without completing the handshake. These probes all have connection outcome `failure`. Approval `c02-e050`, asset `c02-e051`, job start `c02-e052` and completion `c02-e053` provide context comparable to the benign discovery case. The recorded `discovery-agent` job runs under the approved account and references the change, but starts outside its window. A probe can discover a listening port even though a connection was not established.
 
-**Representative evidence:** `c02-e006`, `c02-e007`, `c02-e009`, `c02-e010` show four ports on one host; `c02-e011`, `c02-e019`, `c02-e021`, `c02-e027`, `c02-e040`, `c02-e044` show expansion across hosts and outcomes. The isolated reset/retry at `c02-e045`, `c02-e046` is background activity. Other representative scanning events are acceptable.
+**Representative evidence:** `c02-e006`, `c02-e007`, `c02-e009`, `c02-e010` show four ports on one host; `c02-e011`, `c02-e019`, `c02-e021`, `c02-e027`, `c02-e040`, `c02-e044` show expansion across hosts and outcomes. The isolated reset/retry at `c02-e045`, `c02-e046` is background activity. Other representative scanning events are acceptable. Cite the approval and job/flow timing to establish the window mismatch; merely observing that an approval exists is insufficient.
 
-**Appropriate uncertainty:** Authorized assessment or administrative discovery is possible, but there is no approval evidence in this package. A good answer can be confident about scanning while uncertain about intent.
+**Appropriate uncertainty:** An administrative scheduling error or another authorization is possible, but this supplied approval does not cover the observed execution time. A good answer can be confident about scanning while uncertain about intent.
 
-**Must not claim:** Successful lateral movement, exploitation, authentication, all ports closed, proven workstation compromise, or a specific scanning tool. An `allow` firewall action is not a successful TCP connection. SYN/ACK alone does not establish a completed handshake.
+**Must not claim:** Successful lateral movement, exploitation, authentication, all ports closed, proven workstation compromise, or a tool absent from the records. The job explicitly records `discovery-agent`; do not infer nmap or a malware family. An `allow` firewall action is not a successful TCP connection. SYN/ACK alone does not establish a completed handshake.
 
 ## c03 — Managed telemetry
 
@@ -75,19 +75,19 @@ Run each case as a fresh conversation. To select all six from the repository dir
 
 ## c04 — Password spray pattern
 
-**Input:** [password-spray.jsonl](../logs/password-spray.jsonl) — 14 events.
+**Input:** [password-spray.jsonl](../logs/password-spray.jsonl) — 26 events.
 
 **Expected verdict:** `suspicious`. **Threat type:** suspected password spraying or an automated multi-account credential attack. A cautious broader label is acceptable if the many-account pattern is recognized.
 
-**Must notice:** One source (`198.51.100.7`) fails against six different users, then authenticates successfully as Bob. Distinguish this from isolated same-user failure/retry pairs.
+**Must notice:** One source (`198.51.100.7`) fails against six different users, then authenticates successfully as Bob. Distinguish this from isolated same-user failure/retry pairs. VPN context is present, but all six target-account sequences bind to one device and tunnel authenticated as Morgan, rather than six separately authenticated user devices.
 
-**Reference facts:** One failure each for Alice, Bob, Carol, Dave, Erin and Frank, 30 seconds apart over 150 seconds. Bob's subsequent success occurs 90 seconds after the last failure, from the same source. This pattern differs from high-volume guessing against a single account.
+**Reference facts:** One failure each for Alice, Bob, Carol, Dave, Erin and Frank, 30 seconds apart over 150 seconds. Bob's subsequent success occurs 90 seconds after the last failure, from the same source. This pattern differs from high-volume guessing against a single account. `c04-e015` records the Morgan tunnel (`vpn-session-810`, `endpoint-130`) and shared egress. Five background successes have corresponding FIDO2/session records (`c04-e016` through `c04-e025`). Bob receives a FIDO2 challenge (`c04-e026`); no completed MFA or application-session issuance for that sequence is supplied.
 
-**Supporting evidence:** `c04-e005`, `c04-e006`, `c04-e007`, `c04-e008`, `c04-e009`, `c04-e010` are the failures; `c04-e011` is Bob's success. Representative failures across multiple users plus the success are sufficient. `c04-e003`, `c04-e004` and `c04-e013`, `c04-e014` are isolated internal failure/retry pairs.
+**Supporting evidence:** `c04-e005`, `c04-e006`, `c04-e007`, `c04-e008`, `c04-e009`, `c04-e010` are the failures; `c04-e011` is Bob's success. Representative failures across multiple users plus the success establish the credential pattern. Use `c04-e015` with representative password events to show that their device/tunnel is shared across target accounts. `c04-e003`, `c04-e004` and `c04-e013`, `c04-e014` are isolated internal failure/retry pairs. A valid tunnel and unrelated MFA successes do not explain away the multi-account pattern.
 
-**Appropriate uncertainty:** Attempted passwords and credential provenance are absent. The events cannot prove password reuse, conclusively distinguish spraying from credential stuffing, or establish who performed the successful login.
+**Appropriate uncertainty:** Attempted passwords and credential provenance are absent. The events cannot prove password reuse, conclusively distinguish spraying from credential stuffing, or establish who performed the successful password check. A tunnel authenticated as Morgan does not prove Morgan personally initiated the attempts. Absence of a recorded MFA completion does not prove it failed or never occurred.
 
-**Must not claim:** The same password was tried against every account, confirmed account takeover, MFA bypass, known malicious source reputation, or that any isolated failed login is an attack.
+**Must not claim:** The same password was tried against every account, confirmed account takeover, MFA bypass, completed Bob application session, known malicious source reputation, or that any isolated failed login is an attack.
 
 ## c05 — Scheduled discovery
 

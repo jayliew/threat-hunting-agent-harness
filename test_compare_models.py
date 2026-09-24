@@ -249,6 +249,8 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('4 / 4 runs recorded', html)
         self.assertIn('TimeoutError', html)
         self.assertIn('e999', html)
+        self.assertIn('color-scheme:dark', html)
+        self.assertIn('background:#0f1419', html)
         self.assertTrue((directory / 'manifest.json').exists())
 
     def test_missing_models_reported_together_without_starting_run(self):
@@ -284,6 +286,81 @@ class ComparisonTests(unittest.TestCase):
         with self.assertRaises(ValueError) as error:
             compare_models.prepare_comparison(api, ['alpha'], self.logs[:1])
         self.assertIn("{{ .Prompt }}", str(error.exception))
+        self.assertFalse(api.chat.called)
+
+    def test_gemma_renderer_passes_and_report_names_renderer(self):
+        api = client()
+        api.list.return_value.models = [
+            SimpleNamespace(model="gemma4:26b", digest="digest-gemma"),
+        ]
+        api.show.return_value.template = "{{ .Prompt }}"
+        api.show.return_value.modelfile = "TEMPLATE {{ .Prompt }}\nRENDERER gemma4\n"
+        models, _logs = compare_models.prepare_comparison(api, ['gemma4:26b'], self.logs[:1])
+        self.assertEqual(models[0]['renderer'], 'gemma4')
+        self.assertEqual(models[0]['chat_template'], '{{ .Prompt }}')
+        directory = self.root / 'gemma'
+        directory.mkdir()
+        manifest = {
+            'created_at': 'now',
+            'request_settings': {'num_ctx': 32768, 'think': False},
+            'models': models,
+            'cases': [{'name': 'one.jsonl'}],
+        }
+        compare_models.write_report(directory, manifest, [])
+        html = (directory / 'report.html').read_text()
+        self.assertIn('Framing: RENDERER gemma4', html)
+        self.assertNotIn('{{ .Prompt }}', html)
+
+    def test_deepseek_markers_pass_preflight(self):
+        api = client()
+        api.list.return_value.models = [
+            SimpleNamespace(model="deepseek-r1:32b", digest="digest-ds"),
+        ]
+        api.show.return_value.template = "<\uff5cUser\uff5c>{{ .Content }}<\uff5cAssistant\uff5c>"
+        api.show.return_value.modelfile = "TEMPLATE \"\"\"deepseek\"\"\"\n"
+        models, _logs = compare_models.prepare_comparison(api, ['deepseek-r1:32b'], self.logs[:1])
+        self.assertEqual(models[0]['name'], 'deepseek-r1:32b')
+        self.assertEqual(models[0]['renderer'], '')
+        self.assertFalse(api.chat.called)
+
+    def test_raw_foundation_sec_still_fails_preflight(self):
+        api = client()
+        api.list.return_value.models = [
+            SimpleNamespace(
+                model="hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest",
+                digest="digest-raw",
+            ),
+        ]
+        api.show.return_value.template = "{{ .Prompt }}"
+        api.show.return_value.modelfile = "TEMPLATE {{ .Prompt }}\n"
+        with self.assertRaises(ValueError) as error:
+            compare_models.prepare_comparison(
+                api,
+                ['hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest'],
+                self.logs[:1],
+            )
+        self.assertIn('Modelfile.foundation-sec-8b-instruct', str(error.exception))
+        self.assertFalse(api.chat.called)
+
+    def test_run_hunt_rechecks_template_with_renderer(self):
+        api = client()
+        allowed = harness.run_hunt(
+            'gemma4:26b', EVENTS, client=api,
+            capabilities=['completion', 'thinking'],
+            chat_template='{{ .Prompt }}',
+            renderer='gemma4',
+        )
+        self.assertEqual(allowed['status'], 'ok')
+        self.assertEqual(allowed['renderer'], 'gemma4')
+        self.assertTrue(api.chat.called)
+        api.chat.reset_mock()
+        refused = harness.run_hunt(
+            'hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest',
+            EVENTS, client=api, capabilities=['completion'],
+            chat_template='{{ .Prompt }}', renderer='gemma4',
+        )
+        self.assertEqual(refused['status'], 'error')
+        self.assertIn('Modelfile.foundation-sec-8b-instruct', refused['error'])
         self.assertFalse(api.chat.called)
 
     def test_report_escapes_model_output(self):

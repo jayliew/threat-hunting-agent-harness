@@ -23,6 +23,7 @@ from main import (
     NUM_PREDICT,
     THINK,
     chat_template_error,
+    installed_renderer,
     load_security_events,
     model_detail_fields,
     native_context_length,
@@ -111,7 +112,8 @@ def prepare_comparison(client: Client, models: list[str], logs: list[str]) -> tu
             if capabilities and "completion" not in capabilities:
                 raise ValueError("model does not support text completion")
             template = info.template or ""
-            error = chat_template_error(canonical, template)
+            renderer = installed_renderer(getattr(info, "modelfile", None))
+            error = chat_template_error(canonical, template, renderer)
             if error:
                 raise ValueError(error)
             selected.append({
@@ -119,6 +121,7 @@ def prepare_comparison(client: Client, models: list[str], logs: list[str]) -> tu
                 "digest": model.digest,
                 "capabilities": capabilities,
                 "chat_template": template,
+                "renderer": renderer or "",
                 "context_length": native_context_length(info),
                 **model_detail_fields(info, model),
             })
@@ -151,6 +154,14 @@ def seconds(value: float | None) -> str:
 
 def display(value) -> str:
     return "—" if value is None or value == "" else str(value)
+
+
+def framing_note(model: dict) -> str:
+    """Show a built-in renderer instead of a placeholder {{ .Prompt }} template."""
+    renderer = model.get("renderer") or ""
+    if not renderer:
+        return ""
+    return f"Framing: RENDERER {escape(renderer)}<br>"
 
 
 def quantization_label(model: dict) -> str:
@@ -207,6 +218,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
                 cards.append(
                     f'<article><h3>{name}</h3><p class="pending">Pending</p>'
                     f'<p>{e(context_label(settings.get("num_ctx"), None, model.get("context_length")))}<br>'
+                    f'{framing_note(model)}'
                     f'Quantization: {e(quant)}<br>Thinking: {e(think)}<br>'
                     f'{e(tokens_label(None, False))}</p></article>'
                 )
@@ -239,6 +251,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             cards.append(
                 f'<article><h3>{name}</h3><p class="{e(status)}">{e(status)} · {wall}</p>'
                 f'<p>{e(context_label(allocated, used, model_max))}<br>'
+                f'{framing_note(model)}'
                 f'Quantization: {e(quant)}<br>'
                 f'Thinking: {e(think)} · Load: {load}<br>'
                 f'{e(tokens_label(tokens, thinking_enabled))}<br>'
@@ -251,14 +264,14 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
     html = '''<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Threat hunt model comparison</title><style>
-*{box-sizing:border-box}body{margin:0;padding:32px;font:15px/1.6 system-ui,sans-serif;background:#f3f5f8;color:#172432}
+html{color-scheme:dark}*{box-sizing:border-box}body{margin:0;padding:32px;font:15px/1.6 system-ui,sans-serif;background:#0f1419;color:#e7edf3}
 main{max-width:1800px;margin:auto}h1{font-size:30px;margin-bottom:4px}h2{margin-top:36px;font-size:21px}
-h3{font-size:15px;overflow-wrap:anywhere}p{color:#445468}table{width:100%;border-collapse:collapse;background:white}
-th,td{text-align:left;padding:10px 14px;border-bottom:1px solid #dbe1e8}th{background:#e7edf3}
+h3{font-size:15px;overflow-wrap:anywhere}p{color:#9aa8b5}table{width:100%;border-collapse:collapse;background:#1a222c}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid #2e3a48}th{background:#222c38}
 .scroll{overflow:auto}.answers{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(300px,1fr);gap:16px;overflow-x:auto;padding-bottom:12px}
-article{padding:20px;border:1px solid #dbe1e8;border-radius:10px;background:white;min-width:0}
+article{padding:20px;border:1px solid #2e3a48;border-radius:10px;background:#1a222c;min-width:0}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,monospace}
-.ok{color:#13663f}.invalid,.error{color:#a12620}.pending{color:#586678}summary{cursor:pointer}
+.ok{color:#3dd68c}.invalid,.error{color:#f07178}.pending{color:#8b9aab}summary{cursor:pointer}
 @media(max-width:600px){body{padding:16px}.answers{grid-auto-flow:row;grid-template-columns:1fr}}
 </style></head><body><main>'''
     html += (f'<h1>Threat hunt model comparison</h1><p>{e(manifest["created_at"])} · '
@@ -303,6 +316,7 @@ def run_comparison(client: Client, models: list[str], logs: list[str], output_ro
                 result = run_hunt(model["name"], case["events"], client=client,
                                   capabilities=model["capabilities"],
                                   chat_template=model.get("chat_template"),
+                                  renderer=model.get("renderer") or None,
                                   model_max=model.get("context_length"),
                                   keep_alive=0 if index == len(cases)-1 else "5m")
                 result.update({"schema_version": 1, "case": case["name"], "log_path": case["path"],

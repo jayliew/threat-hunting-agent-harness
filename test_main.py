@@ -19,6 +19,7 @@ from main import (
     event_sort_key,
     chat_template_error,
     chat_think_kwargs,
+    installed_renderer,
     context_usage,
     empty_tokens,
     incomplete_response_message,
@@ -391,6 +392,31 @@ class ChatTemplateTests(unittest.TestCase):
             chat_template_error("mistral-small3.2:24b", "[INST] {{ .Prompt }} [/INST]")
         )
 
+    def test_gemma_renderer_allows_placeholder_template(self) -> None:
+        self.assertIsNone(chat_template_error("gemma4:26b", "{{ .Prompt }}", "gemma4"))
+        self.assertIsNone(chat_template_error("gemma4:31b", "{{ .Prompt }}", "gemma4-large"))
+        self.assertIsNotNone(chat_template_error("gemma4:26b", "{{ .Prompt }}"))
+        blocked = chat_template_error(
+            "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest",
+            "{{ .Prompt }}",
+            "gemma4",
+        )
+        self.assertIsNotNone(blocked)
+        self.assertIn("Modelfile.foundation-sec-8b-instruct", blocked)
+
+    def test_deepseek_fullwidth_markers_pass(self) -> None:
+        template = "<\uff5cUser\uff5c>{{ .Content }}<\uff5cAssistant\uff5c>"
+        self.assertIsNone(chat_template_error("deepseek-r1:32b", template))
+        self.assertEqual("<\uff5cUser\uff5c>", "<｜User｜>")
+        self.assertEqual("<\uff5cAssistant\uff5c>", "<｜Assistant｜>")
+
+    def test_installed_renderer_reads_modelfile_line(self) -> None:
+        modelfile = "FROM blob\nTEMPLATE {{ .Prompt }}\nRENDERER gemma4\nPARSER gemma4\n"
+        self.assertEqual(installed_renderer(modelfile), "gemma4")
+        self.assertIsNone(installed_renderer("TEMPLATE {{ .Prompt }}\n"))
+        self.assertIsNone(installed_renderer(None))
+        self.assertIsNone(installed_renderer(""))
+
     def test_modelfile_passes_preflight(self) -> None:
         text = (REPO_ROOT / "Modelfile.foundation-sec-8b-instruct").read_text()
         template = text.split("TEMPLATE", 1)[1].split("PARAMETER", 1)[0]
@@ -410,6 +436,17 @@ class ChatTemplateTests(unittest.TestCase):
         with self.assertRaises(ValueError) as error:
             inspect_installed_model(api, "alpha:latest")
         self.assertIn("{{ .Prompt }}", str(error.exception))
+        self.assertFalse(api.chat.called)
+
+    def test_inspect_installed_model_allows_gemma_renderer(self) -> None:
+        api = Mock()
+        api.show.return_value.template = "{{ .Prompt }}"
+        api.show.return_value.capabilities = ["completion", "thinking"]
+        api.show.return_value.modelfile = "TEMPLATE {{ .Prompt }}\nRENDERER gemma4\n"
+        template, capabilities, renderer = inspect_installed_model(api, "gemma4:26b")
+        self.assertEqual(template, "{{ .Prompt }}")
+        self.assertEqual(renderer, "gemma4")
+        self.assertIn("thinking", capabilities)
         self.assertFalse(api.chat.called)
 
     def test_ollama_bare_prompt_drops_system_and_role_markers(self) -> None:

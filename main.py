@@ -193,12 +193,14 @@ def context_usage(
 
 
 FOUNDATION_SEC_MARKERS = ("<|system|>", "<|user|>", "<|assistant|>")
+# DeepSeek-R1 uses a fullwidth vertical bar (U+FF5C), not ASCII |.
+DEEPSEEK_MARKERS = ("<\uff5cUser\uff5c>", "<\uff5cAssistant\uff5c>")
 CHAT_ROLE_MARKERS = FOUNDATION_SEC_MARKERS + (
     "<|im_start|>",
     "<|start_header_id|>",
     "[INST]",
     "<start_of_turn>",
-)
+) + DEEPSEEK_MARKERS
 
 
 def is_bare_prompt_template(template: str | None) -> bool:
@@ -211,7 +213,21 @@ def is_foundation_sec_model(model: str) -> bool:
     return "foundation-sec" in model.lower()
 
 
-def chat_template_error(model: str, template: str | None) -> str | None:
+def installed_renderer(modelfile: str | None) -> str | None:
+    """Return the Modelfile RENDERER name when Ollama frames chat with one."""
+    if not isinstance(modelfile, str):
+        return None
+    for line in modelfile.splitlines():
+        stripped = line.strip()
+        if stripped.upper().startswith("RENDERER "):
+            name = stripped.split(None, 1)[1].strip()
+            return name or None
+    return None
+
+
+def chat_template_error(
+    model: str, template: str | None, renderer: str | None = None
+) -> str | None:
     """Return an error if the installed Ollama template cannot frame this chat."""
     text = template or ""
     if is_foundation_sec_model(model):
@@ -225,6 +241,9 @@ def chat_template_error(model: str, template: str | None) -> str | None:
                 "from Modelfile.foundation-sec-8b-instruct before running. "
                 f"Installed template: {installed}"
             )
+        return None
+    # A built-in renderer frames the chat. TEMPLATE {{ .Prompt }} is a placeholder.
+    if renderer:
         return None
     if is_bare_prompt_template(text):
         installed = text.strip() or "(empty)"
@@ -242,15 +261,16 @@ def chat_template_error(model: str, template: str | None) -> str | None:
     return None
 
 
-def inspect_installed_model(client: Client, model: str) -> tuple[str, list[str]]:
+def inspect_installed_model(client: Client, model: str) -> tuple[str, list[str], str | None]:
     """Read /api/show and refuse models whose template cannot frame chat roles."""
     info = client.show(model)
     template = info.template or ""
     capabilities = list(info.capabilities or [])
-    error = chat_template_error(model, template)
+    renderer = installed_renderer(getattr(info, "modelfile", None))
+    error = chat_template_error(model, template, renderer)
     if error:
         raise ValueError(error)
-    return template, capabilities
+    return template, capabilities, renderer
 
 
 # Application instructions, not a model's chat template. Ollama supplies the
@@ -390,6 +410,7 @@ def run_hunt(
     client: Client | None = None,
     capabilities: list[str] | None = None,
     chat_template: str | None = None,
+    renderer: str | None = None,
     keep_alive: str | int = "5m",
     model_max: int | None = None,
 ) -> dict:
@@ -410,6 +431,7 @@ def run_hunt(
         "error": None,
         "response": None,
         "chat_template": chat_template or "",
+        "renderer": renderer or "",
         "request": {"model": model, "messages": messages, "options": options,
                     "stream": False, "keep_alive": keep_alive},
         "prompt_sha256": hashlib.sha256(
@@ -428,13 +450,17 @@ def run_hunt(
             if not inspected_template:
                 result["chat_template"] = info.template or ""
                 inspected_template = True
+            if renderer is None:
+                result["renderer"] = installed_renderer(getattr(info, "modelfile", None)) or ""
             if model_max is None:
                 model_max = native_context_length(info)
                 result["context"]["model_max"] = model_max
         result["capabilities"] = capabilities
         result["request"].update(chat_think_kwargs(THINK, capabilities))
         if inspected_template:
-            error = chat_template_error(model, result["chat_template"])
+            error = chat_template_error(
+                model, result["chat_template"], result["renderer"] or None
+            )
             if error:
                 result["error"] = error
                 result["timing"]["wall_seconds"] = perf_counter() - started
@@ -485,10 +511,12 @@ def main() -> None:
     print(f"Model: {args.model}")
     client = Client(timeout=300)
     try:
-        template, capabilities = inspect_installed_model(client, args.model)
+        template, capabilities, renderer = inspect_installed_model(client, args.model)
     except Exception as error:
         print(error, file=sys.stderr)
         raise SystemExit(1)
+    if renderer:
+        print(f"Chat framing: RENDERER {renderer}")
     print(f"Chat template:\n{template}")
     log_path = resolve_log_path(args.log_file)
     event_list = load_security_events(log_path)
@@ -510,6 +538,7 @@ def main() -> None:
         client=client,
         capabilities=capabilities,
         chat_template=template,
+        renderer=renderer,
     )
     effective_think = result["request"].get("think")
     print(f"Thinking: {effective_think if effective_think is not None else 'unsupported or unavailable'}")

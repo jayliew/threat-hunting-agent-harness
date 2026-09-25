@@ -22,7 +22,6 @@ from main import (
     installed_renderer,
     context_usage,
     empty_tokens,
-    incomplete_response_message,
     inspect_installed_model,
     invalid_hunt_output_message,
     is_bare_prompt_template,
@@ -31,6 +30,7 @@ from main import (
     native_context_length,
     usage_tokens,
 )
+from response_completeness import incomplete_response_message
 
 
 NUM_PREDICT = 1024
@@ -66,9 +66,11 @@ def make_response(
     done_reason: str | None = None,
     eval_count: int | None = None,
     thinking: str | None = None,
+    done: bool | None = None,
 ) -> ChatResponse:
     return ChatResponse(
         message=Message(role="assistant", content=content, thinking=thinking),
+        done=done,
         done_reason=done_reason,
         eval_count=eval_count,
     )
@@ -191,6 +193,19 @@ class IncompleteResponseMessageTests(unittest.TestCase):
         self.assertIsNotNone(message)
         self.assertIn("token limit", message)
         self.assertIn("done_reason=unknown", message)
+
+    def test_done_false_with_partial_content(self) -> None:
+        response = make_response(
+            "Verdict: suspicious\nThreat type: password spray\n",
+            done=False,
+            done_reason="stop",
+            eval_count=40,
+        )
+        message = incomplete_response_message(response, NUM_PREDICT)
+        self.assertIsNotNone(message)
+        self.assertIn("before completion", message)
+        self.assertIn("done=false", message)
+        self.assertIn("done_reason=stop", message)
 
 
 class HuntOutputValidationTests(unittest.TestCase):

@@ -273,6 +273,69 @@ def inspect_installed_model(client: Client, model: str) -> tuple[str, list[str],
     return template, capabilities, renderer
 
 
+def preflight_models_and_logs(
+    client: Client, models: list[str], logs: list[str]
+) -> tuple[list[dict], list[dict]]:
+    """Resolve models and logs before any inference; raise if anything is unusable."""
+    if not models or not logs:
+        raise ValueError("Configure at least one model and one log file.")
+    installed = {item.model: item for item in client.list().models}
+    selected, problems, seen = [], [], set()
+    for name in models:
+        canonical = name if name in installed else name + ":latest"
+        if canonical not in installed:
+            problems.append(f"Model is not installed: {name}")
+            continue
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        model = installed[canonical]
+        try:
+            info = client.show(canonical)
+            capabilities = info.capabilities or []
+            if capabilities and "completion" not in capabilities:
+                raise ValueError("model does not support text completion")
+            template = info.template or ""
+            renderer = installed_renderer(getattr(info, "modelfile", None))
+            error = chat_template_error(canonical, template, renderer)
+            if error:
+                raise ValueError(error)
+            selected.append({
+                "name": canonical,
+                "digest": model.digest,
+                "capabilities": capabilities,
+                "chat_template": template,
+                "renderer": renderer or "",
+                "context_length": native_context_length(info),
+                **model_detail_fields(info, model),
+            })
+        except Exception as error:
+            problems.append(f"Cannot use {name}: {error}")
+    cases, seen_paths = [], set()
+    for name in logs:
+        path = resolve_log_path(name).resolve()
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        try:
+            events = load_security_events(path)
+            if not events:
+                raise ValueError("log contains no events")
+            cases.append({
+                "name": name,
+                "path": str(path),
+                "events": events,
+                "events_sha256": hashlib.sha256(
+                    json.dumps(events, sort_keys=True).encode()
+                ).hexdigest(),
+            })
+        except Exception as error:
+            problems.append(f"Cannot read {name}: {error}")
+    if problems:
+        raise ValueError("Preflight failed:\n" + "\n".join(problems))
+    return selected, cases
+
+
 # Application instructions, not a model's chat template. Ollama supplies the
 # model-specific role/turn tokens from the installed model's template.
 SYSTEM_PROMPT = """
@@ -511,15 +574,22 @@ def main() -> None:
     print(f"Model: {args.model}")
     client = Client(timeout=300)
     try:
-        template, capabilities, renderer = inspect_installed_model(client, args.model)
+        selected, cases = preflight_models_and_logs(
+            client, [args.model], [args.log_file]
+        )
     except Exception as error:
         print(error, file=sys.stderr)
         raise SystemExit(1)
+    model_info = selected[0]
+    case = cases[0]
+    template = model_info["chat_template"]
+    capabilities = model_info["capabilities"]
+    renderer = model_info["renderer"] or None
     if renderer:
         print(f"Chat framing: RENDERER {renderer}")
     print(f"Chat template:\n{template}")
-    log_path = resolve_log_path(args.log_file)
-    event_list = load_security_events(log_path)
+    log_path = Path(case["path"])
+    event_list = case["events"]
     events = json.dumps(event_list, separators=(",", ":"))
     # resolve_log_path() accepts absolute paths, including files outside this repo.
     # relative_to() raises ValueError for those; print the absolute path instead.
@@ -533,12 +603,13 @@ def main() -> None:
     print(f"Security events supplied:\n{events}")
     print("\n--- Analysis ---", flush=True)
     result = run_hunt(
-        args.model,
+        model_info["name"],
         event_list,
         client=client,
         capabilities=capabilities,
         chat_template=template,
         renderer=renderer,
+        model_max=model_info.get("context_length"),
     )
     effective_think = result["request"].get("think")
     print(f"Thinking: {effective_think if effective_think is not None else 'unsupported or unavailable'}")

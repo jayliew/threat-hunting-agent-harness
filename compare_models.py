@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
-import hashlib
 from html import escape
 import json
 import os
@@ -22,12 +21,7 @@ from main import (
     NUM_CTX,
     NUM_PREDICT,
     THINK,
-    chat_template_error,
-    installed_renderer,
-    load_security_events,
-    model_detail_fields,
-    native_context_length,
-    resolve_log_path,
+    preflight_models_and_logs,
     run_hunt,
 )
 
@@ -93,59 +87,7 @@ def allocate_results_directory(output_root: Path, when: datetime) -> Path:
 
 def prepare_comparison(client: Client, models: list[str], logs: list[str]) -> tuple[list[dict], list[dict]]:
     """Resolve the complete matrix before generating anything."""
-    if not models or not logs:
-        raise ValueError("Configure at least one model and one log file.")
-    installed = {item.model: item for item in client.list().models}
-    selected, problems, seen = [], [], set()
-    for name in models:
-        canonical = name if name in installed else name + ":latest"
-        if canonical not in installed:
-            problems.append(f"Model is not installed: {name}")
-            continue
-        if canonical in seen:
-            continue
-        seen.add(canonical)
-        model = installed[canonical]
-        try:
-            info = client.show(canonical)
-            capabilities = info.capabilities or []
-            if capabilities and "completion" not in capabilities:
-                raise ValueError("model does not support text completion")
-            template = info.template or ""
-            renderer = installed_renderer(getattr(info, "modelfile", None))
-            error = chat_template_error(canonical, template, renderer)
-            if error:
-                raise ValueError(error)
-            selected.append({
-                "name": canonical,
-                "digest": model.digest,
-                "capabilities": capabilities,
-                "chat_template": template,
-                "renderer": renderer or "",
-                "context_length": native_context_length(info),
-                **model_detail_fields(info, model),
-            })
-        except Exception as error:
-            problems.append(f"Cannot use {name}: {error}")
-    cases, seen_paths = [], set()
-    for name in logs:
-        path = resolve_log_path(name).resolve()
-        if path in seen_paths:
-            continue
-        seen_paths.add(path)
-        try:
-            events = load_security_events(path)
-            if not events:
-                raise ValueError("log contains no events")
-            cases.append({"name": name, "path": str(path), "events": events,
-                          "events_sha256": hashlib.sha256(
-                              json.dumps(events, sort_keys=True).encode()
-                          ).hexdigest()})
-        except Exception as error:
-            problems.append(f"Cannot read {name}: {error}")
-    if problems:
-        raise ValueError("Preflight failed:\n" + "\n".join(problems))
-    return selected, cases
+    return preflight_models_and_logs(client, models, logs)
 
 
 def seconds(value: float | None) -> str:

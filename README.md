@@ -124,7 +124,7 @@ uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
 The script prints the model name, the installed chat template, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It exits with an error instead of looking like a successful hunt when:
 
 - the installed Ollama template cannot frame chat roles (`{{ .Prompt }}` with no `RENDERER`, no `.Messages`/role markers, or a Foundation-Sec name without `<|system|>/<|user|>/<|assistant|>`)
-- generation hits the token limit (`done_reason=length`) or returns empty content
+- generation is unfinished (`done=false`), hits the token limit (`done_reason=length`), or returns empty content
 - a required section is missing or empty
 - the verdict is not `suspicious`, `benign`, or `inconclusive`
 - a cited evidence ID is not in the supplied events (for example `nonexistent-id`)

@@ -15,7 +15,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 
-from ollama import ChatResponse, Client
+from ollama import Client
+
+from response_completeness import incomplete_response_message
 
 
 # Default Ollama model. Must already be installed locally (`ollama list`).
@@ -310,29 +312,6 @@ USER_TASK = "Assess the security events below and return the four fields specifi
 # These are ordinary application delimiters, not reserved LLM control tokens.
 EVIDENCE_START = "<security_events>"
 EVIDENCE_END = "</security_events>"
-
-
-def incomplete_response_message(
-    response: ChatResponse, num_predict: int
-) -> str | None:
-    content = (response.message.content or "").strip()
-    done_reason = response.done_reason or ""
-    eval_count = response.eval_count
-    hit_limit = done_reason == "length" or (
-        eval_count is not None and eval_count >= num_predict
-    )
-    if hit_limit:
-        return (
-            f"Incomplete response: generation stopped at the token limit "
-            f"(done_reason={done_reason or 'unknown'}, "
-            f"eval_count={eval_count}/{num_predict})."
-        )
-    if not content:
-        return (
-            f"Incomplete response: model returned an empty answer "
-            f"(done_reason={done_reason or 'unknown'})."
-        )
-    return None
 
 
 REQUIRED_SECTIONS = ("Verdict", "Threat type", "Summary", "Evidence")

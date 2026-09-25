@@ -83,13 +83,22 @@ Use it to check whether the model:
 
 You need Python 3.14+, [uv](https://docs.astral.sh/uv/), and [Ollama](https://ollama.com) running locally. This harness does not download weights. It talks to Ollama on your machine and will fail if the chosen model is not installed.
 
-1. Install Ollama and start it. On macOS that is typically `brew install ollama` then `ollama serve` (or open the Ollama app). Confirm it is up and see which models you already have:
+1. On macOS, set the Ollama server environment before you start Ollama (or restart it afterward). These `launchctl` values enable flash attention, use an f16 KV cache, allow one parallel request, and keep one model loaded. They last until logout or reboot. Quit and reopen the Ollama app, or restart `ollama serve`, so the running server inherits them:
+
+```bash
+launchctl setenv OLLAMA_FLASH_ATTENTION 1
+launchctl setenv OLLAMA_KV_CACHE_TYPE f16
+launchctl setenv OLLAMA_NUM_PARALLEL 1
+launchctl setenv OLLAMA_MAX_LOADED_MODELS 1
+```
+
+2. Install Ollama and start it. On macOS that is typically `brew install ollama` then `ollama serve` (or open the Ollama app). Confirm it is up and see which models you already have:
 
 ```bash
 ollama list
 ```
 
-2. Pick a model from that list. If the list is empty (or you want the suggested defensive model), pull it once (several GB):
+3. Pick a model from that list. If the list is empty (or you want the suggested defensive model), pull it once (several GB):
 
 ```bash
 ollama pull hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF
@@ -98,7 +107,7 @@ ollama create foundation-sec-8b-instruct -f Modelfile.foundation-sec-8b-instruct
 
 The pull installs `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest`. That name has no native chat template (`{{ .Prompt }}`). The `ollama create` step is required so the script default `foundation-sec-8b-instruct` sends `<|system|>`, `<|user|>`, and `<|assistant|>`. Any other installed name is fine; pass it with `--model`.
 
-3. From this repo, install Python deps and run a hunt. Default is the HTTP-beaconing file and `foundation-sec-8b-instruct`:
+4. From this repo, install Python deps and run a hunt. Default is the HTTP-beaconing file and `foundation-sec-8b-instruct`:
 
 ```bash
 uv sync

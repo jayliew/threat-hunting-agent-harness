@@ -39,7 +39,7 @@ Let the installed model's [Ollama chat template](https://docs.ollama.com/modelfi
 
 The Hugging Face GGUF `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest` is a real bare-prompt import: `TEMPLATE {{ .Prompt }}` and no `RENDERER`. The GGUF has no `tokenizer.chat_template`, the Hub repo has no Ollama `template` file, and that path sends only the user text. It omits `<|system|>`, `<|user|>`, and `<|assistant|>` from [`chat_template.jinja`](https://huggingface.co/fdtn-ai/Foundation-Sec-8B-Instruct/blob/main/chat_template.jinja), and it does not interpolate the harness system message. The weights are Llama 3.1–based, but this instruct checkpoint was not trained on Llama `<|start_header_id|>` headers; those tokens are still in the tokenizer and are the wrong framing. A `RENDERER` on some other model does not make this name usable. Run `foundation-sec-8b-instruct`, created from `Modelfile.foundation-sec-8b-instruct`.
 
-Before any chat call, both CLIs inspect the installed template via Ollama `/api/show` (the same data as `ollama show --template MODEL`) and the Modelfile `RENDERER` line. Inference does not start if the template is `{{ .Prompt }}` and no renderer is set, if it has no `.Messages` loop and no role/turn markers, or, for Foundation-Sec names, if it is missing `<|system|>`, `<|user|>`, or `<|assistant|>`. Passing the raw `hf.co/...` import exits with that error instead of hunting.
+Before any chat call, both CLIs share the same preflight: the model must appear in `ollama list`, support text completion when capabilities are advertised, and pass the installed-template check via Ollama `/api/show` (the same data as `ollama show --template MODEL`) plus the Modelfile `RENDERER` line. Log files must exist, parse as JSONL, and contain at least one event. Inference does not start if the template is `{{ .Prompt }}` and no renderer is set, if it has no `.Messages` loop and no role/turn markers, or, for Foundation-Sec names, if it is missing `<|system|>`, `<|user|>`, or `<|assistant|>`. Passing the raw `hf.co/...` import exits with that error instead of hunting.
 
 The evidence serializer escapes `<`, `>`, and `&` using JSON Unicode escapes. This prevents a field containing `</security_events>` from literally ending the outer evidence block while preserving its exact decoded value. These delimiters are not a security boundary or a guarantee of instruction-following. Existing completion, output-format, and evidence-ID checks still apply. Prompt structure is tested offline; response quality and compatibility must be evaluated per installed model/template.
 
@@ -123,7 +123,8 @@ uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
 
 The script prints the model name, the installed chat template, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It exits with an error instead of looking like a successful hunt when:
 
-- the installed Ollama template cannot frame chat roles (`{{ .Prompt }}` with no `RENDERER`, no `.Messages`/role markers, or a Foundation-Sec name without `<|system|>/<|user|>/<|assistant|>`)
+- the model is not installed (`ollama list`), lacks text completion, or its Ollama template cannot frame chat roles (`{{ .Prompt }}` with no `RENDERER`, no `.Messages`/role markers, or a Foundation-Sec name without `<|system|>/<|user|>/<|assistant|>`)
+- the log file is missing, unreadable, malformed, or contains no events
 - generation hits the token limit (`done_reason=length`) or returns empty content
 - a required section is missing or empty
 - the verdict is not `suspicious`, `benign`, or `inconclusive`

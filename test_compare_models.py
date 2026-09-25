@@ -153,11 +153,11 @@ class HuntTests(unittest.TestCase):
                     patch.object(harness, 'run_hunt', return_value=result) as run, \
                     contextlib.redirect_stdout(io.StringIO()) as out:
                 harness.main()
-            self.assertEqual(run.call_args.args[:2], ('alpha', EVENTS))
+            self.assertEqual(run.call_args.args[:2], ('alpha:latest', EVENTS))
             self.assertIn(ANSWER, out.getvalue())
             result['status'] = 'invalid'
             result['validation_errors'] = ['Invalid output']
-            with patch.object(sys, 'argv', ['main.py', str(path)]), \
+            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'alpha']), \
                     patch.object(harness, 'Client', return_value=api), \
                     patch.object(harness, 'run_hunt', return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()), \
@@ -183,6 +183,25 @@ class HuntTests(unittest.TestCase):
             self.assertFalse(run.called)
             self.assertFalse(api.chat.called)
             self.assertIn("{{ .Prompt }}", err.getvalue())
+            self.assertIn("Preflight failed", err.getvalue())
+
+    def test_single_hunt_cli_rejects_empty_log_before_inference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'empty.jsonl'
+            path.write_text('')
+            api = client()
+            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'alpha']), \
+                    patch.object(harness, 'Client', return_value=api), \
+                    patch.object(harness, 'run_hunt') as run, \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()) as err, \
+                    self.assertRaises(SystemExit) as exit:
+                harness.main()
+            self.assertEqual(exit.exception.code, 1)
+            self.assertFalse(run.called)
+            self.assertFalse(api.chat.called)
+            self.assertIn("Preflight failed", err.getvalue())
+            self.assertIn("log contains no events", err.getvalue())
 
 
 class ResultsDirectoryNameTests(unittest.TestCase):

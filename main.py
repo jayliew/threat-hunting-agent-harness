@@ -32,11 +32,11 @@ DEFAULT_MODEL = "foundation-sec-8b-instruct"
 # DEFAULT_LOG_FILE = "logs/password-spray.jsonl"
 DEFAULT_LOG_FILE = "logs/http-beaconing.jsonl"
 
-# Full ECS dump is ~9k tokens; keep headroom for the reply. Model max is 131072.
+# Fallback context window when the matched profile has no num_ctx line.
 NUM_CTX = 32768
 NUM_PREDICT = 1024
-# Warn when context used reaches this fraction of NUM_CTX. At or above
-# NUM_CTX the run is an error.
+# Warn when context used reaches this fraction of the configured num_ctx.
+# At or above that window the run is an error.
 CONTEXT_WARN_RATIO = 0.9
 # Context shift. Ollama 0.33 enables this when `shift` is omitted, except for
 # DeepSeek2, and slides older tokens out once num_ctx is full. Send False for
@@ -612,11 +612,13 @@ def run_hunt(
     renderer: str | None = None,
     keep_alive: str | int = "5m",
     model_max: int | None = None,
+    num_ctx: int | None = None,
 ) -> dict:
     """Run one fresh conversation; retain answers and failures for inspection."""
     client = client if client is not None else Client(timeout=300)
+    allocated = NUM_CTX if num_ctx is None else num_ctx
     messages = build_messages(events)
-    options = {"temperature": 0, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT}
+    options = {"temperature": 0, "num_ctx": allocated, "num_predict": NUM_PREDICT}
     tokens = empty_tokens()
     result = {
         "model": model,
@@ -639,7 +641,7 @@ def run_hunt(
         "timing": {},
         "tokens": tokens,
         "warnings": [],
-        "context": context_usage(NUM_CTX, tokens, model_max),
+        "context": context_usage(allocated, tokens, model_max),
     }
     started = perf_counter()
     inspected_template = chat_template is not None
@@ -672,7 +674,7 @@ def run_hunt(
         result["thinking"] = response.message.thinking or ""
         result["tokens"] = usage_tokens(response)
         assign_token_split(result["tokens"], result["thinking"], content)
-        result["context"] = context_usage(NUM_CTX, result["tokens"], model_max)
+        result["context"] = context_usage(allocated, result["tokens"], model_max)
         result["sections"] = parse_hunt_sections(content)
         allowed = allowed_evidence_ids(events)
         result["unknown_evidence_ids"] = sorted(set(
@@ -800,6 +802,7 @@ def main() -> None:
         chat_template=slot.get("chat_template"),
         renderer=renderer or None,
         model_max=slot.get("context_length"),
+        num_ctx=slot["num_ctx"],
     )
     compare_models.annotate_result(result, slot, cases[0])
     compare_models.save_result(directory, manifest, [], result)

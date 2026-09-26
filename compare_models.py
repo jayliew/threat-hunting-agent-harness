@@ -5,7 +5,8 @@ directory under results/ with report.html, results.jsonl, and manifest.json.
 Models are never downloaded; names must already appear in `ollama list`.
 
 Declared model profiles in profiles/*.profile are copied into that directory
-before inference. They record the intended setup; they do not change the request.
+before inference. An uncommented num_ctx line is the context window sent for
+that model. A line that starts with # is kept and not applied.
 """
 from __future__ import annotations
 
@@ -144,6 +145,24 @@ def parse_profile_text(text: str, source: str) -> dict:
 
 def parse_profile_file(path: Path) -> dict:
     return parse_profile_text(path.read_text(encoding="utf-8"), display_source(path))
+
+
+def parse_num_ctx(value: str, source: str) -> int:
+    """Parse a profile num_ctx. Commas are allowed; ranges and other text are not."""
+    text = value.replace(",", "").strip()
+    if not text.isdigit() or int(text) <= 0:
+        raise ValueError(f"{source}: num_ctx must be a positive integer (got {value!r})")
+    return int(text)
+
+
+def profile_num_ctx(profile: dict | None) -> int:
+    """Context window for one setup. A missing num_ctx line uses NUM_CTX."""
+    if profile is None:
+        return NUM_CTX
+    raw = profile.get("fields", {}).get("num_ctx")
+    if raw is None:
+        return NUM_CTX
+    return parse_num_ctx(raw, profile.get("source") or "profile")
 
 
 def load_profiles(directory: Path) -> list[dict]:
@@ -295,7 +314,13 @@ def assign_run_slots(
                 continue
             chosen = [one]
         for profile in chosen:
+            try:
+                num_ctx = profile_num_ctx(profile)
+            except ValueError as error:
+                problems.append(str(error))
+                continue
             slot = dict(model)
+            slot["num_ctx"] = num_ctx
             if profile is None:
                 slot["run_key"] = model["name"]
                 slot["profile_source"] = None
@@ -445,7 +470,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             if result is None:
                 cards.append(
                     f'<article><h3>{name}</h3><p class="pending">Pending</p>'
-                    f'<p>{e(context_label(settings.get("num_ctx"), None, model.get("context_length")))}<br>'
+                    f'<p>{e(context_label(model.get("num_ctx", settings.get("num_ctx")), None, model.get("context_length")))}<br>'
                     f'{framing_note(model)}'
                     f'Quantization: {e(quant)}<br>Thinking: {e(think)}<br>'
                     f'{e(tokens_label(None))}</p></article>'
@@ -458,7 +483,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             load = seconds(timing.get("load_duration_seconds"))
             tokens = result.get("tokens") or {}
             context = result.get("context") or {}
-            allocated = context.get("allocated", settings.get("num_ctx"))
+            allocated = context.get("allocated", model.get("num_ctx", settings.get("num_ctx")))
             used = context.get("used")
             model_max = context.get("model_max", model.get("context_length"))
             rows.append(
@@ -615,6 +640,7 @@ def run_comparison(
                               chat_template=slot.get("chat_template"),
                               renderer=slot.get("renderer") or None,
                               model_max=slot.get("context_length"),
+                              num_ctx=slot["num_ctx"],
                               keep_alive=0 if index == len(cases)-1 else "5m")
             annotate_result(result, slot, case)
             save_result(directory, manifest, results, result)

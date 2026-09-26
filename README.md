@@ -130,7 +130,7 @@ uv run python main.py --profile profiles/qwen3-32b-other.profile
 
 The script prints the model name, the declared profile, the installed chat template, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It also prints input, thinking, and output tokens, how those generated tokens were split, and context used versus the configured `num_ctx`. It writes a results directory, the same kind of record as a comparison: the profile is copied in before inference, then the hunt result is appended. Pass `--profile` to choose the setup. If several profiles name the model and you do not pass `--profile`, the hunt stops and lists them. It exits with an error instead of looking like a successful hunt when:
 
-- a file in `profiles/` is empty, missing `Model`, or is not `Label: value` lines
+- a file in `profiles/` is empty, missing `model`, or is not `key=value` lines
 - the model is not installed (`ollama list`), lacks text completion, or its Ollama template cannot frame chat roles (`{{ .Prompt }}` with no `RENDERER`, no `.Messages`/role markers, or a Foundation-Sec name without `<|system|>/<|user|>/<|assistant|>`)
 - the log file is missing, unreadable, malformed, or contains no events
 - generation hits the token limit (`done_reason=length`) or returns empty content
@@ -155,24 +155,24 @@ Thinking tokens and the final answer share the 1,024-token `num_predict` budget;
 
 Each model used in a test or eval has its own file in `profiles/`. The file is that model's setup for the run: which installed Ollama name to call, and the request values to use for it. Ollama and the model's Modelfile already have defaults, such as `PARAMETER num_ctx`. An uncommented profile value is sent on the chat request and may override those defaults for that call. `num_ctx` is the eval context window. The harness sends it as `options.num_ctx`, which replaces the Modelfile context size and Ollama's default for the request. A `#` line stays in the file for a later change and leaves the Ollama or Modelfile default in place. Blank lines are ignored.
 
-`Model:` names the installed model (`alpha` and `alpha:latest` are the same model). Two files may name the same model when the settings differ; those are different runs and can produce different results. Pass `--profile` with the file for the run you want. If more than one file matches a model and you do not pass `--profile`, the run stops and lists the files.
+Each line is `key=value`, the same shape as a `.env` file. `model` names the installed model (`alpha` and `alpha:latest` are the same model). Two files may name the same model when the settings differ; those are different runs and can produce different results. Pass `--profile` with the file for the run you want. If more than one file matches a model and you do not pass `--profile`, the run stops and lists the files.
 
 `profiles/qwen3-32b.profile` records this setup:
 
 ```
-Model:                  qwen3:32b
-# Weight precision:       Developer Q8_0
-# KV cache:               Q8_0
-# Thinking:               Enabled
-num_ctx:                40,960
-# Repeat penalty:         1.0
+model=qwen3:32b
+# weight_precision=Developer Q8_0
+# kv_cache=Q8_0
+thinking=true
+num_ctx=40,960
+# repeat_penalty=1.0
 ```
 
-The other recorded setups are `llama3.3:70b` (`num_ctx` 16,384), `granite4.2:30b` (65,536), `deepseek-r1:32b` (65,536), `command-r:latest` (131,072), `gemma4:31b` (32,768), `mistral-small3.2:24b` (131,072), `mistral-nemo:12b` (131,072), and `foundation-sec-8b-instruct` (131,072).
+The other recorded setups are `llama3.3:70b` (`num_ctx` 16,384), `granite4.2:30b` (65,536, `thinking=high`), `deepseek-r1:32b` (65,536, `thinking=true`), `command-r:latest` (131,072), `gemma4:31b` (32,768, `thinking=true`), `mistral-small3.2:24b` (131,072), `mistral-nemo:12b` (131,072), and `foundation-sec-8b-instruct` (131,072). `thinking` stays commented on models that do not support it. Granite 4.2 accepts several reasoning levels (`false`, `low`, `medium`, `high`); its profile comments those values and sets the highest, `high`. Qwen3, DeepSeek-R1, and Gemma 4 are on or off, so their profiles use `thinking=true`.
 
 Both `main.py` and `compare_models.py` load the chosen profile before the first inference call, print it, and copy it into the results directory. A model with no file is reported as having no declared profile. If an uncommented weight quant differs from the installed Ollama quantization, the report keeps both and notes the difference. A malformed profile, including a `num_ctx` that is not a positive integer, stops the run before any results directory is created.
 
-A matched profile's `num_ctx` is the context window sent for that hunt, overriding the model's usual context size. A model with no profile, or a profile with no `num_ctx` line, uses 32,768 from `NUM_CTX` in `main.py`. Weight precision, KV cache, thinking, and repeat penalty are commented out, so those Modelfile and Ollama defaults stay in effect. Thinking still comes from `THINK` in `main.py`. The saved profile is what distinguishes two runs of the same model when those settings later differ.
+A matched profile's `num_ctx` is the context window sent for that hunt, overriding the model's usual context size. A model with no profile, or a profile with no `num_ctx` line, uses 32,768 from `NUM_CTX` in `main.py`. An uncommented `thinking` line is resolved before inference and sent as the Ollama `think` argument (`true`, `false`, `low`, `medium`, or `high`) when the installed model lists the thinking capability. A profile that sets `thinking` for a model without that capability stops the run before any chat call. A profile with no `thinking` line uses `THINK` in `main.py`. Weight precision, KV cache, and repeat penalty stay commented out. The saved profile is what distinguishes two runs of the same model when those settings later differ.
 
 Edit the `MODELS` and `DEFAULT_SCENARIO_LOGS` lists at the top of `compare_models.py`, then run:
 
@@ -198,7 +198,7 @@ Log paths are relative to the script (or absolute); a supplied output directory 
 - `results.jsonl`: one row per attempted model/case pair, saved immediately. Includes full raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages/options, prompt and input hashes, model digest, the declared profile path when one matched, timings, token counts, and context allocated/used.
 - `manifest.json`: selected models (digest, capabilities, quantization, native context, and the `num_ctx` sent for that model), declared profiles, plus shared request settings (`num_ctx` as the fallback when a profile does not set one, `num_predict`, `think`, `shift`) and input file identities. Pending cases remain visible in the report if the process is interrupted.
 
-Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Temperature, answer budget, the requested thinking mode, and context shift come from `main.py`; the context window is the matched profile's `num_ctx`, or `NUM_CTX` when that line is absent. Capability-aware handling omits `think` for models without that capability. Context shift is sent for every model. The last case for each model requests unloading afterward. The configurable HTTP operation timeout defaults to 300 seconds; it is not a total batch deadline.
+Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Temperature, answer budget, and context shift come from `main.py`. The context window is the matched profile's `num_ctx`, or `NUM_CTX` when that line is absent. The thinking mode is the matched profile's `thinking` line, or `THINK` when that line is absent, and it is placed on the request before the chat call when the model lists the thinking capability. Context shift is sent for every model. The last case for each model requests unloading afterward. The configurable HTTP operation timeout defaults to 300 seconds; it is not a total batch deadline.
 
 Invalid, empty, truncated, and failed responses are retained. An individual inference error does not stop the remaining cases. The report updates after every saved result. Exit status is nonzero if any run is invalid or failed, if any run meets or exceeds the configured context window, if preflight fails, or if execution is interrupted; completed results remain available.
 

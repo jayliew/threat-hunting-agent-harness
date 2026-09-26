@@ -51,6 +51,13 @@ SHIFT = False
 # 1024 tokens, True can return an empty or truncated analysis. True keeps
 # the reasoning trace; False spends the budget on the structured verdict.
 THINK = False
+# K/V cache quantization for the Ollama server (`OLLAMA_KV_CACHE_TYPE`).
+# Ollama's built-in default is also f16, but this harness sets f16 explicitly
+# so runs are not left to an implicit server default. This is a server
+# environment variable, not a chat API option: the process that runs
+# `ollama serve` (or the Ollama app) must inherit it before start. Recorded
+# on each hunt request and in compare manifests for reproducibility.
+KV_CACHE_TYPE = "f16"
 
 
 def resolve_log_path(log_file: str) -> Path:
@@ -580,12 +587,17 @@ def send_chat(client: Client, request: dict):
     ollama-python 0.6.2 builds ChatRequest without `shift` and drops unknown
     fields, so client.chat(shift=False) raises TypeError. When chat() cannot
     accept `shift`, serialize the known fields and set `shift` on the JSON body.
+    `kv_cache_type` is recorded on the hunt for reproducibility. It is the
+    server's OLLAMA_KV_CACHE_TYPE, not a chat API field, so it is not sent.
     """
+    chat_request = {
+        key: value for key, value in request.items() if key != "kv_cache_type"
+    }
     if chat_accepts_shift(client.chat):
-        return client.chat(**request)
-    payload = {key: value for key, value in request.items() if key != "shift"}
+        return client.chat(**chat_request)
+    payload = {key: value for key, value in chat_request.items() if key != "shift"}
     body = ChatRequest(**payload).model_dump(exclude_none=True)
-    body["shift"] = request["shift"]
+    body["shift"] = chat_request["shift"]
     return client._request(
         ChatResponse,
         "POST",
@@ -635,8 +647,15 @@ def run_hunt(
         "response": None,
         "chat_template": chat_template or "",
         "renderer": renderer or "",
-        "request": {"model": model, "messages": messages, "options": options,
-                    "stream": False, "keep_alive": keep_alive, "shift": SHIFT},
+        "request": {
+            "model": model,
+            "messages": messages,
+            "options": options,
+            "stream": False,
+            "keep_alive": keep_alive,
+            "shift": SHIFT,
+            "kv_cache_type": KV_CACHE_TYPE,
+        },
         "prompt_sha256": hashlib.sha256(
             json.dumps(messages, sort_keys=True).encode()
         ).hexdigest(),
@@ -809,6 +828,7 @@ def main() -> None:
     )
     compare_models.annotate_result(result, slot, cases[0])
     compare_models.save_result(directory, manifest, [], result)
+    print(f"KV cache type (server OLLAMA_KV_CACHE_TYPE): {KV_CACHE_TYPE}")
     effective_think = result["request"].get("think")
     print(f"Thinking: {effective_think if effective_think is not None else 'unsupported or unavailable'}")
     if result["thinking"]:

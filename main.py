@@ -42,14 +42,14 @@ CONTEXT_WARN_RATIO = 0.9
 # DeepSeek2, and slides older tokens out once num_ctx is full. Send False for
 # every model so a full window errors instead of shifting history.
 SHIFT = False
-# Thinking models (Qwen3, DeepSeek-R1, …): Ollama default is True if `think`
-# is omitted. Models without the thinking capability reject the argument
-# (HTTP 400: "does not support thinking"). Send think only when /api/show
-# lists "thinking". For those models, set True or False explicitly; do not
-# leave the API default implicit. Thinking tokens share NUM_PREDICT with
-# the final answer; at 1024 tokens, True can return an empty or truncated
-# analysis. True keeps the reasoning trace; False spends the budget on the
-# structured verdict.
+# Fallback when a profile has no thinking line. Thinking models (Qwen3,
+# DeepSeek-R1, …): Ollama default is True if `think` is omitted. Models
+# without the thinking capability reject the argument (HTTP 400: "does not
+# support thinking"). Send think only when /api/show lists "thinking". For
+# those models, set True or False explicitly; do not leave the API default
+# implicit. Thinking tokens share NUM_PREDICT with the final answer; at
+# 1024 tokens, True can return an empty or truncated analysis. True keeps
+# the reasoning trace; False spends the budget on the structured verdict.
 THINK = False
 
 
@@ -100,8 +100,8 @@ def allowed_evidence_ids(events: list[dict]) -> set[str]:
 
 
 def chat_think_kwargs(
-    think: bool, capabilities: list[str] | None
-) -> dict[str, bool]:
+    think: bool | str, capabilities: list[str] | None
+) -> dict[str, bool | str]:
     """Omit think unless the model advertises the thinking capability."""
     if "thinking" not in (capabilities or []):
         return {}
@@ -613,10 +613,12 @@ def run_hunt(
     keep_alive: str | int = "5m",
     model_max: int | None = None,
     num_ctx: int | None = None,
+    think: bool | str | None = None,
 ) -> dict:
     """Run one fresh conversation; retain answers and failures for inspection."""
     client = client if client is not None else Client(timeout=300)
     allocated = NUM_CTX if num_ctx is None else num_ctx
+    requested_think = THINK if think is None else think
     messages = build_messages(events)
     options = {"temperature": 0, "num_ctx": allocated, "num_predict": NUM_PREDICT}
     tokens = empty_tokens()
@@ -658,7 +660,7 @@ def run_hunt(
                 model_max = native_context_length(info)
                 result["context"]["model_max"] = model_max
         result["capabilities"] = capabilities
-        result["request"].update(chat_think_kwargs(THINK, capabilities))
+        result["request"].update(chat_think_kwargs(requested_think, capabilities))
         if inspected_template:
             error = chat_template_error(
                 model, result["chat_template"], result["renderer"] or None
@@ -712,7 +714,7 @@ def main() -> None:
         help=(
             "Ollama model already installed on this machine "
             f"(ollama list). Default: {DEFAULT_MODEL}. "
-            "With --profile, this must match the profile's Model line."
+            "With --profile, this must match the profile's model= value."
         ),
     )
     parser.add_argument(
@@ -803,6 +805,7 @@ def main() -> None:
         renderer=renderer or None,
         model_max=slot.get("context_length"),
         num_ctx=slot["num_ctx"],
+        think=slot.get("think"),
     )
     compare_models.annotate_result(result, slot, cases[0])
     compare_models.save_result(directory, manifest, [], result)

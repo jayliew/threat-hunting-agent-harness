@@ -20,6 +20,7 @@ from ollama import Client
 from main import (
     NUM_CTX,
     NUM_PREDICT,
+    SHIFT,
     THINK,
     preflight_models_and_logs,
     run_hunt,
@@ -228,6 +229,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
              'Thinking and output tokens split that generated count: exact when only one of those texts is present, '
              'estimated by character length when both are present. '
              'A run warns at 90% of num_ctx and is an error at or above num_ctx. '
+             'Context shift is disabled for every model. '
              'A missing cached-token count is unknown, not zero.</p>'
              '<div class="scroll"><table><thead><tr><th>Case</th><th>Model</th><th>Verdict</th>'
              '<th>Output status</th><th>Unknown IDs</th><th>Wall time</th><th>Load time</th>'
@@ -250,6 +252,7 @@ def run_comparison(client: Client, models: list[str], logs: list[str], output_ro
             "num_ctx": NUM_CTX,
             "num_predict": NUM_PREDICT,
             "think": THINK,
+            "shift": SHIFT,
         },
         "models": selected,
         "cases": [{k: v for k, v in case.items() if k != "events"} for case in cases],

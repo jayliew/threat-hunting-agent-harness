@@ -62,6 +62,8 @@ class HuntTests(unittest.TestCase):
         self.assertEqual(result['timing']['load_duration_seconds'], 0.5)
         self.assertEqual(result['timing']['eval_duration_seconds'], 1.3)
         self.assertEqual(api.chat.call_args.kwargs['think'], harness.THINK)
+        self.assertFalse(api.chat.call_args.kwargs['shift'])
+        self.assertFalse(result['request']['shift'])
         self.assertEqual(len(api.chat.call_args.kwargs['messages']), 2)
         self.assertFalse(api.show.called)
         self.assertEqual(result['tokens']['prompt_eval_count'], 80)
@@ -80,6 +82,31 @@ class HuntTests(unittest.TestCase):
         api = client()
         harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion'])
         self.assertNotIn('think', api.chat.call_args.kwargs)
+        self.assertFalse(api.chat.call_args.kwargs['shift'])
+
+    def test_client_without_shift_kwarg_still_sends_shift_false(self):
+        class FixedChat:
+            def chat(self, model='', messages=None, *, stream=False, think=None,
+                     options=None, keep_alive=None, tools=None, logprobs=None,
+                     top_logprobs=None, format=None):
+                raise AssertionError('chat() cannot accept shift')
+
+            def _request(self, cls, method, path, *, json, stream=False):
+                self.body = json
+                self.method = method
+                self.path = path
+                self.stream = stream
+                return response()
+
+        api = FixedChat()
+        result = harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion'])
+        self.assertEqual(result['status'], 'ok')
+        self.assertFalse(result['request']['shift'])
+        self.assertFalse(api.body['shift'])
+        self.assertEqual(api.method, 'POST')
+        self.assertEqual(api.path, '/api/chat')
+        self.assertFalse(api.stream)
+        self.assertEqual(api.body['options']['num_ctx'], harness.NUM_CTX)
 
     def test_invalid_evidence_and_partial_answer_are_preserved(self):
         api = client()
@@ -488,8 +515,11 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(rows[0]['warnings'], [])
         self.assertIn('Thinking: 0', html)
         self.assertEqual(rows[0]['context']['allocated'], harness.NUM_CTX)
+        self.assertFalse(rows[0]['request']['shift'])
         manifest = json.loads((directory / 'manifest.json').read_text())
         self.assertEqual(manifest['request_settings']['num_ctx'], harness.NUM_CTX)
+        self.assertFalse(manifest['request_settings']['shift'])
+        self.assertIn('Context shift is disabled for every model.', html)
         self.assertIsNone(manifest['models'][0]['quantization_level'])
 
     def test_report_includes_model_settings_tokens_and_context(self):

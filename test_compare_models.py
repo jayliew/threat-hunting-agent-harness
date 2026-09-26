@@ -65,6 +65,8 @@ class HuntTests(unittest.TestCase):
         self.assertEqual(result['request']['kv_cache_type'], harness.KV_CACHE_TYPE)
         self.assertEqual(harness.KV_CACHE_TYPE, 'f16')
         self.assertNotIn('kv_cache_type', api.chat.call_args.kwargs)
+        self.assertFalse(api.chat.call_args.kwargs['shift'])
+        self.assertFalse(result['request']['shift'])
         self.assertEqual(len(api.chat.call_args.kwargs['messages']), 2)
         self.assertFalse(api.show.called)
         self.assertEqual(result['tokens']['prompt_eval_count'], 80)
@@ -83,6 +85,33 @@ class HuntTests(unittest.TestCase):
         api = client()
         harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion'])
         self.assertNotIn('think', api.chat.call_args.kwargs)
+        self.assertFalse(api.chat.call_args.kwargs['shift'])
+
+    def test_client_without_shift_kwarg_still_sends_shift_false(self):
+        class FixedChat:
+            def chat(self, model='', messages=None, *, stream=False, think=None,
+                     options=None, keep_alive=None, tools=None, logprobs=None,
+                     top_logprobs=None, format=None):
+                raise AssertionError('chat() cannot accept shift')
+
+            def _request(self, cls, method, path, *, json, stream=False):
+                self.body = json
+                self.method = method
+                self.path = path
+                self.stream = stream
+                return response()
+
+        api = FixedChat()
+        result = harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion'])
+        self.assertEqual(result['status'], 'ok')
+        self.assertFalse(result['request']['shift'])
+        self.assertFalse(api.body['shift'])
+        self.assertEqual(result['request']['kv_cache_type'], harness.KV_CACHE_TYPE)
+        self.assertNotIn('kv_cache_type', api.body)
+        self.assertEqual(api.method, 'POST')
+        self.assertEqual(api.path, '/api/chat')
+        self.assertFalse(api.stream)
+        self.assertEqual(api.body['options']['num_ctx'], harness.NUM_CTX)
 
     def test_invalid_evidence_and_partial_answer_are_preserved(self):
         api = client()
@@ -200,7 +229,7 @@ class HuntTests(unittest.TestCase):
             path.write_text(json.dumps(EVENTS[0])+'\n')
             api = client()
             result = harness.run_hunt('alpha', EVENTS, client=api)
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'alpha']), \
+            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
                     patch.object(harness, 'Client', return_value=api), \
                     patch.object(harness, 'run_hunt', return_value=result) as run, \
                     contextlib.redirect_stdout(io.StringIO()) as out:
@@ -214,7 +243,7 @@ class HuntTests(unittest.TestCase):
             )
             result['status'] = 'invalid'
             result['validation_errors'] = ['Invalid output']
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'alpha']), \
+            with patch.object(sys, 'argv', ['main.py', str(path), '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
                     patch.object(harness, 'Client', return_value=api), \
                     patch.object(harness, 'run_hunt', return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()), \
@@ -229,7 +258,7 @@ class HuntTests(unittest.TestCase):
             path.write_text(json.dumps(EVENTS[0])+'\n')
             api = client()
             api.show.return_value.template = "{{ .Prompt }}"
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'alpha']), \
+            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
                     patch.object(harness, 'Client', return_value=api), \
                     patch.object(harness, 'run_hunt') as run, \
                     contextlib.redirect_stdout(io.StringIO()), \
@@ -491,9 +520,12 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(rows[0]['warnings'], [])
         self.assertIn('Thinking: 0', html)
         self.assertEqual(rows[0]['context']['allocated'], harness.NUM_CTX)
+        self.assertFalse(rows[0]['request']['shift'])
         manifest = json.loads((directory / 'manifest.json').read_text())
         self.assertEqual(manifest['request_settings']['num_ctx'], harness.NUM_CTX)
         self.assertEqual(manifest['request_settings']['kv_cache_type'], harness.KV_CACHE_TYPE)
+        self.assertFalse(manifest['request_settings']['shift'])
+        self.assertIn('Context shift is disabled for every model.', html)
         self.assertIsNone(manifest['models'][0]['quantization_level'])
         self.assertIn(f'kv_cache_type={harness.KV_CACHE_TYPE}', html)
 
@@ -615,6 +647,406 @@ class ComparisonTests(unittest.TestCase):
             compare_models.main()
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(len(list((self.root/'results').glob('*/report.html'))), 1)
+
+
+class DeclaredProfileTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.profiles = self.root / "profiles"
+        self.profiles.mkdir()
+        self.log = self.root / "case.jsonl"
+        self.log.write_text(json.dumps(EVENTS[0]) + "\n")
+
+    def write_profile(self, name: str, text: str) -> None:
+        (self.profiles / name).write_text(text, encoding="utf-8")
+
+    def test_checked_in_qwen_profile_parses(self):
+        profile = compare_models.parse_profile_file(
+            Path(__file__).resolve().parent / "profiles" / "qwen3-32b.profile"
+        )
+        self.assertEqual(profile["source"], "profiles/qwen3-32b.profile")
+        self.assertEqual(
+            profile["fields"],
+            {"model": "qwen3:32b", "thinking": "true", "num_ctx": "40,960"},
+        )
+        self.assertEqual(compare_models.profile_num_ctx(profile), 40960)
+        self.assertIs(compare_models.profile_think(profile), True)
+        self.assertIn("# weight_precision=Developer Q8_0", profile["text"])
+        self.assertIn("# kv_cache=Q8_0", profile["text"])
+        self.assertIn("# repeat_penalty=1.0", profile["text"])
+
+    def test_checked_in_profiles_match_the_planned_setups(self):
+        expected = {
+            "qwen3-32b.profile": ("qwen3:32b", "40,960", 40960, "true", True),
+            "llama3.3-70b.profile": ("llama3.3:70b", "16,384", 16384, None, None),
+            "granite4.2-30b.profile": ("granite4.2:30b", "65,536", 65536, "high", "high"),
+            "deepseek-r1-32b.profile": ("deepseek-r1:32b", "65,536", 65536, "true", True),
+            "command-r.profile": ("command-r:latest", "131,072", 131072, None, None),
+            "gemma4-31b.profile": ("gemma4:31b", "32,768", 32768, "true", True),
+            "mistral-small3.2-24b.profile": (
+                "mistral-small3.2:24b",
+                "131,072",
+                131072,
+                None,
+                None,
+            ),
+            "mistral-nemo-12b.profile": ("mistral-nemo:12b", "131,072", 131072, None, None),
+            "foundation-sec-8b-instruct.profile": (
+                "foundation-sec-8b-instruct",
+                "131,072",
+                131072,
+                None,
+                None,
+            ),
+        }
+        root = Path(__file__).resolve().parent / "profiles"
+        for name, (model, text, number, thinking, parsed) in expected.items():
+            profile = compare_models.parse_profile_file(root / name)
+            fields = {"model": model, "num_ctx": text}
+            if thinking is not None:
+                fields["thinking"] = thinking
+            self.assertEqual(profile["fields"], fields)
+            self.assertEqual(compare_models.profile_num_ctx(profile), number)
+            self.assertEqual(compare_models.profile_think(profile), parsed)
+            self.assertIn("# weight_precision=", profile["text"])
+            self.assertIn("# repeat_penalty=", profile["text"])
+            if thinking is None:
+                self.assertIn("# thinking=", profile["text"])
+            if name == "granite4.2-30b.profile":
+                self.assertIn(
+                    "# thinking levels: false, low, medium, high",
+                    profile["text"],
+                )
+        self.assertIsNone(compare_models.quantization_note("Developer Q8_0", "Q8_0"))
+        self.assertIsNone(compare_models.quantization_note("Developer QAT Q4_0", "Q4_0"))
+        self.assertIsNone(
+            compare_models.quantization_note("Existing developer Q8_0", "Q8_0")
+        )
+        self.assertIn("Q4_K_M", compare_models.quantization_note("Q4_K_M", "Q8_0"))
+
+    def test_comments_and_blank_lines_are_ignored(self):
+        profile = compare_models.parse_profile_text(
+            "# intended setup\n\nmodel=qwen3:32b\n", "memory"
+        )
+        self.assertEqual(profile["fields"], {"model": "qwen3:32b"})
+
+    def test_ambiguous_profiles_stop_before_inference(self):
+        self.write_profile("think.profile", "model=alpha\ntemperature=0.6\n")
+        self.write_profile("direct.profile", "model=alpha:latest\ntemperature=0\n")
+        api = client()
+        with self.assertRaises(ValueError) as error:
+            compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        message = str(error.exception)
+        self.assertIn("Multiple profiles", message)
+        self.assertIn("think.profile", message)
+        self.assertIn("direct.profile", message)
+        self.assertFalse(api.chat.called)
+        self.assertFalse((self.root / "results").exists())
+
+    def test_explicit_profiles_keep_same_model_runs_separate(self):
+        self.write_profile("think.profile", "model=alpha\ntemperature=0.6\n")
+        self.write_profile("direct.profile", "model=alpha\ntemperature=0\n")
+        api = client()
+        with contextlib.redirect_stdout(io.StringIO()):
+            directory = compare_models.run_comparison(
+                api,
+                ["alpha"],
+                [str(self.log)],
+                self.root / "results",
+                self.profiles,
+                [self.profiles / "think.profile", self.profiles / "direct.profile"],
+            )
+        rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
+        self.assertEqual([row["model"] for row in rows], ["alpha:latest", "alpha:latest"])
+        self.assertEqual(len({row["run_key"] for row in rows}), 2)
+        self.assertNotEqual(rows[0]["declared_profile"], rows[1]["declared_profile"])
+        html = (directory / "report.html").read_text()
+        self.assertIn("temperature=0.6", html)
+        self.assertIn("temperature=0", html)
+        self.assertEqual(
+            sorted(path.name for path in (directory / "declared-profiles").iterdir()),
+            ["direct.profile", "think.profile"],
+        )
+
+    def test_profile_num_ctx_is_sent_and_allocated(self):
+        self.write_profile("alpha.profile", "model=alpha\nnum_ctx=16,384\n")
+        api = client()
+        with contextlib.redirect_stdout(io.StringIO()):
+            directory = compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertEqual(api.chat.call_args.kwargs["options"]["num_ctx"], 16384)
+        rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
+        self.assertEqual(rows[0]["request"]["options"]["num_ctx"], 16384)
+        self.assertEqual(rows[0]["context"]["allocated"], 16384)
+        manifest = json.loads((directory / "manifest.json").read_text())
+        self.assertEqual(manifest["models"][0]["num_ctx"], 16384)
+        self.assertEqual(manifest["request_settings"]["num_ctx"], harness.NUM_CTX)
+        html = (directory / "report.html").read_text()
+        self.assertIn("used 120 / allocated 16384", html)
+
+    def test_profile_without_num_ctx_uses_fallback(self):
+        self.write_profile("alpha.profile", "model=alpha\n")
+        api = client()
+        with contextlib.redirect_stdout(io.StringIO()):
+            directory = compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertEqual(api.chat.call_args.kwargs["options"]["num_ctx"], harness.NUM_CTX)
+        rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
+        self.assertEqual(rows[0]["context"]["allocated"], harness.NUM_CTX)
+        manifest = json.loads((directory / "manifest.json").read_text())
+        self.assertEqual(manifest["models"][0]["num_ctx"], harness.NUM_CTX)
+
+    def test_profile_thinking_is_sent_before_inference(self):
+        self.write_profile("alpha.profile", "model=alpha\nthinking=true\n")
+        api = client()
+        api.show.return_value.capabilities = ["completion", "thinking"]
+        seen = {}
+
+        def generate(**kwargs):
+            self.assertIs(kwargs["think"], True)
+            seen["before"] = True
+            return response()
+
+        api.chat.side_effect = generate
+        with contextlib.redirect_stdout(io.StringIO()):
+            directory = compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertTrue(seen["before"])
+        manifest = json.loads((directory / "manifest.json").read_text())
+        self.assertIs(manifest["models"][0]["think"], True)
+        html = (directory / "report.html").read_text()
+        self.assertIn("Thinking: enabled", html)
+
+    def test_profile_thinking_level_is_sent_before_inference(self):
+        self.write_profile("alpha.profile", "model=alpha\nthinking=high\n")
+        api = client()
+        api.show.return_value.capabilities = ["completion", "thinking"]
+
+        def generate(**kwargs):
+            self.assertEqual(kwargs["think"], "high")
+            return response()
+
+        api.chat.side_effect = generate
+        with contextlib.redirect_stdout(io.StringIO()):
+            compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+
+    def test_profile_thinking_without_capability_stops_before_chat(self):
+        self.write_profile("alpha.profile", "model=alpha\nthinking=true\n")
+        api = client()
+        with self.assertRaises(ValueError) as error:
+            compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertIn("thinking capability", str(error.exception))
+        self.assertFalse(api.chat.called)
+        self.assertFalse((self.root / "results").exists())
+
+    def test_bad_thinking_stops_before_chat(self):
+        self.write_profile("alpha.profile", "model=alpha\nthinking=sometimes\n")
+        api = client()
+        api.show.return_value.capabilities = ["completion", "thinking"]
+        with self.assertRaises(ValueError) as error:
+            compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertIn("thinking must be", str(error.exception))
+        self.assertFalse(api.chat.called)
+        self.assertFalse((self.root / "results").exists())
+
+    def test_bad_num_ctx_stops_before_chat(self):
+        self.write_profile("alpha.profile", "model=alpha\nnum_ctx=16,384\u201324,576\n")
+        api = client()
+        with self.assertRaises(ValueError) as error:
+            compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertIn("num_ctx must be a positive integer", str(error.exception))
+        self.assertFalse(api.chat.called)
+        self.assertFalse((self.root / "results").exists())
+
+    def test_malformed_profile_stops_before_results_and_inference(self):
+        self.write_profile("alpha.profile", "weight_quant=Q6_K\n")
+        api = client()
+        with self.assertRaises(ValueError) as error:
+            compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertIn("missing Model", str(error.exception))
+        self.assertFalse(api.chat.called)
+        self.assertFalse((self.root / "results").exists())
+
+    def test_profile_is_saved_and_shown_before_inference(self):
+        self.write_profile(
+            "alpha.profile",
+            "model=alpha\n"
+            "weight_quant=Q6_K\n"
+            "temperature=<script>alert(1)</script>\n"
+            "kv_cache=f16\n",
+        )
+        api = client()
+        api.show.return_value.details = SimpleNamespace(
+            quantization_level="Q4_K_M",
+            parameter_size="32B",
+            format="gguf",
+            family="qwen",
+        )
+        seen = {}
+
+        def generate(**kwargs):
+            saved = list((self.root / "results").glob("*/manifest.json"))
+            self.assertEqual(len(saved), 1)
+            manifest = json.loads(saved[0].read_text())
+            self.assertEqual(manifest["profiles"][0]["fields"]["kv_cache"], "f16")
+            self.assertIn("Q4_K_M", manifest["profiles"][0]["quantization_note"])
+            report = saved[0].with_name("report.html").read_text()
+            self.assertIn("Declared profiles", report)
+            self.assertIn("0 / 1 runs recorded", report)
+            self.assertNotIn("<script>", report)
+            self.assertIn("&lt;script&gt;", report)
+            copied = saved[0].parent / "declared-profiles" / "alpha.profile"
+            self.assertIn("<script>", copied.read_text())
+            seen["before"] = True
+            return response()
+
+        api.chat.side_effect = generate
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            directory = compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertTrue(seen["before"])
+        printed = out.getvalue()
+        self.assertLess(printed.index("Declared profile"), printed.index("Results:"))
+        self.assertIn("installed quantization is Q4_K_M", printed)
+        rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
+        self.assertTrue(rows[0]["declared_profile"].endswith("alpha.profile"))
+        self.assertEqual(api.chat.call_args.kwargs["options"]["temperature"], 0)
+
+    def test_missing_profile_is_recorded_as_absent(self):
+        api = client()
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            directory = compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertIn("No declared profile for alpha:latest", out.getvalue())
+        html = (directory / "report.html").read_text()
+        self.assertIn("No declared profile", html)
+        manifest = json.loads((directory / "manifest.json").read_text())
+        self.assertEqual(manifest["profiles"], [])
+        rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
+        self.assertIsNone(rows[0]["declared_profile"])
+        self.assertFalse((directory / "declared-profiles").exists())
+
+    def test_single_hunt_records_profile_before_analysis(self):
+        self.write_profile("alpha.profile", "model=alpha\nkv_cache=f16\n")
+        api = client()
+        result = harness.run_hunt("alpha", EVENTS, client=api)
+        output = self.root / "single-results"
+        seen = {}
+
+        def fake_run(*args, **kwargs):
+            saved = list(output.glob("*/declared-profiles/alpha.profile"))
+            self.assertEqual(len(saved), 1)
+            self.assertIn("kv_cache=f16", saved[0].read_text())
+            report = saved[0].parents[1] / "report.html"
+            self.assertIn("0 / 1 runs recorded", report.read_text())
+            seen["before"] = True
+            return result
+
+        with patch.object(sys, "argv", [
+            "main.py", str(self.log), "--model", "alpha",
+            "--profiles-dir", str(self.profiles),
+            "--output-dir", str(output),
+        ]), patch.object(harness, "Client", return_value=api), \
+                patch.object(harness, "run_hunt", side_effect=fake_run), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            harness.main()
+        self.assertTrue(seen["before"])
+        printed = out.getvalue()
+        self.assertLess(printed.index("kv_cache="), printed.index("--- Analysis ---"))
+        rows = [
+            json.loads(line)
+            for path in output.glob("*/results.jsonl")
+            for line in path.read_text().splitlines()
+        ]
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["declared_profile"].endswith("alpha.profile"))
+        self.assertEqual(rows[0]["status"], "ok")
+
+    def test_single_hunt_requires_a_choice_when_settings_differ(self):
+        self.write_profile("think.profile", "model=alpha\ntemperature=0.6\nkv_cache=f16\n")
+        self.write_profile("direct.profile", "model=alpha\ntemperature=0\nkv_cache=q8_0\n")
+        api = client()
+        output = self.root / "single-results"
+        with patch.object(sys, "argv", [
+            "main.py", str(self.log), "--model", "alpha",
+            "--profiles-dir", str(self.profiles),
+            "--output-dir", str(output),
+        ]), patch.object(harness, "Client", return_value=api), \
+                patch.object(harness, "run_hunt") as run, \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()) as err, \
+                self.assertRaises(SystemExit) as exit:
+            harness.main()
+        self.assertEqual(exit.exception.code, 1)
+        self.assertFalse(run.called)
+        self.assertFalse(api.chat.called)
+        self.assertIn("think.profile", err.getvalue())
+        self.assertIn("direct.profile", err.getvalue())
+        self.assertFalse(output.exists())
+
+        result = harness.run_hunt("alpha", EVENTS, client=api)
+
+        def run_with(profile_name):
+            with patch.object(sys, "argv", [
+                "main.py", str(self.log), "--model", "alpha",
+                "--profile", str(self.profiles / profile_name),
+                "--profiles-dir", str(self.profiles),
+                "--output-dir", str(output),
+            ]), patch.object(harness, "Client", return_value=api), \
+                    patch.object(harness, "run_hunt", return_value=result), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                harness.main()
+
+        run_with("think.profile")
+        run_with("direct.profile")
+        recorded = []
+        for path in sorted(output.glob("*/results.jsonl")):
+            rows = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertEqual(len(rows), 1)
+            recorded.append(rows[0]["declared_profile"])
+            copied = list(path.parent.glob("declared-profiles/*.profile"))
+            self.assertEqual(len(copied), 1)
+            self.assertTrue(rows[0]["declared_profile"].endswith(copied[0].name))
+        self.assertEqual(len(recorded), 2)
+        self.assertNotEqual(recorded[0], recorded[1])
+        self.assertTrue(any(path.endswith("think.profile") for path in recorded))
+        self.assertTrue(any(path.endswith("direct.profile") for path in recorded))
+
+    def test_single_hunt_rejects_bad_profile_before_inference(self):
+        self.write_profile("alpha.profile", "not a profile\n")
+        api = client()
+        with patch.object(sys, "argv", [
+            "main.py", str(self.log), "--model", "alpha",
+            "--profiles-dir", str(self.profiles),
+        ]), patch.object(harness, "Client", return_value=api), \
+                patch.object(harness, "run_hunt") as run, \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()) as err, \
+                self.assertRaises(SystemExit) as exit:
+            harness.main()
+        self.assertEqual(exit.exception.code, 1)
+        self.assertFalse(run.called)
+        self.assertFalse(api.chat.called)
+        self.assertIn("expected 'key=value'", err.getvalue())
 
 
 if __name__ == '__main__':

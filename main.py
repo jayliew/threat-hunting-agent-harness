@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import re
 import sys
@@ -16,6 +17,7 @@ from pathlib import Path
 from time import perf_counter
 
 from ollama import ChatResponse, Client
+from ollama._types import ChatRequest
 
 
 # Default Ollama model. Must already be installed locally (`ollama list`).
@@ -30,20 +32,24 @@ DEFAULT_MODEL = "foundation-sec-8b-instruct"
 # DEFAULT_LOG_FILE = "logs/password-spray.jsonl"
 DEFAULT_LOG_FILE = "logs/http-beaconing.jsonl"
 
-# Full ECS dump is ~9k tokens; keep headroom for the reply. Model max is 131072.
+# Fallback context window when the matched profile has no num_ctx line.
 NUM_CTX = 32768
 NUM_PREDICT = 1024
-# Warn when context used reaches this fraction of NUM_CTX. At or above
-# NUM_CTX the run is an error.
+# Warn when context used reaches this fraction of the configured num_ctx.
+# At or above that window the run is an error.
 CONTEXT_WARN_RATIO = 0.9
-# Thinking models (Qwen3, DeepSeek-R1, …): Ollama default is True if `think`
-# is omitted. Models without the thinking capability reject the argument
-# (HTTP 400: "does not support thinking"). Send think only when /api/show
-# lists "thinking". For those models, set True or False explicitly; do not
-# leave the API default implicit. Thinking tokens share NUM_PREDICT with
-# the final answer; at 1024 tokens, True can return an empty or truncated
-# analysis. True keeps the reasoning trace; False spends the budget on the
-# structured verdict.
+# Context shift. Ollama 0.33 enables this when `shift` is omitted, except for
+# DeepSeek2, and slides older tokens out once num_ctx is full. Send False for
+# every model so a full window errors instead of shifting history.
+SHIFT = False
+# Fallback when a profile has no thinking line. Thinking models (Qwen3,
+# DeepSeek-R1, …): Ollama default is True if `think` is omitted. Models
+# without the thinking capability reject the argument (HTTP 400: "does not
+# support thinking"). Send think only when /api/show lists "thinking". For
+# those models, set True or False explicitly; do not leave the API default
+# implicit. Thinking tokens share NUM_PREDICT with the final answer; at
+# 1024 tokens, True can return an empty or truncated analysis. True keeps
+# the reasoning trace; False spends the budget on the structured verdict.
 THINK = False
 # K/V cache quantization for the Ollama server (`OLLAMA_KV_CACHE_TYPE`).
 # Ollama's built-in default is also f16, but this harness sets f16 explicitly
@@ -101,8 +107,8 @@ def allowed_evidence_ids(events: list[dict]) -> set[str]:
 
 
 def chat_think_kwargs(
-    think: bool, capabilities: list[str] | None
-) -> dict[str, bool]:
+    think: bool | str, capabilities: list[str] | None
+) -> dict[str, bool | str]:
     """Omit think unless the model advertises the thinking capability."""
     if "thinking" not in (capabilities or []):
         return {}
@@ -560,6 +566,47 @@ def build_user_message(events: list[dict]) -> str:
     return f"{USER_TASK}\n\n{EVIDENCE_START}\n{serialized}\n{EVIDENCE_END}"
 
 
+def chat_accepts_shift(chat) -> bool:
+    """True when chat() can take a shift keyword, including **kwargs mocks."""
+    try:
+        signature = inspect.signature(chat)
+    except (TypeError, ValueError):
+        return False
+    parameters = signature.parameters
+    if "shift" in parameters:
+        return True
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+
+
+def send_chat(client: Client, request: dict):
+    """Send /api/chat with the request's context-shift flag.
+
+    ollama-python 0.6.2 builds ChatRequest without `shift` and drops unknown
+    fields, so client.chat(shift=False) raises TypeError. When chat() cannot
+    accept `shift`, serialize the known fields and set `shift` on the JSON body.
+    `kv_cache_type` is recorded on the hunt for reproducibility. It is the
+    server's OLLAMA_KV_CACHE_TYPE, not a chat API field, so it is not sent.
+    """
+    chat_request = {
+        key: value for key, value in request.items() if key != "kv_cache_type"
+    }
+    if chat_accepts_shift(client.chat):
+        return client.chat(**chat_request)
+    payload = {key: value for key, value in chat_request.items() if key != "shift"}
+    body = ChatRequest(**payload).model_dump(exclude_none=True)
+    body["shift"] = chat_request["shift"]
+    return client._request(
+        ChatResponse,
+        "POST",
+        "/api/chat",
+        json=body,
+        stream=bool(request.get("stream", False)),
+    )
+
+
 def build_messages(events: list[dict]) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -577,11 +624,15 @@ def run_hunt(
     renderer: str | None = None,
     keep_alive: str | int = "5m",
     model_max: int | None = None,
+    num_ctx: int | None = None,
+    think: bool | str | None = None,
 ) -> dict:
     """Run one fresh conversation; retain answers and failures for inspection."""
     client = client if client is not None else Client(timeout=300)
+    allocated = NUM_CTX if num_ctx is None else num_ctx
+    requested_think = THINK if think is None else think
     messages = build_messages(events)
-    options = {"temperature": 0, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT}
+    options = {"temperature": 0, "num_ctx": allocated, "num_predict": NUM_PREDICT}
     tokens = empty_tokens()
     result = {
         "model": model,
@@ -602,6 +653,7 @@ def run_hunt(
             "options": options,
             "stream": False,
             "keep_alive": keep_alive,
+            "shift": SHIFT,
             "kv_cache_type": KV_CACHE_TYPE,
         },
         "prompt_sha256": hashlib.sha256(
@@ -610,7 +662,7 @@ def run_hunt(
         "timing": {},
         "tokens": tokens,
         "warnings": [],
-        "context": context_usage(NUM_CTX, tokens, model_max),
+        "context": context_usage(allocated, tokens, model_max),
     }
     started = perf_counter()
     inspected_template = chat_template is not None
@@ -627,7 +679,7 @@ def run_hunt(
                 model_max = native_context_length(info)
                 result["context"]["model_max"] = model_max
         result["capabilities"] = capabilities
-        result["request"].update(chat_think_kwargs(THINK, capabilities))
+        result["request"].update(chat_think_kwargs(requested_think, capabilities))
         if inspected_template:
             error = chat_template_error(
                 model, result["chat_template"], result["renderer"] or None
@@ -636,20 +688,14 @@ def run_hunt(
                 result["error"] = error
                 result["timing"]["wall_seconds"] = perf_counter() - started
                 return result
-        response = client.chat(
-            **{
-                key: value
-                for key, value in result["request"].items()
-                if key != "kv_cache_type"
-            }
-        )
+        response = send_chat(client, result["request"])
         content = response.message.content or ""
         result["response"] = response.model_dump(mode="json")
         result["raw_content"] = content
         result["thinking"] = response.message.thinking or ""
         result["tokens"] = usage_tokens(response)
         assign_token_split(result["tokens"], result["thinking"], content)
-        result["context"] = context_usage(NUM_CTX, result["tokens"], model_max)
+        result["context"] = context_usage(allocated, result["tokens"], model_max)
         result["sections"] = parse_hunt_sections(content)
         allowed = allowed_evidence_ids(events)
         result["unknown_evidence_ids"] = sorted(set(
@@ -671,6 +717,9 @@ def run_hunt(
 
 
 def main() -> None:
+    # Import lazily: compare_models imports this module at load time.
+    import compare_models
+
     parser = argparse.ArgumentParser(description="Run the threat-hunting harness.")
     parser.add_argument(
         "log_file",
@@ -680,33 +729,76 @@ def main() -> None:
     )
     parser.add_argument(
         "--model",
-        default=DEFAULT_MODEL,
+        default=None,
         help=(
             "Ollama model already installed on this machine "
-            f"(ollama list). Default: {DEFAULT_MODEL}"
+            f"(ollama list). Default: {DEFAULT_MODEL}. "
+            "With --profile, this must match the profile's model= value."
         ),
     )
+    parser.add_argument(
+        "--profile",
+        type=Path,
+        default=None,
+        help=(
+            "Declared profile file for this run. Use another file on a later "
+            "run to test the same model under different settings."
+        ),
+    )
+    parser.add_argument(
+        "--profiles-dir",
+        type=Path,
+        default=None,
+        help="Directory of declared *.profile files (default: profiles/ next to this script)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Parent for the results directory (default: results/ next to this script)",
+    )
     args = parser.parse_args()
-    print(f"Model: {args.model}")
-    client = Client(timeout=300)
+    profiles_directory = (
+        compare_models.DEFAULT_PROFILES_DIR
+        if args.profiles_dir is None
+        else args.profiles_dir
+    )
+    output_root = compare_models.OUTPUT_ROOT if args.output_dir is None else args.output_dir
     try:
-        selected, cases = preflight_models_and_logs(
-            client, [args.model], [args.log_file]
-        )
-    except Exception as error:
+        if args.profile is not None:
+            explicit = compare_models.load_profile_paths([args.profile])
+            chosen = explicit[0]
+            if args.model and not compare_models.model_names_match(args.model, chosen["model"]):
+                raise ValueError(
+                    f"Profile {chosen['source']} declares {chosen['model']}, not {args.model}."
+                )
+            model_name = chosen["model"]
+            loaded: list[dict] = []
+        else:
+            explicit = []
+            model_name = args.model or DEFAULT_MODEL
+            loaded = compare_models.load_profiles(profiles_directory)
+            # Choose the setup before Ollama is contacted. Several matches must be pinned.
+            compare_models.unique_profile(loaded, model_name)
+    except ValueError as error:
         print(error, file=sys.stderr)
         raise SystemExit(1)
-    model_info = selected[0]
-    case = cases[0]
-    template = model_info["chat_template"]
-    capabilities = model_info["capabilities"]
-    renderer = model_info["renderer"] or None
+    client = Client(timeout=300)
+    log_path = resolve_log_path(args.log_file)
+    try:
+        selected, cases = compare_models.prepare_comparison(
+            client, [model_name], [str(log_path)]
+        )
+        slots = compare_models.assign_run_slots(selected, loaded, explicit)
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        raise SystemExit(1)
+    slot = slots[0]
+    print(f"Model: {slot['name']}")
+    renderer = slot.get("renderer") or ""
     if renderer:
         print(f"Chat framing: RENDERER {renderer}")
-    print(f"Chat template:\n{template}")
-    log_path = Path(case["path"])
-    event_list = case["events"]
-    events = json.dumps(event_list, separators=(",", ":"))
+    print(f"Chat template:\n{slot.get('chat_template') or ''}")
     # resolve_log_path() accepts absolute paths, including files outside this repo.
     # relative_to() raises ValueError for those; print the absolute path instead.
     repo_root = Path(__file__).parent
@@ -715,18 +807,27 @@ def main() -> None:
         if log_path.is_relative_to(repo_root)
         else log_path
     )
+    event_list = cases[0]["events"]
+    events = json.dumps(event_list, separators=(",", ":"))
     print(f"Log file: {displayed_log}")
     print(f"Security events supplied:\n{events}")
+    directory, manifest = compare_models.open_recorded_run(
+        output_root, profiles_directory, slots, cases
+    )
     print("\n--- Analysis ---", flush=True)
     result = run_hunt(
-        model_info["name"],
+        slot["name"],
         event_list,
         client=client,
-        capabilities=capabilities,
-        chat_template=template,
-        renderer=renderer,
-        model_max=model_info.get("context_length"),
+        capabilities=slot["capabilities"],
+        chat_template=slot.get("chat_template"),
+        renderer=renderer or None,
+        model_max=slot.get("context_length"),
+        num_ctx=slot["num_ctx"],
+        think=slot.get("think"),
     )
+    compare_models.annotate_result(result, slot, cases[0])
+    compare_models.save_result(directory, manifest, [], result)
     print(f"KV cache type (server OLLAMA_KV_CACHE_TYPE): {KV_CACHE_TYPE}")
     effective_think = result["request"].get("think")
     print(f"Thinking: {effective_think if effective_think is not None else 'unsupported or unavailable'}")
@@ -740,6 +841,7 @@ def main() -> None:
     errors = result["validation_errors"] + ([result["error"]] if result["error"] else [])
     for error in errors:
         print(error, file=sys.stderr)
+    print(f"Report: {directory / 'report.html'}")
     if result["status"] != "ok":
         raise SystemExit(1)
 

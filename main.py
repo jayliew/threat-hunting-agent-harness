@@ -45,6 +45,13 @@ CONTEXT_WARN_RATIO = 0.9
 # analysis. True keeps the reasoning trace; False spends the budget on the
 # structured verdict.
 THINK = False
+# K/V cache quantization for the Ollama server (`OLLAMA_KV_CACHE_TYPE`).
+# Ollama's built-in default is also f16, but this harness sets f16 explicitly
+# so runs are not left to an implicit server default. This is a server
+# environment variable, not a chat API option: the process that runs
+# `ollama serve` (or the Ollama app) must inherit it before start. Recorded
+# on each hunt request and in compare manifests for reproducibility.
+KV_CACHE_TYPE = "f16"
 
 
 def resolve_log_path(log_file: str) -> Path:
@@ -589,8 +596,14 @@ def run_hunt(
         "response": None,
         "chat_template": chat_template or "",
         "renderer": renderer or "",
-        "request": {"model": model, "messages": messages, "options": options,
-                    "stream": False, "keep_alive": keep_alive},
+        "request": {
+            "model": model,
+            "messages": messages,
+            "options": options,
+            "stream": False,
+            "keep_alive": keep_alive,
+            "kv_cache_type": KV_CACHE_TYPE,
+        },
         "prompt_sha256": hashlib.sha256(
             json.dumps(messages, sort_keys=True).encode()
         ).hexdigest(),
@@ -623,7 +636,13 @@ def run_hunt(
                 result["error"] = error
                 result["timing"]["wall_seconds"] = perf_counter() - started
                 return result
-        response = client.chat(**result["request"])
+        response = client.chat(
+            **{
+                key: value
+                for key, value in result["request"].items()
+                if key != "kv_cache_type"
+            }
+        )
         content = response.message.content or ""
         result["response"] = response.model_dump(mode="json")
         result["raw_content"] = content
@@ -708,6 +727,7 @@ def main() -> None:
         renderer=renderer,
         model_max=model_info.get("context_length"),
     )
+    print(f"KV cache type (server OLLAMA_KV_CACHE_TYPE): {KV_CACHE_TYPE}")
     effective_think = result["request"].get("think")
     print(f"Thinking: {effective_think if effective_think is not None else 'unsupported or unavailable'}")
     if result["thinking"]:

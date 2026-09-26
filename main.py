@@ -628,7 +628,7 @@ def run_hunt(
     think: bool | str | None = None,
 ) -> dict:
     """Run one fresh conversation; retain answers and failures for inspection."""
-    client = client if client is not None else Client(timeout=300)
+    client = client if client is not None else Client(timeout=None)
     allocated = NUM_CTX if num_ctx is None else num_ctx
     requested_think = THINK if think is None else think
     messages = build_messages(events)
@@ -716,6 +716,18 @@ def run_hunt(
     return result
 
 
+def parse_timeout(value: str) -> float | None:
+    """HTTP timeout in seconds, or none to wait until the request finishes."""
+    if value.strip().lower() == "none":
+        return None
+    number = float(value)
+    if not 0 < number < float("inf"):
+        raise argparse.ArgumentTypeError(
+            "timeout must be a positive number of seconds, or none"
+        )
+    return number
+
+
 def main() -> None:
     # Import lazily: compare_models imports this module at load time.
     import compare_models
@@ -757,6 +769,15 @@ def main() -> None:
         default=None,
         help="Parent for the results directory (default: results/ next to this script)",
     )
+    parser.add_argument(
+        "--timeout",
+        type=parse_timeout,
+        default=None,
+        help=(
+            "HTTP timeout in seconds for each Ollama request, or none to wait "
+            "indefinitely (default: none)"
+        ),
+    )
     args = parser.parse_args()
     profiles_directory = (
         compare_models.DEFAULT_PROFILES_DIR
@@ -783,7 +804,7 @@ def main() -> None:
     except ValueError as error:
         print(error, file=sys.stderr)
         raise SystemExit(1)
-    client = Client(timeout=300)
+    client = Client(timeout=args.timeout)
     log_path = resolve_log_path(args.log_file)
     try:
         selected, cases = compare_models.prepare_comparison(

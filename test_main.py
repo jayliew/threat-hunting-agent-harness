@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import unittest
 from pathlib import Path
@@ -15,6 +16,7 @@ from main import (
     NUM_CTX,
     SYSTEM_PROMPT,
     USER_TASK,
+    parse_timeout,
     build_messages,
     allowed_evidence_ids,
     event_id,
@@ -586,6 +588,22 @@ class UsageAndContextTests(unittest.TestCase):
                 "family": "llama",
             },
         )
+
+
+class ParseTimeoutTests(unittest.TestCase):
+    def test_none_waits_indefinitely(self) -> None:
+        self.assertIsNone(parse_timeout("none"))
+        self.assertIsNone(parse_timeout(" NONE "))
+
+    def test_positive_seconds_are_floats(self) -> None:
+        self.assertEqual(parse_timeout("600"), 600.0)
+        self.assertEqual(parse_timeout("0.5"), 0.5)
+
+    def test_zero_and_non_finite_values_are_rejected(self) -> None:
+        for value in ("0", "-1", "inf", "nan"):
+            with self.subTest(value=value):
+                with self.assertRaises(argparse.ArgumentTypeError):
+                    parse_timeout(value)
 
 
 if __name__ == "__main__":

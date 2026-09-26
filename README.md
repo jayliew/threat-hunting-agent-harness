@@ -119,10 +119,18 @@ Pass `--model` with a name from `ollama list`, and optionally another JSONL file
 ```bash
 uv run python main.py --model qwen3:32b
 uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
+uv run python main.py --profile profiles/qwen3-32b.profile
 ```
 
-The script prints the model name, the installed chat template, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It also prints input, thinking, and output tokens, how those generated tokens were split, and context used versus the configured `num_ctx`. It exits with an error instead of looking like a successful hunt when:
+A second profile for the same model is a different setup. Run it on its own so its result stays separate:
 
+```bash
+uv run python main.py --profile profiles/qwen3-32b-other.profile
+```
+
+The script prints the model name, the declared profile, the installed chat template, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It also prints input, thinking, and output tokens, how those generated tokens were split, and context used versus the configured `num_ctx`. It writes a results directory, the same kind of record as a comparison: the profile is copied in before inference, then the hunt result is appended. Pass `--profile` to choose the setup. If several profiles name the model and you do not pass `--profile`, the hunt stops and lists them. It exits with an error instead of looking like a successful hunt when:
+
+- a file in `profiles/` is empty, missing `Model`, or is not `Label: value` lines
 - the model is not installed (`ollama list`), lacks text completion, or its Ollama template cannot frame chat roles (`{{ .Prompt }}` with no `RENDERER`, no `.Messages`/role markers, or a Foundation-Sec name without `<|system|>/<|user|>/<|assistant|>`)
 - the log file is missing, unreadable, malformed, or contains no events
 - generation hits the token limit (`done_reason=length`) or returns empty content
@@ -145,6 +153,25 @@ Thinking tokens and the final answer share the 1,024-token `num_predict` budget;
 
 ## Compare models across scenarios
 
+Before a single hunt or a comparison, record the setup you intend to test in `profiles/<name>.profile`. `Model:` names the installed Ollama model (`alpha` and `alpha:latest` are the same model). Other lines are `Label: value` notes. Blank lines and `#` comments are ignored. Two files may name the same model when the settings differ; those are different runs and can produce different results. Pass `--profile` with the file for the run you want. If more than one file matches a model and you do not pass `--profile`, the run stops and lists the files.
+
+`profiles/qwen3-32b.profile` records this setup:
+
+```
+Model:                  qwen3:32b
+Weight precision:       Developer Q8_0
+KV cache:               Q8_0
+Thinking:               Enabled
+Planned context range:  40,960
+Repeat penalty:         1.0
+```
+
+The other recorded setups are `llama3.3:70b`, `granite4.2:30b`, `deepseek-r1:32b`, `command-r:latest`, `gemma4:31b`, `mistral-small3.2:24b`, `mistral-nemo:12b`, and `foundation-sec-8b-instruct`.
+
+Both `main.py` and `compare_models.py` load the chosen profile before the first inference call, print it, and copy it into the results directory. A model with no file is reported as having no declared profile. If the declared weight quant differs from the installed Ollama quantization, the report keeps both and notes the difference. A malformed profile stops the run before any results directory is created.
+
+The profile is the record of the setup you wrote down for that run. Temperature, top-p, top-k, repeat penalty, context size, generation cap, thinking, and KV cache in that file are not yet applied to the Ollama request. The request still uses the settings in `main.py`. The saved profile is what distinguishes two runs of the same model when those settings later differ.
+
 Edit the `MODELS` and `DEFAULT_SCENARIO_LOGS` lists at the top of `compare_models.py`, then run:
 
 ```bash
@@ -158,13 +185,16 @@ You can override the lists without editing code:
 ```bash
 uv run python compare_models.py --models qwen3:32b mistral-small3.2:24b --logs logs/password-spray.jsonl logs/http-beaconing.jsonl
 uv run python compare_models.py --models mistral-small3.2:24b --timeout 600 --output-dir results
+uv run python compare_models.py --profiles-dir profiles
+uv run python compare_models.py --models qwen3:32b --profile profiles/qwen3-32b.profile profiles/qwen3-32b-other.profile
 ```
 
-Log paths are relative to the script (or absolute); a supplied output directory is relative to your current working directory. Each invocation creates a unique US Eastern Time subdirectory named with dd-Mon-yyyy, weekday, and hh-mm am/pm (for example `20-Sep-2026-Sun_09-28am-ET`) containing:
+Log paths are relative to the script (or absolute); a supplied output directory or `--profiles-dir` is relative to your current working directory. The default profiles directory is `profiles/` next to the script. Each invocation creates a unique US Eastern Time subdirectory named with dd-Mon-yyyy, weekday, and hh-mm am/pm (for example `20-Sep-2026-Sun_09-28am-ET`) containing:
 
-- `report.html`: open in a browser for a dark-themed summary table and full answers side by side, grouped by case. Each model card and the summary table include quantization, thinking mode (enabled / disabled / not supported), context used vs allocated, and token counts (input, thinking, output, cached, uncached). A near-full context window is shown as a warning. Thinking traces can be expanded when present. Output and error text are HTML-escaped.
-- `results.jsonl`: one row per attempted model/case pair, saved immediately. Includes full raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages/options, prompt and input hashes, model digest, timings, token counts, and context allocated/used.
-- `manifest.json`: selected models (digest, capabilities, quantization, native context) plus shared request settings (`num_ctx`, `num_predict`, `think`, `shift`) and input file identities. Pending cases remain visible in the report if the process is interrupted.
+- `report.html`: open in a browser for a dark-themed summary table and full answers side by side, grouped by case. Declared profiles appear above the table, including models with none recorded. Each model card and the summary table include quantization, thinking mode (enabled / disabled / not supported), context used vs allocated, and token counts (input, thinking, output, cached, uncached). A near-full context window is shown as a warning. Thinking traces can be expanded when present. Output, profile, and error text are HTML-escaped.
+- `declared-profiles/`: a copy of each matching profile, written before inference. The initial report already lists those profiles at `0 / N` runs recorded.
+- `results.jsonl`: one row per attempted model/case pair, saved immediately. Includes full raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages/options, prompt and input hashes, model digest, the declared profile path when one matched, timings, token counts, and context allocated/used.
+- `manifest.json`: selected models (digest, capabilities, quantization, native context), declared profiles, plus shared request settings (`num_ctx`, `num_predict`, `think`, `shift`) and input file identities. Pending cases remain visible in the report if the process is interrupted.
 
 Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Temperature, context size, answer budget, the requested thinking mode, and context shift come from `main.py`; capability-aware handling omits `think` for models without that capability. Context shift is sent for every model. The last case for each model requests unloading afterward. The configurable HTTP operation timeout defaults to 300 seconds; it is not a total batch deadline.
 
@@ -184,6 +214,7 @@ uv run python -m unittest -v
 | --- | --- |
 | `main.py` | Single-hunt CLI: prompt, log loading, one Ollama chat call (think only if supported), output and evidence-ID validation |
 | `compare_models.py` | Compare installed Ollama models across the same JSONL scenarios and write a report under `results/` |
+| `profiles/*.profile` | Declared model setup, written before a run and copied into the results directory |
 | `Modelfile.foundation-sec-8b-instruct` | Native `<|system|>/<|user|>/<|assistant|>` template for the Foundation-Sec GGUF import |
 | `logs/password-spray.jsonl` | Optional demo: ECS login / password-spray events |
 | `logs/http-beaconing.jsonl` | Default demo: ECS HTTP beaconing among legitimate traffic |

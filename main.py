@@ -695,6 +695,20 @@ def send_chat(client: Client, request: dict):
     )
 
 
+def set_evaluation_seconds(timing: dict) -> None:
+    """Record prompt processing plus generation for this log.
+
+    Model load and unload are not part of this duration. Missing either
+    server timing leaves the value null rather than substituting wall time.
+    """
+    prompt = timing.get("prompt_eval_duration_seconds")
+    generated = timing.get("eval_duration_seconds")
+    if prompt is None or generated is None:
+        timing["evaluation_seconds"] = None
+        return
+    timing["evaluation_seconds"] = prompt + generated
+
+
 def build_messages(events: list[dict]) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -775,6 +789,7 @@ def run_hunt(
             if error:
                 result["error"] = error
                 result["timing"]["wall_seconds"] = perf_counter() - started
+                set_evaluation_seconds(result["timing"])
                 return result
         response = send_chat(client, result["request"])
         content = response.message.content or ""
@@ -801,6 +816,7 @@ def run_hunt(
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
     result["timing"]["wall_seconds"] = perf_counter() - started
+    set_evaluation_seconds(result["timing"])
     return result
 
 
@@ -945,6 +961,10 @@ def main() -> None:
     if result["raw_content"]:
         print(result["raw_content"])
     print(format_token_report(result))
+    print(
+        f"{result['status']} · {compare_models.seconds(result['timing'].get('evaluation_seconds'))}",
+        flush=True,
+    )
     for warning in result["warnings"]:
         print(warning, file=sys.stderr)
     errors = result["validation_errors"] + ([result["error"]] if result["error"] else [])

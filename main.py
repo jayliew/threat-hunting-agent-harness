@@ -33,6 +33,9 @@ DEFAULT_LOG_FILE = "logs/http-beaconing.jsonl"
 # Full ECS dump is ~9k tokens; keep headroom for the reply. Model max is 131072.
 NUM_CTX = 32768
 NUM_PREDICT = 1024
+# Warn when context used reaches this fraction of NUM_CTX. At or above
+# NUM_CTX the run is an error.
+CONTEXT_WARN_RATIO = 0.9
 # Thinking models (Qwen3, DeepSeek-R1, …): Ollama default is True if `think`
 # is omitted. Models without the thinking capability reject the argument
 # (HTTP 400: "does not support thinking"). Send think only when /api/show
@@ -157,6 +160,10 @@ def empty_tokens() -> dict:
         "prompt_eval_cached_count": None,
         "prompt_uncached_count": None,
         "eval_count": None,
+        "input_tokens": None,
+        "thinking_tokens": None,
+        "output_tokens": None,
+        "split": "unknown",
     }
 
 
@@ -171,9 +178,60 @@ def usage_tokens(response) -> dict:
     tokens["prompt_eval_count"] = prompt
     tokens["prompt_eval_cached_count"] = cached
     tokens["eval_count"] = output
+    tokens["input_tokens"] = prompt
     if prompt is not None and cached is not None:
         tokens["prompt_uncached_count"] = prompt - cached
     return tokens
+
+
+def split_generated_tokens(
+    eval_count: int | None, thinking: str, content: str
+) -> tuple[int | None, int | None, str]:
+    """Split generated tokens into thinking and output.
+
+    Ollama reports one generated count. The split is exact when only one of
+    those texts is present, and proportional to character length when both
+    are. The two counts always sum to eval_count.
+    """
+    if eval_count is None:
+        return None, None, "unknown"
+    if not (thinking or "").strip():
+        return 0, eval_count, "exact"
+    if not (content or "").strip():
+        return eval_count, 0, "exact"
+    total_chars = len(thinking) + len(content)
+    thinking_tokens = round(eval_count * len(thinking) / total_chars)
+    thinking_tokens = min(max(thinking_tokens, 0), eval_count)
+    return thinking_tokens, eval_count - thinking_tokens, "estimated"
+
+
+def assign_token_split(tokens: dict, thinking: str, content: str) -> None:
+    thinking_tokens, output_tokens, split = split_generated_tokens(
+        tokens.get("eval_count"), thinking, content
+    )
+    tokens["thinking_tokens"] = thinking_tokens
+    tokens["output_tokens"] = output_tokens
+    tokens["split"] = split
+
+
+def context_limit(allocated: int, used: int | None) -> tuple[str, str | None]:
+    """Compare used tokens with the configured context window.
+
+    Returns (limit, message). limit is unknown, ok, warn, or error.
+    """
+    if used is None:
+        return "unknown", None
+    if used >= allocated:
+        return (
+            "error",
+            f"Context window full: used {used} tokens, configured num_ctx is {allocated}.",
+        )
+    if used >= allocated * CONTEXT_WARN_RATIO:
+        return (
+            "warn",
+            f"Context window nearly full: used {used} / {allocated} configured tokens.",
+        )
+    return "ok", None
 
 
 def context_usage(
@@ -189,7 +247,43 @@ def context_usage(
         used = prompt
     elif output is not None:
         used = output
-    return {"allocated": allocated, "used": used, "model_max": model_max}
+    limit, _message = context_limit(allocated, used)
+    return {
+        "allocated": allocated,
+        "used": used,
+        "model_max": model_max,
+        "limit": limit,
+    }
+
+
+def apply_context_limit(result: dict) -> None:
+    """Warn near the configured window. A full window marks the run as an error."""
+    context = result["context"]
+    limit, message = context_limit(context["allocated"], context["used"])
+    context["limit"] = limit
+    if message is None:
+        return
+    if limit == "warn":
+        result["warnings"].append(message)
+        return
+    result["status"] = "error"
+    result["error"] = message if not result["error"] else f"{result['error']}; {message}"
+
+
+def format_token_report(result: dict) -> str:
+    tokens = result["tokens"]
+    context = result["context"]
+
+    def show(value) -> str:
+        return "unknown" if value is None else str(value)
+
+    return (
+        f"Tokens: input {show(tokens.get('input_tokens'))} · "
+        f"thinking {show(tokens.get('thinking_tokens'))} · "
+        f"output {show(tokens.get('output_tokens'))} "
+        f"({tokens.get('split') or 'unknown'}) · "
+        f"context {show(context.get('used'))} / {show(context.get('allocated'))}"
+    )
 
 
 FOUNDATION_SEC_MARKERS = ("<|system|>", "<|user|>", "<|assistant|>")
@@ -502,6 +596,7 @@ def run_hunt(
         ).hexdigest(),
         "timing": {},
         "tokens": tokens,
+        "warnings": [],
         "context": context_usage(NUM_CTX, tokens, model_max),
     }
     started = perf_counter()
@@ -534,6 +629,7 @@ def run_hunt(
         result["raw_content"] = content
         result["thinking"] = response.message.thinking or ""
         result["tokens"] = usage_tokens(response)
+        assign_token_split(result["tokens"], result["thinking"], content)
         result["context"] = context_usage(NUM_CTX, result["tokens"], model_max)
         result["sections"] = parse_hunt_sections(content)
         allowed = allowed_evidence_ids(events)
@@ -545,6 +641,7 @@ def run_hunt(
             invalid_hunt_output_message(content, allowed),
         ) if error]
         result["status"] = "invalid" if result["validation_errors"] else "ok"
+        apply_context_limit(result)
         for field in ("total_duration", "load_duration", "prompt_eval_duration", "eval_duration"):
             value = getattr(response, field, None)
             result["timing"][field + "_seconds"] = value / 1e9 if value is not None else None
@@ -617,6 +714,9 @@ def main() -> None:
         print(f"Thinking:\n{result['thinking']}")
     if result["raw_content"]:
         print(result["raw_content"])
+    print(format_token_report(result))
+    for warning in result["warnings"]:
+        print(warning, file=sys.stderr)
     errors = result["validation_errors"] + ([result["error"]] if result["error"] else [])
     for error in errors:
         print(error, file=sys.stderr)

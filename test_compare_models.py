@@ -62,18 +62,51 @@ class HuntTests(unittest.TestCase):
         self.assertEqual(result['timing']['load_duration_seconds'], 0.5)
         self.assertEqual(result['timing']['eval_duration_seconds'], 1.3)
         self.assertEqual(api.chat.call_args.kwargs['think'], harness.THINK)
+        self.assertFalse(api.chat.call_args.kwargs['shift'])
+        self.assertFalse(result['request']['shift'])
         self.assertEqual(len(api.chat.call_args.kwargs['messages']), 2)
         self.assertFalse(api.show.called)
         self.assertEqual(result['tokens']['prompt_eval_count'], 80)
         self.assertEqual(result['tokens']['eval_count'], 40)
+        self.assertEqual(result['tokens']['input_tokens'], 80)
+        self.assertEqual(result['tokens']['thinking_tokens'], 0)
+        self.assertEqual(result['tokens']['output_tokens'], 40)
+        self.assertEqual(result['tokens']['split'], 'exact')
         self.assertIsNone(result['tokens']['prompt_eval_cached_count'])
         self.assertEqual(result['context']['allocated'], harness.NUM_CTX)
         self.assertEqual(result['context']['used'], 120)
+        self.assertEqual(result['context']['limit'], 'ok')
+        self.assertEqual(result['warnings'], [])
 
     def test_non_thinking_model_omits_think(self):
         api = client()
         harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion'])
         self.assertNotIn('think', api.chat.call_args.kwargs)
+        self.assertFalse(api.chat.call_args.kwargs['shift'])
+
+    def test_client_without_shift_kwarg_still_sends_shift_false(self):
+        class FixedChat:
+            def chat(self, model='', messages=None, *, stream=False, think=None,
+                     options=None, keep_alive=None, tools=None, logprobs=None,
+                     top_logprobs=None, format=None):
+                raise AssertionError('chat() cannot accept shift')
+
+            def _request(self, cls, method, path, *, json, stream=False):
+                self.body = json
+                self.method = method
+                self.path = path
+                self.stream = stream
+                return response()
+
+        api = FixedChat()
+        result = harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion'])
+        self.assertEqual(result['status'], 'ok')
+        self.assertFalse(result['request']['shift'])
+        self.assertFalse(api.body['shift'])
+        self.assertEqual(api.method, 'POST')
+        self.assertEqual(api.path, '/api/chat')
+        self.assertFalse(api.stream)
+        self.assertEqual(api.body['options']['num_ctx'], harness.NUM_CTX)
 
     def test_invalid_evidence_and_partial_answer_are_preserved(self):
         api = client()
@@ -111,6 +144,49 @@ class HuntTests(unittest.TestCase):
         api.show.return_value.modelinfo = {"llama.context_length": 131072}
         result = harness.run_hunt('alpha:latest', EVENTS, client=api)
         self.assertEqual(result['context']['model_max'], 131072)
+
+    def test_context_window_full_is_an_error_and_keeps_validation_errors(self):
+        api = client()
+        chat = response(ANSWER.replace('e1', 'e999'))
+        chat.prompt_eval_count = harness.NUM_CTX
+        api.chat.return_value = chat
+        result = harness.run_hunt(
+            'alpha:latest', EVENTS, client=api, capabilities=['completion']
+        )
+        self.assertEqual(result['status'], 'error')
+        self.assertEqual(result['context']['limit'], 'error')
+        self.assertIn('Context window full', result['error'])
+        self.assertIn(str(harness.NUM_CTX), result['error'])
+        self.assertTrue(result['validation_errors'])
+        self.assertIn('e999', result['validation_errors'][0])
+
+    def test_context_window_near_full_warns_without_changing_status(self):
+        api = client()
+        chat = response()
+        chat.prompt_eval_count = harness.NUM_CTX - 50
+        chat.eval_count = 40
+        api.chat.return_value = chat
+        result = harness.run_hunt(
+            'alpha:latest', EVENTS, client=api, capabilities=['completion']
+        )
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(result['context']['used'], harness.NUM_CTX - 10)
+        self.assertEqual(result['context']['limit'], 'warn')
+        self.assertEqual(len(result['warnings']), 1)
+        self.assertIn('Context window nearly full', result['warnings'][0])
+
+    def test_thinking_and_output_tokens_sum_to_eval_count(self):
+        api = client()
+        chat = response()
+        chat.message.thinking = 'abcd'
+        api.chat.return_value = chat
+        result = harness.run_hunt(
+            'alpha:latest', EVENTS, client=api, capabilities=['completion']
+        )
+        tokens = result['tokens']
+        self.assertEqual(tokens['split'], 'estimated')
+        self.assertEqual(tokens['thinking_tokens'] + tokens['output_tokens'], tokens['eval_count'])
+        self.assertEqual(result['status'], 'ok')
 
     def test_cached_prompt_tokens_are_recorded_when_present(self):
         api = client()
@@ -155,6 +231,11 @@ class HuntTests(unittest.TestCase):
                 harness.main()
             self.assertEqual(run.call_args.args[:2], ('alpha:latest', EVENTS))
             self.assertIn(ANSWER, out.getvalue())
+            self.assertIn(
+                'Tokens: input 80 · thinking 0 · output 40 (exact) · context 120 / '
+                f'{harness.NUM_CTX}',
+                out.getvalue(),
+            )
             result['status'] = 'invalid'
             result['validation_errors'] = ['Invalid output']
             with patch.object(sys, 'argv', ['main.py', str(path), '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
@@ -183,6 +264,25 @@ class HuntTests(unittest.TestCase):
             self.assertFalse(run.called)
             self.assertFalse(api.chat.called)
             self.assertIn("{{ .Prompt }}", err.getvalue())
+            self.assertIn("Preflight failed", err.getvalue())
+
+    def test_single_hunt_cli_rejects_empty_log_before_inference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'empty.jsonl'
+            path.write_text('')
+            api = client()
+            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'alpha']), \
+                    patch.object(harness, 'Client', return_value=api), \
+                    patch.object(harness, 'run_hunt') as run, \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()) as err, \
+                    self.assertRaises(SystemExit) as exit:
+                harness.main()
+            self.assertEqual(exit.exception.code, 1)
+            self.assertFalse(run.called)
+            self.assertFalse(api.chat.called)
+            self.assertIn("Preflight failed", err.getvalue())
+            self.assertIn("log contains no events", err.getvalue())
 
 
 class ResultsDirectoryNameTests(unittest.TestCase):
@@ -405,11 +505,21 @@ class ComparisonTests(unittest.TestCase):
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
         self.assertEqual(rows[0]['tokens']['prompt_eval_count'], 80)
         self.assertEqual(rows[0]['tokens']['eval_count'], 40)
+        self.assertEqual(rows[0]['tokens']['input_tokens'], 80)
+        self.assertEqual(rows[0]['tokens']['thinking_tokens'], 0)
+        self.assertEqual(rows[0]['tokens']['output_tokens'], 40)
+        self.assertEqual(rows[0]['tokens']['split'], 'exact')
         self.assertIsNone(rows[0]['tokens']['prompt_eval_cached_count'])
         self.assertEqual(rows[0]['context']['used'], 120)
+        self.assertEqual(rows[0]['context']['limit'], 'ok')
+        self.assertEqual(rows[0]['warnings'], [])
+        self.assertIn('Thinking: 0', html)
         self.assertEqual(rows[0]['context']['allocated'], harness.NUM_CTX)
+        self.assertFalse(rows[0]['request']['shift'])
         manifest = json.loads((directory / 'manifest.json').read_text())
         self.assertEqual(manifest['request_settings']['num_ctx'], harness.NUM_CTX)
+        self.assertFalse(manifest['request_settings']['shift'])
+        self.assertIn('Context shift is disabled for every model.', html)
         self.assertIsNone(manifest['models'][0]['quantization_level'])
 
     def test_report_includes_model_settings_tokens_and_context(self):
@@ -479,7 +589,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('Thinking: disabled', html)
         self.assertIn('Input: —', html)
 
-    def test_report_labels_thinking_enabled_and_output_includes_thinking(self):
+    def test_report_shows_thinking_tokens_and_context_warning(self):
         directory = self.root / 'think'
         directory.mkdir()
         manifest = {
@@ -497,6 +607,7 @@ class ComparisonTests(unittest.TestCase):
             'unknown_evidence_ids': [],
             'validation_errors': [],
             'error': None,
+            'warnings': ['Context window nearly full: used 30000 / 32768 configured tokens.'],
             'thinking': 'trace',
             'raw_content': ANSWER,
             'request': {'think': True},
@@ -505,14 +616,22 @@ class ComparisonTests(unittest.TestCase):
                 'prompt_eval_cached_count': 20,
                 'prompt_uncached_count': 60,
                 'eval_count': 40,
+                'input_tokens': 80,
+                'thinking_tokens': 12,
+                'output_tokens': 28,
+                'split': 'estimated',
             },
-            'context': {'allocated': 32768, 'used': 120, 'model_max': None},
+            'context': {'allocated': 32768, 'used': 30000, 'model_max': None, 'limit': 'warn'},
         }
         compare_models.write_report(directory, manifest, [result])
         html = (directory / 'report.html').read_text()
         self.assertIn('Thinking: enabled', html)
-        self.assertIn('Output: 40 (includes thinking)', html)
+        self.assertIn('Thinking: 12 (estimated)', html)
+        self.assertIn('Output: 28 (estimated)', html)
         self.assertIn('Cached: 20', html)
+        self.assertIn('class="warn"', html)
+        self.assertIn('Context window nearly full: used 30000 / 32768 configured tokens.', html)
+        self.assertIn('<th>Thinking tokens</th>', html)
 
     def test_cli_exits_nonzero_after_recording_invalid_runs(self):
         api = client()

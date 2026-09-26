@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import re
 import sys
@@ -16,6 +17,7 @@ from pathlib import Path
 from time import perf_counter
 
 from ollama import ChatResponse, Client
+from ollama._types import ChatRequest
 
 
 # Default Ollama model. Must already be installed locally (`ollama list`).
@@ -33,6 +35,13 @@ DEFAULT_LOG_FILE = "logs/http-beaconing.jsonl"
 # Full ECS dump is ~9k tokens; keep headroom for the reply. Model max is 131072.
 NUM_CTX = 32768
 NUM_PREDICT = 1024
+# Warn when context used reaches this fraction of NUM_CTX. At or above
+# NUM_CTX the run is an error.
+CONTEXT_WARN_RATIO = 0.9
+# Context shift. Ollama 0.33 enables this when `shift` is omitted, except for
+# DeepSeek2, and slides older tokens out once num_ctx is full. Send False for
+# every model so a full window errors instead of shifting history.
+SHIFT = False
 # Thinking models (Qwen3, DeepSeek-R1, …): Ollama default is True if `think`
 # is omitted. Models without the thinking capability reject the argument
 # (HTTP 400: "does not support thinking"). Send think only when /api/show
@@ -157,6 +166,10 @@ def empty_tokens() -> dict:
         "prompt_eval_cached_count": None,
         "prompt_uncached_count": None,
         "eval_count": None,
+        "input_tokens": None,
+        "thinking_tokens": None,
+        "output_tokens": None,
+        "split": "unknown",
     }
 
 
@@ -171,9 +184,60 @@ def usage_tokens(response) -> dict:
     tokens["prompt_eval_count"] = prompt
     tokens["prompt_eval_cached_count"] = cached
     tokens["eval_count"] = output
+    tokens["input_tokens"] = prompt
     if prompt is not None and cached is not None:
         tokens["prompt_uncached_count"] = prompt - cached
     return tokens
+
+
+def split_generated_tokens(
+    eval_count: int | None, thinking: str, content: str
+) -> tuple[int | None, int | None, str]:
+    """Split generated tokens into thinking and output.
+
+    Ollama reports one generated count. The split is exact when only one of
+    those texts is present, and proportional to character length when both
+    are. The two counts always sum to eval_count.
+    """
+    if eval_count is None:
+        return None, None, "unknown"
+    if not (thinking or "").strip():
+        return 0, eval_count, "exact"
+    if not (content or "").strip():
+        return eval_count, 0, "exact"
+    total_chars = len(thinking) + len(content)
+    thinking_tokens = round(eval_count * len(thinking) / total_chars)
+    thinking_tokens = min(max(thinking_tokens, 0), eval_count)
+    return thinking_tokens, eval_count - thinking_tokens, "estimated"
+
+
+def assign_token_split(tokens: dict, thinking: str, content: str) -> None:
+    thinking_tokens, output_tokens, split = split_generated_tokens(
+        tokens.get("eval_count"), thinking, content
+    )
+    tokens["thinking_tokens"] = thinking_tokens
+    tokens["output_tokens"] = output_tokens
+    tokens["split"] = split
+
+
+def context_limit(allocated: int, used: int | None) -> tuple[str, str | None]:
+    """Compare used tokens with the configured context window.
+
+    Returns (limit, message). limit is unknown, ok, warn, or error.
+    """
+    if used is None:
+        return "unknown", None
+    if used >= allocated:
+        return (
+            "error",
+            f"Context window full: used {used} tokens, configured num_ctx is {allocated}.",
+        )
+    if used >= allocated * CONTEXT_WARN_RATIO:
+        return (
+            "warn",
+            f"Context window nearly full: used {used} / {allocated} configured tokens.",
+        )
+    return "ok", None
 
 
 def context_usage(
@@ -189,7 +253,43 @@ def context_usage(
         used = prompt
     elif output is not None:
         used = output
-    return {"allocated": allocated, "used": used, "model_max": model_max}
+    limit, _message = context_limit(allocated, used)
+    return {
+        "allocated": allocated,
+        "used": used,
+        "model_max": model_max,
+        "limit": limit,
+    }
+
+
+def apply_context_limit(result: dict) -> None:
+    """Warn near the configured window. A full window marks the run as an error."""
+    context = result["context"]
+    limit, message = context_limit(context["allocated"], context["used"])
+    context["limit"] = limit
+    if message is None:
+        return
+    if limit == "warn":
+        result["warnings"].append(message)
+        return
+    result["status"] = "error"
+    result["error"] = message if not result["error"] else f"{result['error']}; {message}"
+
+
+def format_token_report(result: dict) -> str:
+    tokens = result["tokens"]
+    context = result["context"]
+
+    def show(value) -> str:
+        return "unknown" if value is None else str(value)
+
+    return (
+        f"Tokens: input {show(tokens.get('input_tokens'))} · "
+        f"thinking {show(tokens.get('thinking_tokens'))} · "
+        f"output {show(tokens.get('output_tokens'))} "
+        f"({tokens.get('split') or 'unknown'}) · "
+        f"context {show(context.get('used'))} / {show(context.get('allocated'))}"
+    )
 
 
 FOUNDATION_SEC_MARKERS = ("<|system|>", "<|user|>", "<|assistant|>")
@@ -271,6 +371,69 @@ def inspect_installed_model(client: Client, model: str) -> tuple[str, list[str],
     if error:
         raise ValueError(error)
     return template, capabilities, renderer
+
+
+def preflight_models_and_logs(
+    client: Client, models: list[str], logs: list[str]
+) -> tuple[list[dict], list[dict]]:
+    """Resolve models and logs before any inference; raise if anything is unusable."""
+    if not models or not logs:
+        raise ValueError("Configure at least one model and one log file.")
+    installed = {item.model: item for item in client.list().models}
+    selected, problems, seen = [], [], set()
+    for name in models:
+        canonical = name if name in installed else name + ":latest"
+        if canonical not in installed:
+            problems.append(f"Model is not installed: {name}")
+            continue
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        model = installed[canonical]
+        try:
+            info = client.show(canonical)
+            capabilities = info.capabilities or []
+            if capabilities and "completion" not in capabilities:
+                raise ValueError("model does not support text completion")
+            template = info.template or ""
+            renderer = installed_renderer(getattr(info, "modelfile", None))
+            error = chat_template_error(canonical, template, renderer)
+            if error:
+                raise ValueError(error)
+            selected.append({
+                "name": canonical,
+                "digest": model.digest,
+                "capabilities": capabilities,
+                "chat_template": template,
+                "renderer": renderer or "",
+                "context_length": native_context_length(info),
+                **model_detail_fields(info, model),
+            })
+        except Exception as error:
+            problems.append(f"Cannot use {name}: {error}")
+    cases, seen_paths = [], set()
+    for name in logs:
+        path = resolve_log_path(name).resolve()
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        try:
+            events = load_security_events(path)
+            if not events:
+                raise ValueError("log contains no events")
+            cases.append({
+                "name": name,
+                "path": str(path),
+                "events": events,
+                "events_sha256": hashlib.sha256(
+                    json.dumps(events, sort_keys=True).encode()
+                ).hexdigest(),
+            })
+        except Exception as error:
+            problems.append(f"Cannot read {name}: {error}")
+    if problems:
+        raise ValueError("Preflight failed:\n" + "\n".join(problems))
+    return selected, cases
 
 
 # Application instructions, not a model's chat template. Ollama supplies the
@@ -396,6 +559,42 @@ def build_user_message(events: list[dict]) -> str:
     return f"{USER_TASK}\n\n{EVIDENCE_START}\n{serialized}\n{EVIDENCE_END}"
 
 
+def chat_accepts_shift(chat) -> bool:
+    """True when chat() can take a shift keyword, including **kwargs mocks."""
+    try:
+        signature = inspect.signature(chat)
+    except (TypeError, ValueError):
+        return False
+    parameters = signature.parameters
+    if "shift" in parameters:
+        return True
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+
+
+def send_chat(client: Client, request: dict):
+    """Send /api/chat with the request's context-shift flag.
+
+    ollama-python 0.6.2 builds ChatRequest without `shift` and drops unknown
+    fields, so client.chat(shift=False) raises TypeError. When chat() cannot
+    accept `shift`, serialize the known fields and set `shift` on the JSON body.
+    """
+    if chat_accepts_shift(client.chat):
+        return client.chat(**request)
+    payload = {key: value for key, value in request.items() if key != "shift"}
+    body = ChatRequest(**payload).model_dump(exclude_none=True)
+    body["shift"] = request["shift"]
+    return client._request(
+        ChatResponse,
+        "POST",
+        "/api/chat",
+        json=body,
+        stream=bool(request.get("stream", False)),
+    )
+
+
 def build_messages(events: list[dict]) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -433,12 +632,13 @@ def run_hunt(
         "chat_template": chat_template or "",
         "renderer": renderer or "",
         "request": {"model": model, "messages": messages, "options": options,
-                    "stream": False, "keep_alive": keep_alive},
+                    "stream": False, "keep_alive": keep_alive, "shift": SHIFT},
         "prompt_sha256": hashlib.sha256(
             json.dumps(messages, sort_keys=True).encode()
         ).hexdigest(),
         "timing": {},
         "tokens": tokens,
+        "warnings": [],
         "context": context_usage(NUM_CTX, tokens, model_max),
     }
     started = perf_counter()
@@ -465,12 +665,13 @@ def run_hunt(
                 result["error"] = error
                 result["timing"]["wall_seconds"] = perf_counter() - started
                 return result
-        response = client.chat(**result["request"])
+        response = send_chat(client, result["request"])
         content = response.message.content or ""
         result["response"] = response.model_dump(mode="json")
         result["raw_content"] = content
         result["thinking"] = response.message.thinking or ""
         result["tokens"] = usage_tokens(response)
+        assign_token_split(result["tokens"], result["thinking"], content)
         result["context"] = context_usage(NUM_CTX, result["tokens"], model_max)
         result["sections"] = parse_hunt_sections(content)
         allowed = allowed_evidence_ids(events)
@@ -482,6 +683,7 @@ def run_hunt(
             invalid_hunt_output_message(content, allowed),
         ) if error]
         result["status"] = "invalid" if result["validation_errors"] else "ok"
+        apply_context_limit(result)
         for field in ("total_duration", "load_duration", "prompt_eval_duration", "eval_duration"):
             value = getattr(response, field, None)
             result["timing"][field + "_seconds"] = value / 1e9 if value is not None else None
@@ -607,6 +809,9 @@ def main() -> None:
         print(f"Thinking:\n{result['thinking']}")
     if result["raw_content"]:
         print(result["raw_content"])
+    print(format_token_report(result))
+    for warning in result["warnings"]:
+        print(warning, file=sys.stderr)
     errors = result["validation_errors"] + ([result["error"]] if result["error"] else [])
     for error in errors:
         print(error, file=sys.stderr)

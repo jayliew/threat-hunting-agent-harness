@@ -121,7 +121,7 @@ uv run python main.py --model qwen3:32b
 uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
 ```
 
-The script prints the model name, the installed chat template, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It also prints input, thinking, and output tokens, how those generated tokens were split, and context used versus the configured `num_ctx`. It exits with an error instead of looking like a successful hunt when:
+The script prints the model name, the profile when one was selected, the installed chat template, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It also prints input, thinking, and output tokens, how those generated tokens were split, context used versus that run's `num_ctx`, and whether `num_predict` is a cap or disabled. It exits with an error instead of looking like a successful hunt when:
 
 - the model is not installed (`ollama list`), lacks text completion, or its Ollama template cannot frame chat roles (`{{ .Prompt }}` with no `RENDERER`, no `.Messages`/role markers, or a Foundation-Sec name without `<|system|>/<|user|>/<|assistant|>`)
 - the log file is missing, unreadable, malformed, or contains no events
@@ -139,7 +139,30 @@ Before you run, set `THINK` in `main.py` to `True` (on) or `False` (off) for mod
 
 The harness queries Ollama (`/api/show`) and sends `think` only when the model lists the `thinking` capability. Models without that capability reject the argument (`does not support thinking`), so it is omitted. Qwen3-class models enable thinking by default when the API omits `think`; for those models the harness always sends `think` explicitly.
 
-Thinking tokens and the final answer share the 1,024-token `num_predict` budget; with thinking on, the model can hit that limit mid-trace and return an empty or truncated analysis.
+Thinking tokens and the final answer share the `num_predict` budget. The default cap is 1,024 tokens; with thinking on, the model can hit that limit mid-trace and return an empty or truncated analysis. Set `num_predict` to `-1` to disable the cap. Generation then stops when the model finishes or when the context window is full.
+
+## Context window and generation cap
+
+`NUM_CTX` and `NUM_PREDICT` in `main.py` are the defaults. `GENERATION_SETTINGS` in the same file overrides them for a model, a profile, and a log file. Omit a key, or set it to `"*"`, to match any value of that dimension. A more specific entry wins. Entries that are equally specific apply in list order, and each entry overrides only the keys it sets.
+
+```python
+GENERATION_SETTINGS = [
+    {"model": "qwen3:32b", "profile": "thinking", "log": "logs/http-beaconing.jsonl",
+     "num_ctx": 32768, "num_predict": 8192},
+    {"model": "llama3.3:70b", "num_predict": -1},
+]
+```
+
+`num_ctx` is a positive token count. `num_predict` is a positive token count, or `-1` to leave generation uncapped. A disabled cap does not turn off the context-window check: a reply that fills `num_ctx` is still an error.
+
+Select a profile with `name@profile` or, for one hunt, `--profile`. A run with no profile matches only entries whose profile is omitted or `"*"`. One-off flags `--num-ctx` and `--num-predict` replace the matched values for that hunt.
+
+```bash
+uv run python main.py --model qwen3:32b@thinking --num-predict -1
+uv run python compare_models.py --models qwen3:32b@thinking llama3.3:70b
+```
+
+The same model with two profiles is two runs. `alpha@fast` and `alpha@slow` are not collapsed.
 
 ## Compare models across scenarios
 
@@ -151,24 +174,25 @@ uv run python compare_models.py
 
 The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all six scenarios: password spray, HTTP beaconing, internal network scanning, shared VPN logins (`logs/shared-vpn-logins.ecs.jsonl`), managed telemetry (`logs/managed-telemetry.ecs.jsonl`), and scheduled discovery (`logs/scheduled-discovery.ecs.jsonl`): 18 runs. Use names from `ollama list`. All configured models and input files are checked before inference starts, including the installed Ollama chat template; missing models and models with unusable templates are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
 
-You can override the lists without editing code:
+You can override the lists without editing code. Add `@profile` when that model should use a `GENERATION_SETTINGS` profile:
 
 ```bash
 uv run python compare_models.py --models qwen3:32b mistral-small3.2:24b --logs logs/password-spray.jsonl logs/http-beaconing.jsonl
 uv run python compare_models.py --models mistral-small3.2:24b --timeout 600 --output-dir results
+uv run python compare_models.py --models qwen3:32b@thinking --logs logs/http-beaconing.jsonl
 ```
 
 Log paths are relative to the script (or absolute); a supplied output directory is relative to your current working directory. Each invocation creates a unique US Eastern Time subdirectory named with dd-Mon-yyyy, weekday, and hh-mm am/pm (for example `20-Sep-2026-Sun_09-28am-ET`) containing:
 
-- `report.html`: open in a browser for a dark-themed summary table and full answers side by side, grouped by case. Each model card and the summary table include quantization, thinking mode (enabled / disabled / not supported), context used vs allocated, and token counts (input, thinking, output, cached, uncached). A near-full context window is shown as a warning. Thinking traces can be expanded when present. Output and error text are HTML-escaped.
-- `results.jsonl`: one row per attempted model/case pair, saved immediately. Includes full raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages/options, prompt and input hashes, model digest, timings, token counts, and context allocated/used.
-- `manifest.json`: selected models (digest, capabilities, quantization, native context) plus shared request settings (`num_ctx`, `num_predict`, `think`) and input file identities. Pending cases remain visible in the report if the process is interrupted.
+- `report.html`: open in a browser for a dark-themed summary table and full answers side by side, grouped by case. Each model card and the summary table include quantization, thinking mode (enabled / disabled / not supported), context used vs allocated, the generation cap, and token counts (input, thinking, output, cached, uncached). A near-full context window is shown as a warning. Thinking traces can be expanded when present. Output and error text are HTML-escaped.
+- `results.jsonl`: one row per attempted model, profile, and log, saved immediately. Includes full raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages/options, prompt and input hashes, model digest, profile, the resolved `num_ctx` and `num_predict`, timings, token counts, and context allocated/used.
+- `manifest.json`: selected models (digest, capabilities, quantization, native context, profile) plus default request settings (`num_ctx`, `num_predict`, `think`), the `GENERATION_SETTINGS` table, and input file identities. Pending cases remain visible in the report if the process is interrupted.
 
-Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Temperature, context size, answer budget, and the requested thinking mode come from `main.py`; capability-aware handling omits `think` for models without that capability. The last case for each model requests unloading afterward. The configurable HTTP operation timeout defaults to 300 seconds; it is not a total batch deadline.
+Runs are sequential and grouped by model and profile to reduce repeated loading. Every case receives a fresh conversation. Temperature and the requested thinking mode come from `main.py`. Context size and the generation cap come from the `GENERATION_SETTINGS` entry that matches that model, profile, and log file, otherwise from `NUM_CTX` and `NUM_PREDICT`. Capability-aware handling omits `think` for models without that capability. The last case for each model and profile requests unloading afterward. The configurable HTTP operation timeout defaults to 300 seconds; it is not a total batch deadline.
 
 Invalid, empty, truncated, and failed responses are retained. An individual inference error does not stop the remaining cases. The report updates after every saved result. Exit status is nonzero if any run is invalid or failed, if any run meets or exceeds the configured context window, if preflight fails, or if execution is interrupted; completed results remain available.
 
-`ok` means the answer passed format and evidence-ID checks and stayed under the configured context window, not that its diagnosis is correct. Compare the full answers against each scenario's instructor notes. This first version performs one run per pair and does not assign detection-accuracy scores. Timing separates model loading, prompt processing, and generation; wall time includes loading and request overhead. These are observed timings, not a controlled cold/warm performance benchmark. Context allocated is the requested `num_ctx`. Context used is prompt tokens plus generated tokens for that turn. Thinking and output tokens divide that generated count: the split is exact when only one of those texts is present, and estimated from character length when both are present. A run warns when used tokens reach 90% of `num_ctx` and is an error when used tokens are at least `num_ctx`. A missing cached-token count is unknown, not zero. Identical context settings do not guarantee that different model tokenizers or native context limits see identical effective context; use inputs that fit every selected model.
+`ok` means the answer passed format and evidence-ID checks and stayed under that run's context window, not that its diagnosis is correct. Compare the full answers against each scenario's instructor notes. This first version performs one run per model, profile, and log, and does not assign detection-accuracy scores. Timing separates model loading, prompt processing, and generation; wall time includes loading and request overhead. These are observed timings, not a controlled cold/warm performance benchmark. Context allocated is that run's `num_ctx`. Context used is prompt tokens plus generated tokens for that turn. Thinking and output tokens divide that generated count: the split is exact when only one of those texts is present, and estimated from character length when both are present. A run warns when used tokens reach 90% of its `num_ctx` and is an error when used tokens are at least that `num_ctx`. `num_predict` `-1` disables only the generation cap. A missing cached-token count is unknown, not zero. Identical context settings do not guarantee that different model tokenizers or native context limits see identical effective context; use inputs that fit every selected model.
 
 Run offline checks with:
 

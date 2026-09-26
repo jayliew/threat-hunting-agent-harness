@@ -30,21 +30,28 @@ DEFAULT_MODEL = "foundation-sec-8b-instruct"
 # DEFAULT_LOG_FILE = "logs/password-spray.jsonl"
 DEFAULT_LOG_FILE = "logs/http-beaconing.jsonl"
 
-# Full ECS dump is ~9k tokens; keep headroom for the reply. Model max is 131072.
+# Defaults when GENERATION_SETTINGS has no matching entry. NUM_PREDICT -1
+# would disable the cap; the default keeps a finite budget.
 NUM_CTX = 32768
 NUM_PREDICT = 1024
-# Warn when context used reaches this fraction of NUM_CTX. At or above
-# NUM_CTX the run is an error.
+# Warn when context used reaches this fraction of the run's num_ctx. At or
+# above that num_ctx the run is an error.
 CONTEXT_WARN_RATIO = 0.9
 # Thinking models (Qwen3, DeepSeek-R1, …): Ollama default is True if `think`
 # is omitted. Models without the thinking capability reject the argument
 # (HTTP 400: "does not support thinking"). Send think only when /api/show
 # lists "thinking". For those models, set True or False explicitly; do not
-# leave the API default implicit. Thinking tokens share NUM_PREDICT with
-# the final answer; at 1024 tokens, True can return an empty or truncated
-# analysis. True keeps the reasoning trace; False spends the budget on the
-# structured verdict.
+# leave the API default implicit. Thinking tokens share num_predict with
+# the final answer unless num_predict is -1. A short cap can return an empty
+# or truncated analysis. True keeps the reasoning trace; False spends the
+# budget on the structured verdict.
 THINK = False
+# Per model, profile, and log file. Omit a key, or set it to "*", to match
+# any value of that dimension. A later, more specific entry overrides a
+# broader one for the keys it sets. num_predict -1 disables the generation
+# cap (Ollama unlimited). List a comparison model as name@profile to select
+# a profile; a hunt with no profile matches only wildcard profile entries.
+GENERATION_SETTINGS: list[dict] = []
 
 
 def resolve_log_path(log_file: str) -> Path:
@@ -52,6 +59,140 @@ def resolve_log_path(log_file: str) -> Path:
     if not path.is_absolute():
         path = Path(__file__).parent / path
     return path
+
+
+def generation_cap_label(num_predict: int) -> str:
+    """Return the display form of a generation cap. -1 is disabled."""
+    return "disabled" if num_predict < 0 else str(num_predict)
+
+
+def _match_any(value) -> bool:
+    return value is None or value == "" or value == "*"
+
+
+def _require_num_ctx(value, where: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{where}: num_ctx must be a positive integer")
+    return value
+
+
+def _require_num_predict(value, where: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or (value != -1 and value < 1):
+        raise ValueError(
+            f"{where}: num_predict must be a positive integer, or -1 to disable the cap"
+        )
+    return value
+
+
+def validate_generation_settings(entries: list[dict] | None = None) -> None:
+    """Reject a malformed GENERATION_SETTINGS table before any hunt."""
+    entries = GENERATION_SETTINGS if entries is None else entries
+    allowed = {"model", "profile", "log", "num_ctx", "num_predict"}
+    for index, entry in enumerate(entries):
+        where = f"GENERATION_SETTINGS[{index}]"
+        if not isinstance(entry, dict):
+            raise ValueError(f"{where} must be a dict")
+        unknown = set(entry) - allowed
+        if unknown:
+            raise ValueError(f"{where} has unknown keys: {', '.join(sorted(unknown))}")
+        if "num_ctx" not in entry and "num_predict" not in entry:
+            raise ValueError(f"{where} must set num_ctx, num_predict, or both")
+        if "num_ctx" in entry:
+            _require_num_ctx(entry["num_ctx"], where)
+        if "num_predict" in entry:
+            _require_num_predict(entry["num_predict"], where)
+
+
+def _model_names_match(entry_model: str, run_model: str) -> bool:
+    if entry_model == run_model:
+        return True
+
+    def with_latest(name: str) -> str:
+        leaf = name.split("/")[-1]
+        return name if ":" in leaf else f"{name}:latest"
+
+    return with_latest(entry_model) == with_latest(run_model)
+
+
+def log_identifiers(log_file: str | None) -> set[str]:
+    """Names that should match a log entry: as given, filename, and repo-relative path."""
+    if not log_file:
+        return set()
+    raw = str(log_file)
+    path = Path(raw)
+    found = {raw, path.as_posix(), path.name}
+    try:
+        resolved = resolve_log_path(raw).resolve()
+    except OSError:
+        return {item for item in found if item}
+    found.add(str(resolved))
+    found.add(resolved.as_posix())
+    found.add(resolved.name)
+    repo = Path(__file__).parent.resolve()
+    if resolved.is_relative_to(repo):
+        found.add(resolved.relative_to(repo).as_posix())
+    return {item for item in found if item}
+
+
+def _entry_specificity(entry: dict) -> int:
+    score = 0
+    if not _match_any(entry.get("model")):
+        score += 1
+    if not _match_any(entry.get("profile")):
+        score += 1
+    if not _match_any(entry.get("log")):
+        score += 1
+    return score
+
+
+def _entry_matches(entry: dict, model: str, profile: str | None, log_file: str | None) -> bool:
+    entry_model = entry.get("model")
+    if not _match_any(entry_model) and not _model_names_match(str(entry_model), model):
+        return False
+    entry_profile = entry.get("profile")
+    if not _match_any(entry_profile) and entry_profile != profile:
+        return False
+    entry_log = entry.get("log")
+    if not _match_any(entry_log):
+        if not log_identifiers(str(entry_log)) & log_identifiers(log_file):
+            return False
+    return True
+
+
+def resolve_generation_settings(
+    model: str, profile: str | None = None, log_file: str | None = None
+) -> dict[str, int]:
+    """Pick num_ctx and num_predict for one model, profile, and log file.
+
+    Broader matches apply first. A more specific entry overrides only the
+    keys it sets. Entries of equal specificity apply in list order.
+    """
+    validate_generation_settings()
+    chosen = {"num_ctx": NUM_CTX, "num_predict": NUM_PREDICT}
+    ranked = []
+    for index, entry in enumerate(GENERATION_SETTINGS):
+        if _entry_matches(entry, model, profile, log_file):
+            ranked.append((_entry_specificity(entry), index, entry))
+    for _specificity, _index, entry in sorted(ranked):
+        if "num_ctx" in entry:
+            chosen["num_ctx"] = entry["num_ctx"]
+        if "num_predict" in entry:
+            chosen["num_predict"] = entry["num_predict"]
+    return chosen
+
+
+def split_model_profile(spec: str) -> tuple[str, str | None]:
+    """Split 'name' or 'name@profile'. The profile is the text after the last @."""
+    model, separator, profile = spec.rpartition("@")
+    if not separator:
+        return spec, None
+    model = model.strip()
+    profile = profile.strip()
+    if not model or not profile or profile == "*":
+        raise ValueError(
+            f"Model spec {spec!r} must be an installed name or name@profile"
+        )
+    return model, profile
 
 
 def load_logs(log_path: Path) -> list[dict]:
@@ -273,6 +414,8 @@ def apply_context_limit(result: dict) -> None:
 def format_token_report(result: dict) -> str:
     tokens = result["tokens"]
     context = result["context"]
+    generation = result.get("generation") or {}
+    num_predict = generation.get("num_predict", NUM_PREDICT)
 
     def show(value) -> str:
         return "unknown" if value is None else str(value)
@@ -282,7 +425,8 @@ def format_token_report(result: dict) -> str:
         f"thinking {show(tokens.get('thinking_tokens'))} · "
         f"output {show(tokens.get('output_tokens'))} "
         f"({tokens.get('split') or 'unknown'}) · "
-        f"context {show(context.get('used'))} / {show(context.get('allocated'))}"
+        f"context {show(context.get('used'))} / {show(context.get('allocated'))} · "
+        f"num_predict {generation_cap_label(num_predict)}"
     )
 
 
@@ -373,16 +517,23 @@ def preflight_models_and_logs(
     """Resolve models and logs before any inference; raise if anything is unusable."""
     if not models or not logs:
         raise ValueError("Configure at least one model and one log file.")
+    validate_generation_settings()
     installed = {item.model: item for item in client.list().models}
     selected, problems, seen = [], [], set()
     for name in models:
-        canonical = name if name in installed else name + ":latest"
+        try:
+            model_name, profile = split_model_profile(name)
+        except ValueError as error:
+            problems.append(str(error))
+            continue
+        canonical = model_name if model_name in installed else model_name + ":latest"
         if canonical not in installed:
-            problems.append(f"Model is not installed: {name}")
+            problems.append(f"Model is not installed: {model_name}")
             continue
-        if canonical in seen:
+        slot = (canonical, profile)
+        if slot in seen:
             continue
-        seen.add(canonical)
+        seen.add(slot)
         model = installed[canonical]
         try:
             info = client.show(canonical)
@@ -396,6 +547,7 @@ def preflight_models_and_logs(
                 raise ValueError(error)
             selected.append({
                 "name": canonical,
+                "profile": profile,
                 "digest": model.digest,
                 "capabilities": capabilities,
                 "chat_template": template,
@@ -404,7 +556,7 @@ def preflight_models_and_logs(
                 **model_detail_fields(info, model),
             })
         except Exception as error:
-            problems.append(f"Cannot use {name}: {error}")
+            problems.append(f"Cannot use {model_name}: {error}")
     cases, seen_paths = [], set()
     for name in logs:
         path = resolve_log_path(name).resolve()
@@ -475,14 +627,18 @@ def incomplete_response_message(
     content = (response.message.content or "").strip()
     done_reason = response.done_reason or ""
     eval_count = response.eval_count
+    # -1 disables the cap. A non-negative eval_count is always >= -1, so that
+    # comparison must not run. done_reason "length" still means the server
+    # stopped the reply, usually because the context window filled.
+    capped = num_predict >= 0
     hit_limit = done_reason == "length" or (
-        eval_count is not None and eval_count >= num_predict
+        capped and eval_count is not None and eval_count >= num_predict
     )
     if hit_limit:
         return (
             f"Incomplete response: generation stopped at the token limit "
             f"(done_reason={done_reason or 'unknown'}, "
-            f"eval_count={eval_count}/{num_predict})."
+            f"eval_count={eval_count}/{generation_cap_label(num_predict)})."
         )
     if not content:
         return (
@@ -570,14 +726,35 @@ def run_hunt(
     renderer: str | None = None,
     keep_alive: str | int = "5m",
     model_max: int | None = None,
+    log_file: str | None = None,
+    profile: str | None = None,
+    num_ctx: int | None = None,
+    num_predict: int | None = None,
 ) -> dict:
-    """Run one fresh conversation; retain answers and failures for inspection."""
+    """Run one fresh conversation; retain answers and failures for inspection.
+
+    num_ctx and num_predict come from GENERATION_SETTINGS for this model,
+    profile, and log file. Explicit arguments replace that match. num_predict
+    -1 leaves generation uncapped.
+    """
+    generation = resolve_generation_settings(model, profile, log_file)
+    if num_ctx is not None:
+        generation["num_ctx"] = _require_num_ctx(num_ctx, "num_ctx")
+    if num_predict is not None:
+        generation["num_predict"] = _require_num_predict(num_predict, "num_predict")
     client = client if client is not None else Client(timeout=300)
     messages = build_messages(events)
-    options = {"temperature": 0, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT}
+    options = {
+        "temperature": 0,
+        "num_ctx": generation["num_ctx"],
+        "num_predict": generation["num_predict"],
+    }
     tokens = empty_tokens()
     result = {
         "model": model,
+        "profile": profile,
+        "log_file": log_file,
+        "generation": dict(generation),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "status": "error",
         "raw_content": "",
@@ -597,7 +774,7 @@ def run_hunt(
         "timing": {},
         "tokens": tokens,
         "warnings": [],
-        "context": context_usage(NUM_CTX, tokens, model_max),
+        "context": context_usage(generation["num_ctx"], tokens, model_max),
     }
     started = perf_counter()
     inspected_template = chat_template is not None
@@ -630,14 +807,14 @@ def run_hunt(
         result["thinking"] = response.message.thinking or ""
         result["tokens"] = usage_tokens(response)
         assign_token_split(result["tokens"], result["thinking"], content)
-        result["context"] = context_usage(NUM_CTX, result["tokens"], model_max)
+        result["context"] = context_usage(generation["num_ctx"], result["tokens"], model_max)
         result["sections"] = parse_hunt_sections(content)
         allowed = allowed_evidence_ids(events)
         result["unknown_evidence_ids"] = sorted(set(
             parse_evidence_ids(result["sections"].get("Evidence", ""))
         ) - allowed)
         result["validation_errors"] = [error for error in (
-            incomplete_response_message(response, NUM_PREDICT),
+            incomplete_response_message(response, generation["num_predict"]),
             invalid_hunt_output_message(content, allowed),
         ) if error]
         result["status"] = "invalid" if result["validation_errors"] else "ok"
@@ -649,6 +826,34 @@ def run_hunt(
         result["error"] = f"{type(error).__name__}: {error}"
     result["timing"]["wall_seconds"] = perf_counter() - started
     return result
+
+
+def _cli_num_ctx(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        number = None
+    if number is None or isinstance(number, bool):
+        raise argparse.ArgumentTypeError("num_ctx must be a positive integer")
+    try:
+        return _require_num_ctx(number, "num_ctx")
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
+def _cli_num_predict(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        number = None
+    if number is None:
+        raise argparse.ArgumentTypeError(
+            "num_predict must be a positive integer, or -1 to disable the cap"
+        )
+    try:
+        return _require_num_predict(number, "num_predict")
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
 
 
 def main() -> None:
@@ -664,15 +869,45 @@ def main() -> None:
         default=DEFAULT_MODEL,
         help=(
             "Ollama model already installed on this machine "
-            f"(ollama list). Default: {DEFAULT_MODEL}"
+            f"(ollama list), optionally name@profile. Default: {DEFAULT_MODEL}"
+        ),
+    )
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="Profile name for GENERATION_SETTINGS. Overrides name@profile on --model.",
+    )
+    parser.add_argument(
+        "--num-ctx",
+        type=_cli_num_ctx,
+        default=None,
+        help=f"Context window for this hunt (default: match GENERATION_SETTINGS, else {NUM_CTX})",
+    )
+    parser.add_argument(
+        "--num-predict",
+        type=_cli_num_predict,
+        default=None,
+        help=(
+            "Generation cap for this hunt. -1 disables it. "
+            f"Default: match GENERATION_SETTINGS, else {NUM_PREDICT}"
         ),
     )
     args = parser.parse_args()
-    print(f"Model: {args.model}")
+    try:
+        model_name, profile = split_model_profile(args.model)
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        raise SystemExit(1)
+    if args.profile:
+        profile = args.profile
+    model_spec = model_name if profile is None else f"{model_name}@{profile}"
+    print(f"Model: {model_name}")
+    if profile:
+        print(f"Profile: {profile}")
     client = Client(timeout=300)
     try:
         selected, cases = preflight_models_and_logs(
-            client, [args.model], [args.log_file]
+            client, [model_spec], [args.log_file]
         )
     except Exception as error:
         print(error, file=sys.stderr)
@@ -707,6 +942,10 @@ def main() -> None:
         chat_template=template,
         renderer=renderer,
         model_max=model_info.get("context_length"),
+        log_file=case["name"],
+        profile=model_info.get("profile"),
+        num_ctx=args.num_ctx,
+        num_predict=args.num_predict,
     )
     effective_think = result["request"].get("think")
     print(f"Thinking: {effective_think if effective_think is not None else 'unsupported or unavailable'}")

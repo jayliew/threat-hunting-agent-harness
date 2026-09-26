@@ -150,10 +150,12 @@ def parse_profile_file(path: Path) -> dict:
 
 
 def parse_num_ctx(value: str, source: str) -> int:
-    """Parse a profile num_ctx. Commas are allowed; ranges and other text are not."""
-    text = value.replace(",", "").strip()
+    """Parse a profile num_ctx as one positive integer. Commas are not allowed."""
+    text = value.strip()
     if not text.isdigit() or int(text) <= 0:
-        raise ValueError(f"{source}: num_ctx must be a positive integer (got {value!r})")
+        raise ValueError(
+            f"{source}: num_ctx must be a positive integer with no commas (got {value!r})"
+        )
     return int(text)
 
 

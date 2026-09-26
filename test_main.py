@@ -384,17 +384,61 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertIsNotNone(llama_headers)
         self.assertIn("<|system|>", llama_headers)
 
-    def test_generic_models_need_messages_or_role_markers(self) -> None:
+    def test_unknown_names_fail_closed(self) -> None:
+        error = chat_template_error(
+            "FenkoHQ/other:latest",
+            "{{- range .Messages }}{{ .Role }}: {{ .Content }}{{- end }}",
+        )
+        self.assertIsNotNone(error)
+        self.assertIn("No expected chat template is registered", error)
+        self.assertIn("FenkoHQ/other:latest", error)
+        qwen35 = chat_template_error("qwen3.5:27b", "<|im_start|>user<|im_end|>")
+        self.assertIsNotNone(qwen35)
+        self.assertIn("No expected chat template is registered", qwen35)
+
+    def test_each_family_requires_its_own_markers(self) -> None:
+        qwen = "<|im_start|>system\n{{ .System }}<|im_end|>"
+        llama = "<|start_header_id|>system<|end_header_id|>\n{{ .System }}<|eot_id|>"
+        mistral_small = "[SYSTEM_PROMPT]{{ .Content }}[/SYSTEM_PROMPT][INST]{{ .Content }}[/INST]"
+        mistral_nemo = "[INST]{{ .System }}\n{{ .Content }}[/INST]"
+        command_r = (
+            "<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{{ .System }}"
+            "<|USER_TOKEN|>{{ .Content }}<|CHATBOT_TOKEN|>"
+        )
+        self.assertIsNone(chat_template_error("qwen3:32b", qwen))
+        self.assertIsNone(chat_template_error("llama3.3:70b", llama))
+        self.assertIsNone(chat_template_error("mistral-small3.2:24b", mistral_small))
+        self.assertIsNone(chat_template_error("mistral-nemo:12b", mistral_nemo))
+        self.assertIsNone(chat_template_error("granite4.2:30b", qwen))
+        self.assertIsNone(chat_template_error("command-r:latest", command_r))
         self.assertIsNotNone(chat_template_error("qwen3:32b", "{{ .Prompt }}"))
+        self.assertIsNotNone(chat_template_error("qwen3:32b", mistral_small))
+        self.assertIsNotNone(chat_template_error("llama3.3:70b", qwen))
         self.assertIsNotNone(
-            chat_template_error("FenkoHQ/other:latest", "{{ if .System }}{{ .System }}{{ end }}{{ .Prompt }}")
-        )
-        self.assertIsNone(
-            chat_template_error("qwen3:32b", "{{- range .Messages }}{{ .Role }}: {{ .Content }}{{- end }}")
-        )
-        self.assertIsNone(
             chat_template_error("mistral-small3.2:24b", "[INST] {{ .Prompt }} [/INST]")
         )
+        self.assertIsNotNone(chat_template_error("mistral-nemo:12b", "[INST]{{ .Prompt }}[/INST]"))
+        self.assertIsNotNone(chat_template_error("command-r:latest", qwen))
+        mixed = (
+            "<|system|>\n{{ .System }}\n<|user|>\n{{ .Content }}\n<|assistant|>\n"
+            "<|start_header_id|>"
+        )
+        forbidden = chat_template_error("foundation-sec-8b-instruct", mixed)
+        self.assertIsNotNone(forbidden)
+        self.assertIn("<|start_header_id|>", forbidden)
+
+    def test_renderer_is_only_valid_for_gemma4(self) -> None:
+        qwen = "<|im_start|>system\n{{ .System }}<|im_end|>"
+        replaced = chat_template_error("qwen3:32b", qwen, "gemma4")
+        self.assertIsNotNone(replaced)
+        self.assertIn("RENDERER", replaced)
+        self.assertIn("<|im_start|>", replaced)
+        granite = chat_template_error("granite4.2:30b", qwen, "gemma4")
+        self.assertIsNotNone(granite)
+        self.assertIn("replaces the chat template", granite)
+        wrong_gemma = chat_template_error("gemma4:31b", "{{ .Prompt }}", "qwen3-coder")
+        self.assertIsNotNone(wrong_gemma)
+        self.assertIn("gemma4-large", wrong_gemma)
 
     def test_gemma_renderer_allows_placeholder_template(self) -> None:
         self.assertIsNone(chat_template_error("gemma4:26b", "{{ .Prompt }}", "gemma4"))
@@ -438,7 +482,7 @@ class ChatTemplateTests(unittest.TestCase):
         api.show.return_value.template = "{{ .Prompt }}"
         api.show.return_value.capabilities = ["completion"]
         with self.assertRaises(ValueError) as error:
-            inspect_installed_model(api, "alpha:latest")
+            inspect_installed_model(api, "qwen3:32b")
         self.assertIn("{{ .Prompt }}", str(error.exception))
         self.assertFalse(api.chat.called)
 

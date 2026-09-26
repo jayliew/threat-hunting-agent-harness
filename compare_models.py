@@ -120,20 +120,20 @@ def normalize_field_name(label: str) -> str:
 
 
 def parse_profile_text(text: str, source: str) -> dict:
-    """Parse a declared profile. Each line is 'Label: value'."""
+    """Parse a declared profile. Each line is 'key=value', as in a .env file."""
     if not text.strip():
         raise ValueError(f"{source}: profile is empty")
     fields: dict[str, str] = {}
     for number, line in enumerate(text.splitlines(), start=1):
         if not line.strip() or line.strip().startswith("#"):
             continue
-        if ":" not in line:
-            raise ValueError(f"{source}:{number}: expected 'Label: value'")
-        label, value = line.split(":", 1)
+        if "=" not in line:
+            raise ValueError(f"{source}:{number}: expected 'key=value'")
+        label, value = line.split("=", 1)
         label = label.strip()
         value = value.strip()
         if not label or not value:
-            raise ValueError(f"{source}:{number}: expected 'Label: value'")
+            raise ValueError(f"{source}:{number}: expected 'key=value'")
         key = normalize_field_name(label)
         if key in fields:
             raise ValueError(f"{source}:{number}: duplicate field {label}")
@@ -163,6 +163,30 @@ def profile_num_ctx(profile: dict | None) -> int:
     if raw is None:
         return NUM_CTX
     return parse_num_ctx(raw, profile.get("source") or "profile")
+
+
+def parse_thinking(value: str, source: str) -> bool | str:
+    """Parse a profile thinking line into the Ollama think argument."""
+    text = value.strip().lower()
+    if text in {"true", "enabled", "on", "yes"}:
+        return True
+    if text in {"false", "disabled", "off", "no"}:
+        return False
+    if text in {"low", "medium", "high"}:
+        return text
+    raise ValueError(
+        f"{source}: thinking must be true, false, low, medium, or high (got {value!r})"
+    )
+
+
+def profile_think(profile: dict | None) -> bool | str | None:
+    """Think argument for one setup. A missing line uses THINK from main.py."""
+    if profile is None:
+        return None
+    raw = profile.get("fields", {}).get("thinking")
+    if raw is None:
+        return None
+    return parse_thinking(raw, profile.get("source") or "profile")
 
 
 def load_profiles(directory: Path) -> list[dict]:
@@ -316,11 +340,20 @@ def assign_run_slots(
         for profile in chosen:
             try:
                 num_ctx = profile_num_ctx(profile)
+                think = profile_think(profile)
             except ValueError as error:
                 problems.append(str(error))
                 continue
+            if think is not None and "thinking" not in (model.get("capabilities") or []):
+                source = (profile or {}).get("source") or "profile"
+                problems.append(
+                    f"{source}: thinking is set but {model['name']} does not "
+                    "list the thinking capability"
+                )
+                continue
             slot = dict(model)
             slot["num_ctx"] = num_ctx
+            slot["think"] = think
             if profile is None:
                 slot["run_key"] = model["name"]
                 slot["profile_source"] = None
@@ -425,14 +458,25 @@ def quantization_label(model: dict) -> str:
     return " · ".join(part for part in parts if part) or "—"
 
 
+def think_label(value) -> str:
+    if value is True:
+        return "enabled"
+    if value is False or value is None:
+        return "disabled"
+    return str(value)
+
+
 def thinking_label(result: dict | None, model: dict, settings: dict) -> str:
     if result is not None:
         if "think" in result.get("request", {}):
-            return "enabled" if result["request"]["think"] else "disabled"
+            return think_label(result["request"]["think"])
         return "not supported"
     if "thinking" not in (model.get("capabilities") or []):
         return "not supported"
-    return "enabled" if settings.get("think") else "disabled"
+    chosen = model.get("think")
+    if chosen is None:
+        chosen = settings.get("think")
+    return think_label(chosen)
 
 
 def context_label(allocated, used, model_max) -> str:
@@ -641,6 +685,7 @@ def run_comparison(
                               renderer=slot.get("renderer") or None,
                               model_max=slot.get("context_length"),
                               num_ctx=slot["num_ctx"],
+                              think=slot.get("think"),
                               keep_alive=0 if index == len(cases)-1 else "5m")
             annotate_result(result, slot, case)
             save_result(directory, manifest, results, result)

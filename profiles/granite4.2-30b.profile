@@ -1,6 +1,7 @@
-Model:                  granite4.2:30b
-# Weight precision:       Developer Q8_0
-# KV cache:               Q8_0
-# Thinking:               High
-num_ctx:                65,536
-# Repeat penalty:         1.0
+model=granite4.2:30b
+# weight_precision=Developer Q8_0
+# kv_cache=Q8_0
+# thinking levels: false, low, medium, high
+thinking=high
+num_ctx=65,536
+# repeat_penalty=1.0

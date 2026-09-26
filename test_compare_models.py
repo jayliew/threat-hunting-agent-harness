@@ -62,6 +62,9 @@ class HuntTests(unittest.TestCase):
         self.assertEqual(result['timing']['load_duration_seconds'], 0.5)
         self.assertEqual(result['timing']['eval_duration_seconds'], 1.3)
         self.assertEqual(api.chat.call_args.kwargs['think'], harness.THINK)
+        self.assertEqual(result['request']['kv_cache_type'], harness.KV_CACHE_TYPE)
+        self.assertEqual(harness.KV_CACHE_TYPE, 'f16')
+        self.assertNotIn('kv_cache_type', api.chat.call_args.kwargs)
         self.assertEqual(len(api.chat.call_args.kwargs['messages']), 2)
         self.assertFalse(api.show.called)
         self.assertEqual(result['tokens']['prompt_eval_count'], 80)
@@ -490,7 +493,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(rows[0]['context']['allocated'], harness.NUM_CTX)
         manifest = json.loads((directory / 'manifest.json').read_text())
         self.assertEqual(manifest['request_settings']['num_ctx'], harness.NUM_CTX)
+        self.assertEqual(manifest['request_settings']['kv_cache_type'], harness.KV_CACHE_TYPE)
         self.assertIsNone(manifest['models'][0]['quantization_level'])
+        self.assertIn(f'kv_cache_type={harness.KV_CACHE_TYPE}', html)
 
     def test_report_includes_model_settings_tokens_and_context(self):
         api = client()

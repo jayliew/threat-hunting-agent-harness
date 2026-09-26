@@ -41,8 +41,8 @@ def response(content=ANSWER, reason="stop"):
 def client():
     result = Mock()
     result.list.return_value.models = [
-        SimpleNamespace(model="alpha:latest", digest="digest-alpha"),
-        SimpleNamespace(model="beta:1", digest="digest-beta"),
+        SimpleNamespace(model="foundation-sec-alpha:latest", digest="digest-alpha"),
+        SimpleNamespace(model="foundation-sec-8b-beta:1", digest="digest-beta"),
     ]
     result.show.return_value.capabilities = ["completion"]
     result.show.return_value.template = (
@@ -55,12 +55,14 @@ def client():
 class HuntTests(unittest.TestCase):
     def test_shared_hunt_preserves_request_response_and_timing(self):
         api = client()
-        result = harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion', 'thinking'])
+        result = harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api, capabilities=['completion', 'thinking'])
         self.assertEqual(result['status'], 'ok')
         self.assertEqual(result['sections']['Verdict'], 'benign')
         self.assertEqual(result['response']['message']['content'], ANSWER)
         self.assertEqual(result['timing']['load_duration_seconds'], 0.5)
+        self.assertEqual(result['timing']['prompt_eval_duration_seconds'], 0.2)
         self.assertEqual(result['timing']['eval_duration_seconds'], 1.3)
+        self.assertEqual(result['timing']['evaluation_seconds'], 1.5)
         self.assertEqual(api.chat.call_args.kwargs['think'], harness.THINK)
         self.assertEqual(result['request']['kv_cache_type'], harness.KV_CACHE_TYPE)
         self.assertEqual(harness.KV_CACHE_TYPE, 'f16')
@@ -83,7 +85,7 @@ class HuntTests(unittest.TestCase):
 
     def test_non_thinking_model_omits_think(self):
         api = client()
-        harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion'])
+        harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api, capabilities=['completion'])
         self.assertNotIn('think', api.chat.call_args.kwargs)
         self.assertFalse(api.chat.call_args.kwargs['shift'])
 
@@ -102,7 +104,7 @@ class HuntTests(unittest.TestCase):
                 return response()
 
         api = FixedChat()
-        result = harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion'])
+        result = harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api, capabilities=['completion'])
         self.assertEqual(result['status'], 'ok')
         self.assertFalse(result['request']['shift'])
         self.assertFalse(api.body['shift'])
@@ -116,7 +118,7 @@ class HuntTests(unittest.TestCase):
     def test_invalid_evidence_and_partial_answer_are_preserved(self):
         api = client()
         api.chat.return_value = response(ANSWER.replace('e1', 'e999'), 'length')
-        result = harness.run_hunt('alpha:latest', EVENTS, client=api)
+        result = harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api)
         self.assertEqual(result['status'], 'invalid')
         self.assertEqual(result['unknown_evidence_ids'], ['e999'])
         self.assertEqual(len(result['validation_errors']), 2)
@@ -125,11 +127,12 @@ class HuntTests(unittest.TestCase):
     def test_timeout_is_a_recorded_error(self):
         api = client()
         api.chat.side_effect = TimeoutError('request expired')
-        result = harness.run_hunt('alpha:latest', EVENTS, client=api)
+        result = harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api)
         self.assertEqual(result['status'], 'error')
         self.assertIn('TimeoutError', result['error'])
         self.assertIsNone(result['response'])
         self.assertGreaterEqual(result['timing']['wall_seconds'], 0)
+        self.assertIsNone(result['timing']['evaluation_seconds'])
         self.assertEqual(result['tokens'], harness.empty_tokens())
         self.assertEqual(result['context']['allocated'], harness.NUM_CTX)
         self.assertIsNone(result['context']['used'])
@@ -137,17 +140,18 @@ class HuntTests(unittest.TestCase):
     def test_run_hunt_skips_chat_when_show_template_is_bare(self):
         api = client()
         api.show.return_value.template = "{{ .Prompt }}"
-        result = harness.run_hunt('alpha:latest', EVENTS, client=api)
+        result = harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api)
         self.assertEqual(result['status'], 'error')
         self.assertIn("{{ .Prompt }}", result['error'])
         self.assertFalse(api.chat.called)
+        self.assertIsNone(result['timing']['evaluation_seconds'])
         self.assertEqual(result['tokens'], harness.empty_tokens())
         self.assertIsNone(result['context']['used'])
 
     def test_run_hunt_records_native_context_from_show(self):
         api = client()
         api.show.return_value.modelinfo = {"llama.context_length": 131072}
-        result = harness.run_hunt('alpha:latest', EVENTS, client=api)
+        result = harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api)
         self.assertEqual(result['context']['model_max'], 131072)
 
     def test_context_window_full_is_an_error_and_keeps_validation_errors(self):
@@ -156,7 +160,7 @@ class HuntTests(unittest.TestCase):
         chat.prompt_eval_count = harness.NUM_CTX
         api.chat.return_value = chat
         result = harness.run_hunt(
-            'alpha:latest', EVENTS, client=api, capabilities=['completion']
+            'foundation-sec-alpha:latest', EVENTS, client=api, capabilities=['completion']
         )
         self.assertEqual(result['status'], 'error')
         self.assertEqual(result['context']['limit'], 'error')
@@ -172,7 +176,7 @@ class HuntTests(unittest.TestCase):
         chat.eval_count = 40
         api.chat.return_value = chat
         result = harness.run_hunt(
-            'alpha:latest', EVENTS, client=api, capabilities=['completion']
+            'foundation-sec-alpha:latest', EVENTS, client=api, capabilities=['completion']
         )
         self.assertEqual(result['status'], 'ok')
         self.assertEqual(result['context']['used'], harness.NUM_CTX - 10)
@@ -186,7 +190,7 @@ class HuntTests(unittest.TestCase):
         chat.message.thinking = 'abcd'
         api.chat.return_value = chat
         result = harness.run_hunt(
-            'alpha:latest', EVENTS, client=api, capabilities=['completion']
+            'foundation-sec-alpha:latest', EVENTS, client=api, capabilities=['completion']
         )
         tokens = result['tokens']
         self.assertEqual(tokens['split'], 'estimated')
@@ -208,7 +212,7 @@ class HuntTests(unittest.TestCase):
             eval_duration=chat.eval_duration,
             model_dump=lambda mode="json": chat.model_dump(mode=mode),
         )
-        result = harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion'])
+        result = harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api, capabilities=['completion'])
         self.assertEqual(result['tokens']['prompt_eval_cached_count'], 20)
         self.assertEqual(result['tokens']['prompt_uncached_count'], 60)
         self.assertEqual(result['context']['used'], 120)
@@ -218,8 +222,9 @@ class HuntTests(unittest.TestCase):
         api.chat.return_value = ChatResponse(
             message=Message(role="assistant", content=ANSWER), done_reason="stop"
         )
-        result = harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion'])
+        result = harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api, capabilities=['completion'])
         self.assertEqual(result['tokens'], harness.empty_tokens())
+        self.assertIsNone(result['timing']['evaluation_seconds'])
         self.assertIsNone(result['context']['used'])
         self.assertEqual(result['context']['allocated'], harness.NUM_CTX)
 
@@ -228,19 +233,24 @@ class HuntTests(unittest.TestCase):
             path = Path(tmp) / 'case.jsonl'
             path.write_text(json.dumps(EVENTS[0])+'\n')
             api = client()
-            result = harness.run_hunt('alpha', EVENTS, client=api)
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
+            result = harness.run_hunt('foundation-sec-alpha', EVENTS, client=api)
+            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
                     patch.object(harness, 'Client', return_value=api), \
                     patch.object(harness, 'run_hunt', return_value=result) as run, \
                     contextlib.redirect_stdout(io.StringIO()) as out:
                 harness.main()
-            self.assertEqual(run.call_args.args[:2], ('alpha:latest', EVENTS))
+            self.assertEqual(run.call_args.args[:2], ('foundation-sec-alpha:latest', EVENTS))
             self.assertIn(ANSWER, out.getvalue())
             self.assertIn(
                 'Tokens: input 80 · thinking 0 · output 40 (exact) · context 120 / '
                 f'{harness.NUM_CTX}',
                 out.getvalue(),
             )
+            self.assertIn(
+                f"{result['status']} · {compare_models.seconds(result['timing']['evaluation_seconds'])}",
+                out.getvalue(),
+            )
+            self.assertEqual(result['timing']['evaluation_seconds'], 1.5)
             result['status'] = 'invalid'
             result['validation_errors'] = ['Invalid output']
             with patch.object(sys, 'argv', ['main.py', str(path), '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
@@ -252,13 +262,33 @@ class HuntTests(unittest.TestCase):
                 harness.main()
             self.assertEqual(exit.exception.code, 1)
 
+    def test_single_hunt_cli_defaults_to_no_timeout_and_forwards_seconds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'case.jsonl'
+            path.write_text(json.dumps(EVENTS[0])+'\n')
+            api = client()
+            result = harness.run_hunt('foundation-sec-alpha', EVENTS, client=api)
+            base = ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]
+            with patch.object(sys, 'argv', base), \
+                    patch.object(harness, 'Client', return_value=api) as constructed, \
+                    patch.object(harness, 'run_hunt', return_value=result), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                harness.main()
+            constructed.assert_called_once_with(timeout=None)
+            with patch.object(sys, 'argv', base + ['--timeout', '45']), \
+                    patch.object(harness, 'Client', return_value=api) as constructed, \
+                    patch.object(harness, 'run_hunt', return_value=result), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                harness.main()
+            constructed.assert_called_once_with(timeout=45.0)
+
     def test_single_hunt_cli_rejects_bad_template_before_inference(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'case.jsonl'
             path.write_text(json.dumps(EVENTS[0])+'\n')
             api = client()
             api.show.return_value.template = "{{ .Prompt }}"
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
+            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
                     patch.object(harness, 'Client', return_value=api), \
                     patch.object(harness, 'run_hunt') as run, \
                     contextlib.redirect_stdout(io.StringIO()), \
@@ -276,7 +306,7 @@ class HuntTests(unittest.TestCase):
             path = Path(tmp) / 'empty.jsonl'
             path.write_text('')
             api = client()
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'alpha']), \
+            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha']), \
                     patch.object(harness, 'Client', return_value=api), \
                     patch.object(harness, 'run_hunt') as run, \
                     contextlib.redirect_stdout(io.StringIO()), \
@@ -288,6 +318,14 @@ class HuntTests(unittest.TestCase):
             self.assertFalse(api.chat.called)
             self.assertIn("Preflight failed", err.getvalue())
             self.assertIn("log contains no events", err.getvalue())
+
+
+class DurationFormatTests(unittest.TestCase):
+    def test_displays_minutes_and_seconds(self):
+        self.assertEqual(compare_models.seconds(None), "—")
+        self.assertEqual(compare_models.seconds(1.5), "0m 1.50s")
+        self.assertEqual(compare_models.seconds(90.5), "1m 30.50s")
+        self.assertEqual(compare_models.seconds(125.2), "2m 5.20s")
 
 
 class ResultsDirectoryNameTests(unittest.TestCase):
@@ -334,15 +372,27 @@ class ComparisonTests(unittest.TestCase):
 
     def run_quietly(self, api):
         with contextlib.redirect_stdout(io.StringIO()):
-            return compare_models.run_comparison(api, ['alpha', 'beta:1'], self.logs, self.root / 'results')
+            return compare_models.run_comparison(api, ['foundation-sec-alpha', 'foundation-sec-8b-beta:1'], self.logs, self.root / 'results')
 
     def test_matrix_runs_sequentially_and_continues_after_failure(self):
         api = client()
         api.chat.side_effect = [response(), TimeoutError('slow'), response(ANSWER.replace('e1', 'e999')), response()]
-        directory = self.run_quietly(api)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            directory = compare_models.run_comparison(
+                api, ['foundation-sec-alpha', 'foundation-sec-8b-beta:1'], self.logs, self.root / 'results'
+            )
+        printed = out.getvalue()
+        self.assertIn('  ok · 0m 1.50s', printed)
+        self.assertIn('  error · —', printed)
+        self.assertIn('  invalid · 0m 1.50s', printed)
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
         self.assertEqual([r['status'] for r in rows], ['ok', 'error', 'invalid', 'ok'])
-        self.assertEqual([r['model'] for r in rows], ['alpha:latest']*2 + ['beta:1']*2)
+        self.assertEqual(
+            [r['timing']['evaluation_seconds'] for r in rows],
+            [1.5, None, 1.5, 1.5],
+        )
+        self.assertEqual(rows[0]['timing']['load_duration_seconds'], 0.5)
+        self.assertEqual([r['model'] for r in rows], ['foundation-sec-alpha:latest']*2 + ['foundation-sec-8b-beta:1']*2)
         self.assertEqual([r['case'] for r in rows], self.logs*2)
         self.assertEqual([r['model_digest'] for r in rows], ['digest-alpha']*2 + ['digest-beta']*2)
         requests = [c.kwargs for c in api.chat.call_args_list]
@@ -352,6 +402,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(rows[0]['prompt_sha256'], rows[2]['prompt_sha256'])
         html = (directory / 'report.html').read_text()
         self.assertIn('4 / 4 runs recorded', html)
+        self.assertIn('<th>Eval time</th>', html)
+        self.assertIn('excludes model load and unload', html)
+        self.assertIn('ok · 0m 1.50s', html)
         self.assertIn('TimeoutError', html)
         self.assertIn('e999', html)
         self.assertIn('color-scheme:dark', html)
@@ -374,13 +427,13 @@ class ComparisonTests(unittest.TestCase):
         malformed.write_text('not-json\n')
         api = client()
         with self.assertRaises(ValueError) as error:
-            compare_models.prepare_comparison(api, ['alpha'], [str(empty), str(malformed)])
+            compare_models.prepare_comparison(api, ['foundation-sec-alpha'], [str(empty), str(malformed)])
         self.assertIn('empty.jsonl', str(error.exception))
         self.assertIn('bad.jsonl', str(error.exception))
         self.assertFalse(api.chat.called)
 
     def test_duplicate_aliases_and_paths_run_once(self):
-        models, logs = compare_models.prepare_comparison(client(), ['alpha', 'alpha:latest'], self.logs*2)
+        models, logs = compare_models.prepare_comparison(client(), ['foundation-sec-alpha', 'foundation-sec-alpha:latest'], self.logs*2)
         self.assertEqual(len(models), 1)
         self.assertEqual(len(logs), 2)
         self.assertIn("<|system|>", models[0]["chat_template"])
@@ -389,7 +442,7 @@ class ComparisonTests(unittest.TestCase):
         api = client()
         api.show.return_value.template = "{{ .Prompt }}"
         with self.assertRaises(ValueError) as error:
-            compare_models.prepare_comparison(api, ['alpha'], self.logs[:1])
+            compare_models.prepare_comparison(api, ['foundation-sec-alpha'], self.logs[:1])
         self.assertIn("{{ .Prompt }}", str(error.exception))
         self.assertFalse(api.chat.called)
 
@@ -534,7 +587,7 @@ class ComparisonTests(unittest.TestCase):
         template = api.show.return_value.template
 
         def show(name):
-            thinking = name.startswith('alpha')
+            thinking = name.startswith('foundation-sec-alpha')
             return SimpleNamespace(
                 capabilities=['completion', 'thinking'] if thinking else ['completion'],
                 template=template,
@@ -554,10 +607,10 @@ class ComparisonTests(unittest.TestCase):
         directory = self.run_quietly(api)
         manifest = json.loads((directory / 'manifest.json').read_text())
         by_name = {model['name']: model for model in manifest['models']}
-        self.assertEqual(by_name['alpha:latest']['quantization_level'], 'Q4_K_M')
-        self.assertEqual(by_name['alpha:latest']['context_length'], 40960)
-        self.assertEqual(by_name['beta:1']['quantization_level'], 'Q8_0')
-        self.assertEqual(by_name['beta:1']['context_length'], 131072)
+        self.assertEqual(by_name['foundation-sec-alpha:latest']['quantization_level'], 'Q4_K_M')
+        self.assertEqual(by_name['foundation-sec-alpha:latest']['context_length'], 40960)
+        self.assertEqual(by_name['foundation-sec-8b-beta:1']['quantization_level'], 'Q8_0')
+        self.assertEqual(by_name['foundation-sec-8b-beta:1']['context_length'], 131072)
         html = (directory / 'report.html').read_text()
         self.assertIn('Q4_K_M · 32.8B · gguf', html)
         self.assertIn('Q8_0 · 8B · gguf', html)
@@ -578,7 +631,7 @@ class ComparisonTests(unittest.TestCase):
             'created_at': 'now',
             'request_settings': {'num_ctx': 32768, 'num_predict': 1024, 'think': False},
             'models': [{
-                'name': 'alpha:latest',
+                'name': 'foundation-sec-alpha:latest',
                 'capabilities': ['completion', 'thinking'],
                 'quantization_level': 'Q4_K_M',
                 'parameter_size': '7B',
@@ -602,12 +655,12 @@ class ComparisonTests(unittest.TestCase):
         manifest = {
             'created_at': 'now',
             'request_settings': {'num_ctx': 32768, 'think': True},
-            'models': [{'name': 'alpha:latest', 'capabilities': ['completion', 'thinking']}],
+            'models': [{'name': 'foundation-sec-alpha:latest', 'capabilities': ['completion', 'thinking']}],
             'cases': [{'name': 'one.jsonl'}],
         }
         result = {
             'case': 'one.jsonl',
-            'model': 'alpha:latest',
+            'model': 'foundation-sec-alpha:latest',
             'status': 'ok',
             'sections': {'Verdict': 'benign'},
             'timing': {},
@@ -643,10 +696,24 @@ class ComparisonTests(unittest.TestCase):
     def test_cli_exits_nonzero_after_recording_invalid_runs(self):
         api = client()
         api.chat.return_value = response('bad answer')
-        with patch.object(compare_models, 'Client', return_value=api), patch.object(sys, 'argv', ['compare_models.py', '--models', 'alpha', '--logs', self.logs[0], '--output-dir', str(self.root/'results')]), contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as exit:
+        with patch.object(compare_models, 'Client', return_value=api), patch.object(sys, 'argv', ['compare_models.py', '--models', 'foundation-sec-alpha', '--logs', self.logs[0], '--output-dir', str(self.root/'results')]), contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as exit:
             compare_models.main()
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(len(list((self.root/'results').glob('*/report.html'))), 1)
+
+    def test_compare_cli_defaults_to_no_timeout_and_forwards_seconds(self):
+        api = client()
+        argv = ['compare_models.py', '--models', 'foundation-sec-alpha', '--logs', self.logs[0], '--output-dir', str(self.root/'results'), '--profiles-dir', str(self.root/'profiles')]
+        with patch.object(compare_models, 'Client', return_value=api) as constructed, \
+                patch.object(sys, 'argv', argv), \
+                contextlib.redirect_stdout(io.StringIO()):
+            compare_models.main()
+        constructed.assert_called_once_with(timeout=None)
+        with patch.object(compare_models, 'Client', return_value=api) as constructed, \
+                patch.object(sys, 'argv', argv + ['--timeout', '45']), \
+                contextlib.redirect_stdout(io.StringIO()):
+            compare_models.main()
+        constructed.assert_called_once_with(timeout=45.0)
 
 
 class DeclaredProfileTests(unittest.TestCase):
@@ -733,12 +800,12 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertEqual(profile["fields"], {"model": "qwen3:32b"})
 
     def test_ambiguous_profiles_stop_before_inference(self):
-        self.write_profile("think.profile", "model=alpha\ntemperature=0.6\n")
-        self.write_profile("direct.profile", "model=alpha:latest\ntemperature=0\n")
+        self.write_profile("think.profile", "model=foundation-sec-alpha\ntemperature=0.6\n")
+        self.write_profile("direct.profile", "model=foundation-sec-alpha:latest\ntemperature=0\n")
         api = client()
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
-                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
             )
         message = str(error.exception)
         self.assertIn("Multiple profiles", message)
@@ -748,20 +815,20 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertFalse((self.root / "results").exists())
 
     def test_explicit_profiles_keep_same_model_runs_separate(self):
-        self.write_profile("think.profile", "model=alpha\ntemperature=0.6\n")
-        self.write_profile("direct.profile", "model=alpha\ntemperature=0\n")
+        self.write_profile("think.profile", "model=foundation-sec-alpha\ntemperature=0.6\n")
+        self.write_profile("direct.profile", "model=foundation-sec-alpha\ntemperature=0\n")
         api = client()
         with contextlib.redirect_stdout(io.StringIO()):
             directory = compare_models.run_comparison(
                 api,
-                ["alpha"],
+                ["foundation-sec-alpha"],
                 [str(self.log)],
                 self.root / "results",
                 self.profiles,
                 [self.profiles / "think.profile", self.profiles / "direct.profile"],
             )
         rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
-        self.assertEqual([row["model"] for row in rows], ["alpha:latest", "alpha:latest"])
+        self.assertEqual([row["model"] for row in rows], ["foundation-sec-alpha:latest", "foundation-sec-alpha:latest"])
         self.assertEqual(len({row["run_key"] for row in rows}), 2)
         self.assertNotEqual(rows[0]["declared_profile"], rows[1]["declared_profile"])
         html = (directory / "report.html").read_text()
@@ -773,11 +840,11 @@ class DeclaredProfileTests(unittest.TestCase):
         )
 
     def test_profile_num_ctx_is_sent_and_allocated(self):
-        self.write_profile("alpha.profile", "model=alpha\nnum_ctx=16,384\n")
+        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nnum_ctx=16,384\n")
         api = client()
         with contextlib.redirect_stdout(io.StringIO()):
             directory = compare_models.run_comparison(
-                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
             )
         self.assertEqual(api.chat.call_args.kwargs["options"]["num_ctx"], 16384)
         rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
@@ -790,11 +857,11 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertIn("used 120 / allocated 16384", html)
 
     def test_profile_without_num_ctx_uses_fallback(self):
-        self.write_profile("alpha.profile", "model=alpha\n")
+        self.write_profile("alpha.profile", "model=foundation-sec-alpha\n")
         api = client()
         with contextlib.redirect_stdout(io.StringIO()):
             directory = compare_models.run_comparison(
-                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
             )
         self.assertEqual(api.chat.call_args.kwargs["options"]["num_ctx"], harness.NUM_CTX)
         rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
@@ -803,7 +870,7 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertEqual(manifest["models"][0]["num_ctx"], harness.NUM_CTX)
 
     def test_profile_thinking_is_sent_before_inference(self):
-        self.write_profile("alpha.profile", "model=alpha\nthinking=true\n")
+        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nthinking=true\n")
         api = client()
         api.show.return_value.capabilities = ["completion", "thinking"]
         seen = {}
@@ -816,7 +883,7 @@ class DeclaredProfileTests(unittest.TestCase):
         api.chat.side_effect = generate
         with contextlib.redirect_stdout(io.StringIO()):
             directory = compare_models.run_comparison(
-                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
             )
         self.assertTrue(seen["before"])
         manifest = json.loads((directory / "manifest.json").read_text())
@@ -825,7 +892,7 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertIn("Thinking: enabled", html)
 
     def test_profile_thinking_level_is_sent_before_inference(self):
-        self.write_profile("alpha.profile", "model=alpha\nthinking=high\n")
+        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nthinking=high\n")
         api = client()
         api.show.return_value.capabilities = ["completion", "thinking"]
 
@@ -836,38 +903,38 @@ class DeclaredProfileTests(unittest.TestCase):
         api.chat.side_effect = generate
         with contextlib.redirect_stdout(io.StringIO()):
             compare_models.run_comparison(
-                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
             )
 
     def test_profile_thinking_without_capability_stops_before_chat(self):
-        self.write_profile("alpha.profile", "model=alpha\nthinking=true\n")
+        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nthinking=true\n")
         api = client()
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
-                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
             )
         self.assertIn("thinking capability", str(error.exception))
         self.assertFalse(api.chat.called)
         self.assertFalse((self.root / "results").exists())
 
     def test_bad_thinking_stops_before_chat(self):
-        self.write_profile("alpha.profile", "model=alpha\nthinking=sometimes\n")
+        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nthinking=sometimes\n")
         api = client()
         api.show.return_value.capabilities = ["completion", "thinking"]
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
-                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
             )
         self.assertIn("thinking must be", str(error.exception))
         self.assertFalse(api.chat.called)
         self.assertFalse((self.root / "results").exists())
 
     def test_bad_num_ctx_stops_before_chat(self):
-        self.write_profile("alpha.profile", "model=alpha\nnum_ctx=16,384\u201324,576\n")
+        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nnum_ctx=16,384\u201324,576\n")
         api = client()
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
-                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
             )
         self.assertIn("num_ctx must be a positive integer", str(error.exception))
         self.assertFalse(api.chat.called)
@@ -878,7 +945,7 @@ class DeclaredProfileTests(unittest.TestCase):
         api = client()
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
-                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
             )
         self.assertIn("missing Model", str(error.exception))
         self.assertFalse(api.chat.called)
@@ -887,7 +954,7 @@ class DeclaredProfileTests(unittest.TestCase):
     def test_profile_is_saved_and_shown_before_inference(self):
         self.write_profile(
             "alpha.profile",
-            "model=alpha\n"
+            "model=foundation-sec-alpha\n"
             "weight_quant=Q6_K\n"
             "temperature=<script>alert(1)</script>\n"
             "kv_cache=f16\n",
@@ -920,7 +987,7 @@ class DeclaredProfileTests(unittest.TestCase):
         api.chat.side_effect = generate
         with contextlib.redirect_stdout(io.StringIO()) as out:
             directory = compare_models.run_comparison(
-                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
             )
         self.assertTrue(seen["before"])
         printed = out.getvalue()
@@ -934,9 +1001,9 @@ class DeclaredProfileTests(unittest.TestCase):
         api = client()
         with contextlib.redirect_stdout(io.StringIO()) as out:
             directory = compare_models.run_comparison(
-                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
             )
-        self.assertIn("No declared profile for alpha:latest", out.getvalue())
+        self.assertIn("No declared profile for foundation-sec-alpha:latest", out.getvalue())
         html = (directory / "report.html").read_text()
         self.assertIn("No declared profile", html)
         manifest = json.loads((directory / "manifest.json").read_text())
@@ -946,9 +1013,9 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertFalse((directory / "declared-profiles").exists())
 
     def test_single_hunt_records_profile_before_analysis(self):
-        self.write_profile("alpha.profile", "model=alpha\nkv_cache=f16\n")
+        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nkv_cache=f16\n")
         api = client()
-        result = harness.run_hunt("alpha", EVENTS, client=api)
+        result = harness.run_hunt("foundation-sec-alpha", EVENTS, client=api)
         output = self.root / "single-results"
         seen = {}
 
@@ -962,7 +1029,7 @@ class DeclaredProfileTests(unittest.TestCase):
             return result
 
         with patch.object(sys, "argv", [
-            "main.py", str(self.log), "--model", "alpha",
+            "main.py", str(self.log), "--model", "foundation-sec-alpha",
             "--profiles-dir", str(self.profiles),
             "--output-dir", str(output),
         ]), patch.object(harness, "Client", return_value=api), \
@@ -982,12 +1049,12 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertEqual(rows[0]["status"], "ok")
 
     def test_single_hunt_requires_a_choice_when_settings_differ(self):
-        self.write_profile("think.profile", "model=alpha\ntemperature=0.6\nkv_cache=f16\n")
-        self.write_profile("direct.profile", "model=alpha\ntemperature=0\nkv_cache=q8_0\n")
+        self.write_profile("think.profile", "model=foundation-sec-alpha\ntemperature=0.6\nkv_cache=f16\n")
+        self.write_profile("direct.profile", "model=foundation-sec-alpha\ntemperature=0\nkv_cache=q8_0\n")
         api = client()
         output = self.root / "single-results"
         with patch.object(sys, "argv", [
-            "main.py", str(self.log), "--model", "alpha",
+            "main.py", str(self.log), "--model", "foundation-sec-alpha",
             "--profiles-dir", str(self.profiles),
             "--output-dir", str(output),
         ]), patch.object(harness, "Client", return_value=api), \
@@ -1003,11 +1070,11 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertIn("direct.profile", err.getvalue())
         self.assertFalse(output.exists())
 
-        result = harness.run_hunt("alpha", EVENTS, client=api)
+        result = harness.run_hunt("foundation-sec-alpha", EVENTS, client=api)
 
         def run_with(profile_name):
             with patch.object(sys, "argv", [
-                "main.py", str(self.log), "--model", "alpha",
+                "main.py", str(self.log), "--model", "foundation-sec-alpha",
                 "--profile", str(self.profiles / profile_name),
                 "--profiles-dir", str(self.profiles),
                 "--output-dir", str(output),
@@ -1035,7 +1102,7 @@ class DeclaredProfileTests(unittest.TestCase):
         self.write_profile("alpha.profile", "not a profile\n")
         api = client()
         with patch.object(sys, "argv", [
-            "main.py", str(self.log), "--model", "alpha",
+            "main.py", str(self.log), "--model", "foundation-sec-alpha",
             "--profiles-dir", str(self.profiles),
         ]), patch.object(harness, "Client", return_value=api), \
                 patch.object(harness, "run_hunt") as run, \

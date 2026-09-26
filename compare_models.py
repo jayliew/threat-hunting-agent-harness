@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 from ollama import Client
 
+from host_signals import host_signal_labels
 from main import (
     NUM_CTX,
     NUM_PREDICT,
@@ -132,6 +133,11 @@ def context_label(allocated, used, model_max) -> str:
     return text
 
 
+def host_signals_label(result: dict) -> str:
+    signals = (result.get("host") or {}).get("signals") or []
+    return host_signal_labels(signals)
+
+
 def tokens_label(tokens: dict | None) -> str:
     tokens = tokens or {}
     estimate = " (estimated)" if tokens.get("split") == "estimated" else ""
@@ -185,7 +191,8 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
                 f'<td>{e(display(tokens.get("input_tokens")))}</td>'
                 f'<td>{e(display(tokens.get("thinking_tokens")))}</td>'
                 f'<td>{e(display(tokens.get("output_tokens")))}</td>'
-                f'<td>{e(display(tokens.get("prompt_eval_cached_count")))}</td></tr>'
+                f'<td>{e(display(tokens.get("prompt_eval_cached_count")))}</td>'
+                f'<td>{e(host_signals_label(result))}</td></tr>'
             )
             errors = result["validation_errors"] + ([result["error"]] if result["error"] else [])
             error_html = ''.join(f'<p class="error">{e(error)}</p>' for error in errors)
@@ -233,6 +240,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
              '<th>Output status</th><th>Unknown IDs</th><th>Wall time</th><th>Load time</th>'
              '<th>Quantization</th><th>Thinking</th><th>Context used</th><th>Context allocated</th>'
              '<th>Input tokens</th><th>Thinking tokens</th><th>Output tokens</th><th>Cached tokens</th>'
+             '<th>Host signals</th>'
              f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>{"".join(sections)}</main></body></html>')
     temp = directory / "report.html.tmp"
     temp.write_text(html, encoding="utf-8")

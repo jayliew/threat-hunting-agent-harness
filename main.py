@@ -17,6 +17,8 @@ from time import perf_counter
 
 from ollama import ChatResponse, Client
 
+from host_signals import HostMonitor, apply_host_signals, empty_host
+
 
 # Default Ollama model. Must already be installed locally (`ollama list`).
 # Pass --model to use a different installed name.
@@ -598,9 +600,11 @@ def run_hunt(
         "tokens": tokens,
         "warnings": [],
         "context": context_usage(NUM_CTX, tokens, model_max),
+        "host": empty_host(),
     }
     started = perf_counter()
     inspected_template = chat_template is not None
+    monitor = None
     try:
         if capabilities is None:
             info = client.show(model)
@@ -623,6 +627,8 @@ def run_hunt(
                 result["error"] = error
                 result["timing"]["wall_seconds"] = perf_counter() - started
                 return result
+        monitor = HostMonitor(model)
+        monitor.start()
         response = client.chat(**result["request"])
         content = response.message.content or ""
         result["response"] = response.model_dump(mode="json")
@@ -647,6 +653,13 @@ def run_hunt(
             result["timing"][field + "_seconds"] = value / 1e9 if value is not None else None
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
+    finally:
+        if monitor is not None:
+            try:
+                samples = monitor.stop()
+            except Exception:
+                samples = []
+            apply_host_signals(result, samples)
     result["timing"]["wall_seconds"] = perf_counter() - started
     return result
 

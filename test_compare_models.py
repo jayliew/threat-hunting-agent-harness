@@ -703,7 +703,7 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertEqual(profile["source"], "profiles/qwen3-32b.profile")
         self.assertEqual(
             profile["fields"],
-            {"model": "qwen3:32b", "thinking": "true", "num_ctx": "40,960"},
+            {"model": "qwen3:32b", "thinking": "true", "num_ctx": "40960"},
         )
         self.assertEqual(compare_models.profile_num_ctx(profile), 40960)
         self.assertIs(compare_models.profile_think(profile), True)
@@ -713,23 +713,23 @@ class DeclaredProfileTests(unittest.TestCase):
 
     def test_checked_in_profiles_match_the_planned_setups(self):
         expected = {
-            "qwen3-32b.profile": ("qwen3:32b", "40,960", 40960, "true", True),
-            "llama3.3-70b.profile": ("llama3.3:70b", "16,384", 16384, None, None),
-            "granite4.2-30b.profile": ("granite4.2:30b", "65,536", 65536, "high", "high"),
-            "deepseek-r1-32b.profile": ("deepseek-r1:32b", "65,536", 65536, "true", True),
-            "command-r.profile": ("command-r:latest", "131,072", 131072, None, None),
-            "gemma4-31b.profile": ("gemma4:31b", "32,768", 32768, "true", True),
+            "qwen3-32b.profile": ("qwen3:32b", "40960", 40960, "true", True),
+            "llama3.3-70b.profile": ("llama3.3:70b", "16384", 16384, None, None),
+            "granite4.2-30b.profile": ("granite4.2:30b", "65536", 65536, "high", "high"),
+            "deepseek-r1-32b.profile": ("deepseek-r1:32b", "65536", 65536, "true", True),
+            "command-r.profile": ("command-r:latest", "131072", 131072, None, None),
+            "gemma4-31b.profile": ("gemma4:31b", "32768", 32768, "true", True),
             "mistral-small3.2-24b.profile": (
                 "mistral-small3.2:24b",
-                "131,072",
+                "131072",
                 131072,
                 None,
                 None,
             ),
-            "mistral-nemo-12b.profile": ("mistral-nemo:12b", "131,072", 131072, None, None),
+            "mistral-nemo-12b.profile": ("mistral-nemo:12b", "131072", 131072, None, None),
             "foundation-sec-8b-instruct.profile": (
                 "foundation-sec-8b-instruct",
-                "131,072",
+                "131072",
                 131072,
                 None,
                 None,
@@ -807,7 +807,7 @@ class DeclaredProfileTests(unittest.TestCase):
         )
 
     def test_profile_num_ctx_is_sent_and_allocated(self):
-        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nnum_ctx=16,384\n")
+        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nnum_ctx=16384\n")
         api = client()
         with contextlib.redirect_stdout(io.StringIO()):
             directory = compare_models.run_comparison(
@@ -897,7 +897,7 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertFalse((self.root / "results").exists())
 
     def test_bad_num_ctx_stops_before_chat(self):
-        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nnum_ctx=16,384\u201324,576\n")
+        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nnum_ctx=16384\u201324576\n")
         api = client()
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
@@ -906,6 +906,15 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertIn("num_ctx must be a positive integer", str(error.exception))
         self.assertFalse(api.chat.called)
         self.assertFalse((self.root / "results").exists())
+
+    def test_num_ctx_rejects_commas(self):
+        profile = compare_models.parse_profile_text(
+            "model=foundation-sec-alpha\nnum_ctx=16,384\n", "memory"
+        )
+        with self.assertRaises(ValueError) as error:
+            compare_models.profile_num_ctx(profile)
+        self.assertIn("no commas", str(error.exception))
+        self.assertIn("16,384", str(error.exception))
 
     def test_malformed_profile_stops_before_results_and_inference(self):
         self.write_profile("alpha.profile", "weight_quant=Q6_K\n")

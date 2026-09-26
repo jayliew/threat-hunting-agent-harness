@@ -3,5 +3,5 @@ model=granite4.2:30b
 # kv_cache=Q8_0
 # thinking levels: false, low, medium, high
 thinking=high
-num_ctx=65,536
+num_ctx=65536
 # repeat_penalty=1.0

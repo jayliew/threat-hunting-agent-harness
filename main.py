@@ -15,6 +15,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
+from typing import NamedTuple
 
 from ollama import ChatResponse, Client
 from ollama._types import ChatRequest
@@ -302,22 +303,84 @@ def format_token_report(result: dict) -> str:
 FOUNDATION_SEC_MARKERS = ("<|system|>", "<|user|>", "<|assistant|>")
 # DeepSeek-R1 uses a fullwidth vertical bar (U+FF5C), not ASCII |.
 DEEPSEEK_MARKERS = ("<\uff5cUser\uff5c>", "<\uff5cAssistant\uff5c>")
-CHAT_ROLE_MARKERS = FOUNDATION_SEC_MARKERS + (
-    "<|im_start|>",
-    "<|start_header_id|>",
-    "[INST]",
-    "<start_of_turn>",
-) + DEEPSEEK_MARKERS
+FOUNDATION_SEC_HINT = (
+    "Foundation-Sec-8B-Instruct expects <|system|>, <|user|>, and <|assistant|>. "
+    "Create a local model from Modelfile.foundation-sec-8b-instruct before running."
+)
+GEMMA4_HINT = "Gemma 4 must use RENDERER gemma4 or gemma4-large."
+
+
+class ExpectedChatFraming(NamedTuple):
+    label: str
+    pattern: re.Pattern[str]
+    markers: tuple[str, ...] = ()
+    renderers: tuple[str, ...] = ()
+    forbidden: tuple[str, ...] = ()
+    hint: str = ""
+
+
+# Most specific name first. qwen3 must not claim qwen3.5, which uses its own renderer.
+EXPECTED_CHAT_FRAMING = (
+    ExpectedChatFraming(
+        "Foundation-Sec-8B-Instruct",
+        re.compile(r"foundation-sec", re.IGNORECASE),
+        FOUNDATION_SEC_MARKERS,
+        forbidden=("<|start_header_id|>",),
+        hint=FOUNDATION_SEC_HINT,
+    ),
+    ExpectedChatFraming(
+        "Mistral Small",
+        re.compile(r"mistral-small", re.IGNORECASE),
+        ("[SYSTEM_PROMPT]", "[/SYSTEM_PROMPT]", "[INST]", "[/INST]"),
+    ),
+    ExpectedChatFraming(
+        "Mistral Nemo",
+        re.compile(r"mistral-nemo", re.IGNORECASE),
+        ("[INST]", "[/INST]", ".System"),
+    ),
+    ExpectedChatFraming(
+        "Gemma 4",
+        re.compile(r"gemma4", re.IGNORECASE),
+        renderers=("gemma4", "gemma4-large"),
+        hint=GEMMA4_HINT,
+    ),
+    ExpectedChatFraming(
+        "Granite 4",
+        re.compile(r"granite4", re.IGNORECASE),
+        ("<|im_start|>", "<|im_end|>"),
+    ),
+    ExpectedChatFraming(
+        "DeepSeek-R1",
+        re.compile(r"deepseek-r1", re.IGNORECASE),
+        DEEPSEEK_MARKERS,
+    ),
+    ExpectedChatFraming(
+        "Command R",
+        re.compile(r"command-r", re.IGNORECASE),
+        (
+            "<|START_OF_TURN_TOKEN|>",
+            "<|SYSTEM_TOKEN|>",
+            "<|USER_TOKEN|>",
+            "<|CHATBOT_TOKEN|>",
+        ),
+    ),
+    ExpectedChatFraming(
+        "Qwen3",
+        re.compile(r"qwen3(?!\.5)", re.IGNORECASE),
+        ("<|im_start|>", "<|im_end|>"),
+    ),
+    ExpectedChatFraming(
+        "Llama 3",
+        re.compile(r"llama3", re.IGNORECASE),
+        ("<|start_header_id|>", "<|eot_id|>"),
+    ),
+)
 
 
 def is_bare_prompt_template(template: str | None) -> bool:
     """True when Ollama will send chat text without native role/turn markers."""
     collapsed = re.sub(r"\s+", "", template or "")
     return collapsed in {"{{.Prompt}}", "{{.Prompt}}{{.Response}}", ""}
-
-
-def is_foundation_sec_model(model: str) -> bool:
-    return "foundation-sec" in model.lower()
 
 
 def installed_renderer(modelfile: str | None) -> str | None:
@@ -332,44 +395,69 @@ def installed_renderer(modelfile: str | None) -> str | None:
     return None
 
 
+def expected_chat_framing(model: str) -> ExpectedChatFraming | None:
+    """Return the native framing registered for this installed model name."""
+    for framing in EXPECTED_CHAT_FRAMING:
+        if framing.pattern.search(model):
+            return framing
+    return None
+
+
+def framing_expectation(framing: ExpectedChatFraming) -> str:
+    if framing.hint:
+        return framing.hint
+    return f"{framing.label} expects {', '.join(framing.markers)}."
+
+
 def chat_template_error(
     model: str, template: str | None, renderer: str | None = None
 ) -> str | None:
-    """Return an error if the installed Ollama template cannot frame this chat."""
+    """Return an error if the installed framing is not the one this model was trained with."""
+    framing = expected_chat_framing(model)
+    if framing is None:
+        return (
+            f"No expected chat template is registered for {model!r}. "
+            "Preflight will not prompt a model whose native framing is unknown."
+        )
     text = template or ""
-    if is_foundation_sec_model(model):
-        missing = [marker for marker in FOUNDATION_SEC_MARKERS if marker not in text]
-        if missing:
-            installed = text.strip() or "(empty)"
+    installed = text.strip() or "(empty)"
+    expectation = framing_expectation(framing)
+    if framing.renderers:
+        if renderer not in framing.renderers:
+            shown = renderer or "(none)"
             return (
-                f"Installed Ollama template for {model!r} is missing "
-                f"{', '.join(missing)}. Foundation-Sec-8B-Instruct expects "
-                "<|system|>, <|user|>, and <|assistant|>. Create a local model "
-                "from Modelfile.foundation-sec-8b-instruct before running. "
+                f"Installed Ollama model {model!r} has RENDERER {shown}. "
+                f"{expectation} "
                 f"Installed template: {installed}"
             )
         return None
-    # A built-in renderer frames the chat. TEMPLATE {{ .Prompt }} is a placeholder.
     if renderer:
-        return None
-    if is_bare_prompt_template(text):
-        installed = text.strip() or "(empty)"
         return (
-            f"Installed Ollama template for {model!r} is {installed}. "
-            "This harness sends chat roles; {{ .Prompt }} sends only the user "
-            "text and drops system instructions."
+            f"Installed Ollama model {model!r} has RENDERER {renderer!r}, "
+            "which replaces the chat template. "
+            f"{expectation} "
+            f"Installed template: {installed}"
         )
-    if ".Messages" not in text and not any(marker in text for marker in CHAT_ROLE_MARKERS):
+    forbidden = [marker for marker in framing.forbidden if marker in text]
+    if forbidden:
         return (
-            f"Installed Ollama template for {model!r} has no role/turn markers "
-            "and does not range .Messages, so chat framing will not be applied. "
-            f"Installed template: {text.strip()}"
+            f"Installed Ollama template for {model!r} contains "
+            f"{', '.join(forbidden)}, which is the wrong framing. "
+            f"{expectation} "
+            f"Installed template: {installed}"
+        )
+    missing = [marker for marker in framing.markers if marker not in text]
+    if missing:
+        return (
+            f"Installed Ollama template for {model!r} is missing "
+            f"{', '.join(missing)}. {expectation} "
+            f"Installed template: {installed}"
         )
     return None
 
 
 def inspect_installed_model(client: Client, model: str) -> tuple[str, list[str], str | None]:
-    """Read /api/show and refuse models whose template cannot frame chat roles."""
+    """Read /api/show and refuse models whose framing is not the trained one."""
     info = client.show(model)
     template = info.template or ""
     capabilities = list(info.capabilities or [])
@@ -607,6 +695,20 @@ def send_chat(client: Client, request: dict):
     )
 
 
+def set_evaluation_seconds(timing: dict) -> None:
+    """Record prompt processing plus generation for this log.
+
+    Model load and unload are not part of this duration. Missing either
+    server timing leaves the value null rather than substituting wall time.
+    """
+    prompt = timing.get("prompt_eval_duration_seconds")
+    generated = timing.get("eval_duration_seconds")
+    if prompt is None or generated is None:
+        timing["evaluation_seconds"] = None
+        return
+    timing["evaluation_seconds"] = prompt + generated
+
+
 def build_messages(events: list[dict]) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -628,7 +730,7 @@ def run_hunt(
     think: bool | str | None = None,
 ) -> dict:
     """Run one fresh conversation; retain answers and failures for inspection."""
-    client = client if client is not None else Client(timeout=300)
+    client = client if client is not None else Client(timeout=None)
     allocated = NUM_CTX if num_ctx is None else num_ctx
     requested_think = THINK if think is None else think
     messages = build_messages(events)
@@ -687,6 +789,7 @@ def run_hunt(
             if error:
                 result["error"] = error
                 result["timing"]["wall_seconds"] = perf_counter() - started
+                set_evaluation_seconds(result["timing"])
                 return result
         response = send_chat(client, result["request"])
         content = response.message.content or ""
@@ -713,7 +816,20 @@ def run_hunt(
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
     result["timing"]["wall_seconds"] = perf_counter() - started
+    set_evaluation_seconds(result["timing"])
     return result
+
+
+def parse_timeout(value: str) -> float | None:
+    """HTTP timeout in seconds, or none to wait until the request finishes."""
+    if value.strip().lower() == "none":
+        return None
+    number = float(value)
+    if not 0 < number < float("inf"):
+        raise argparse.ArgumentTypeError(
+            "timeout must be a positive number of seconds, or none"
+        )
+    return number
 
 
 def main() -> None:
@@ -757,6 +873,15 @@ def main() -> None:
         default=None,
         help="Parent for the results directory (default: results/ next to this script)",
     )
+    parser.add_argument(
+        "--timeout",
+        type=parse_timeout,
+        default=None,
+        help=(
+            "HTTP timeout in seconds for each Ollama request, or none to wait "
+            "indefinitely (default: none)"
+        ),
+    )
     args = parser.parse_args()
     profiles_directory = (
         compare_models.DEFAULT_PROFILES_DIR
@@ -783,7 +908,7 @@ def main() -> None:
     except ValueError as error:
         print(error, file=sys.stderr)
         raise SystemExit(1)
-    client = Client(timeout=300)
+    client = Client(timeout=args.timeout)
     log_path = resolve_log_path(args.log_file)
     try:
         selected, cases = compare_models.prepare_comparison(
@@ -836,6 +961,10 @@ def main() -> None:
     if result["raw_content"]:
         print(result["raw_content"])
     print(format_token_report(result))
+    print(
+        f"{result['status']} · {compare_models.seconds(result['timing'].get('evaluation_seconds'))}",
+        flush=True,
+    )
     for warning in result["warnings"]:
         print(warning, file=sys.stderr)
     errors = result["validation_errors"] + ([result["error"]] if result["error"] else [])

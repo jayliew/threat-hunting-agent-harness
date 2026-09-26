@@ -438,7 +438,14 @@ def declared_profiles_html(manifest: dict) -> str:
 
 
 def seconds(value: float | None) -> str:
-    return "—" if value is None else f"{value:.2f}s"
+    """Format a duration stored in seconds as minutes and seconds."""
+    if value is None:
+        return "—"
+    total = abs(float(value))
+    minutes = int(total // 60)
+    remainder = total - (minutes * 60)
+    text = f"{minutes}m {remainder:.2f}s"
+    return f"-{text}" if value < 0 else text
 
 
 def display(value) -> str:
@@ -527,6 +534,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             status = result["status"]
             verdict = result["sections"].get("Verdict", "—")
             timing = result["timing"]
+            evaluated = seconds(timing.get("evaluation_seconds"))
             wall = seconds(timing.get("wall_seconds"))
             load = seconds(timing.get("load_duration_seconds"))
             tokens = result.get("tokens") or {}
@@ -537,7 +545,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             rows.append(
                 f'<tr><td>{e(case["name"])}</td><td>{name}</td>'
                 f'<td>{e(verdict)}</td><td class="{e(status)}">{e(status)}</td>'
-                f'<td>{len(result["unknown_evidence_ids"])}</td><td>{wall}</td><td>{load}</td>'
+                f'<td>{len(result["unknown_evidence_ids"])}</td><td>{evaluated}</td><td>{wall}</td><td>{load}</td>'
                 f'<td>{e(quant)}</td><td>{e(think)}</td>'
                 f'<td>{e(display(used))}</td><td>{e(display(allocated))}</td>'
                 f'<td>{e(display(tokens.get("input_tokens")))}</td>'
@@ -553,7 +561,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             thinking = (f'<details><summary>Thinking trace</summary><pre>{e(result["thinking"])}</pre></details>'
                         if result["thinking"] else '')
             cards.append(
-                f'<article><h3>{name}</h3><p class="{e(status)}">{e(status)} · {wall}</p>'
+                f'<article><h3>{name}</h3><p class="{e(status)}">{e(status)} · {evaluated}</p>'
                 f'<p>{e(context_label(allocated, used, model_max))}<br>'
                 f'{framing_note(model)}'
                 f'Quantization: {e(quant)}<br>'
@@ -586,7 +594,8 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
              f'kv_cache_type={e(settings.get("kv_cache_type"))} '
              '(server env <code>OLLAMA_KV_CACHE_TYPE</code>; not a chat API option).</p>'
              '<p>Output validity checks format and cited IDs; '
-             'it does not establish detection accuracy. Wall time includes model loading. '
+             'it does not establish detection accuracy. Eval time is prompt processing plus generation for that log and excludes model load and unload. '
+             'Wall time includes model loading. '
              'Runs are sequential, with a fresh conversation for every case. '
              'Context used is prompt tokens plus generated tokens, compared with the configured num_ctx. '
              'Thinking and output tokens split that generated count: exact when only one of those texts is present, '
@@ -596,7 +605,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
              'A missing cached-token count is unknown, not zero.</p>'
              f'{declared_profiles_html(manifest)}'
              '<div class="scroll"><table><thead><tr><th>Case</th><th>Model</th><th>Verdict</th>'
-             '<th>Output status</th><th>Unknown IDs</th><th>Wall time</th><th>Load time</th>'
+             '<th>Output status</th><th>Unknown IDs</th><th>Eval time</th><th>Wall time</th><th>Load time</th>'
              '<th>Quantization</th><th>Thinking</th><th>Context used</th><th>Context allocated</th>'
              '<th>Input tokens</th><th>Thinking tokens</th><th>Output tokens</th><th>Cached tokens</th>'
              f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>{"".join(sections)}</main></body></html>')
@@ -700,7 +709,10 @@ def run_comparison(
                               keep_alive=0 if index == len(cases)-1 else "5m")
             annotate_result(result, slot, case)
             save_result(directory, manifest, results, result)
-            print(f'  {result["status"]} · {seconds(result["timing"]["wall_seconds"])}', flush=True)
+            print(
+                f'  {result["status"]} · {seconds(result["timing"].get("evaluation_seconds"))}',
+                flush=True,
+            )
             for warning in result.get("warnings") or []:
                 print(f"  {warning}", flush=True)
     return directory

@@ -694,6 +694,9 @@ def run_hunt(
 
 
 def main() -> None:
+    # Import lazily: compare_models imports this module at load time.
+    import compare_models
+
     parser = argparse.ArgumentParser(description="Run the threat-hunting harness.")
     parser.add_argument(
         "log_file",
@@ -703,33 +706,76 @@ def main() -> None:
     )
     parser.add_argument(
         "--model",
-        default=DEFAULT_MODEL,
+        default=None,
         help=(
             "Ollama model already installed on this machine "
-            f"(ollama list). Default: {DEFAULT_MODEL}"
+            f"(ollama list). Default: {DEFAULT_MODEL}. "
+            "With --profile, this must match the profile's Model line."
         ),
     )
+    parser.add_argument(
+        "--profile",
+        type=Path,
+        default=None,
+        help=(
+            "Declared profile file for this run. Use another file on a later "
+            "run to test the same model under different settings."
+        ),
+    )
+    parser.add_argument(
+        "--profiles-dir",
+        type=Path,
+        default=None,
+        help="Directory of declared *.profile files (default: profiles/ next to this script)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Parent for the results directory (default: results/ next to this script)",
+    )
     args = parser.parse_args()
-    print(f"Model: {args.model}")
-    client = Client(timeout=300)
+    profiles_directory = (
+        compare_models.DEFAULT_PROFILES_DIR
+        if args.profiles_dir is None
+        else args.profiles_dir
+    )
+    output_root = compare_models.OUTPUT_ROOT if args.output_dir is None else args.output_dir
     try:
-        selected, cases = preflight_models_and_logs(
-            client, [args.model], [args.log_file]
-        )
-    except Exception as error:
+        if args.profile is not None:
+            explicit = compare_models.load_profile_paths([args.profile])
+            chosen = explicit[0]
+            if args.model and not compare_models.model_names_match(args.model, chosen["model"]):
+                raise ValueError(
+                    f"Profile {chosen['source']} declares {chosen['model']}, not {args.model}."
+                )
+            model_name = chosen["model"]
+            loaded: list[dict] = []
+        else:
+            explicit = []
+            model_name = args.model or DEFAULT_MODEL
+            loaded = compare_models.load_profiles(profiles_directory)
+            # Choose the setup before Ollama is contacted. Several matches must be pinned.
+            compare_models.unique_profile(loaded, model_name)
+    except ValueError as error:
         print(error, file=sys.stderr)
         raise SystemExit(1)
-    model_info = selected[0]
-    case = cases[0]
-    template = model_info["chat_template"]
-    capabilities = model_info["capabilities"]
-    renderer = model_info["renderer"] or None
+    client = Client(timeout=300)
+    log_path = resolve_log_path(args.log_file)
+    try:
+        selected, cases = compare_models.prepare_comparison(
+            client, [model_name], [str(log_path)]
+        )
+        slots = compare_models.assign_run_slots(selected, loaded, explicit)
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        raise SystemExit(1)
+    slot = slots[0]
+    print(f"Model: {slot['name']}")
+    renderer = slot.get("renderer") or ""
     if renderer:
         print(f"Chat framing: RENDERER {renderer}")
-    print(f"Chat template:\n{template}")
-    log_path = Path(case["path"])
-    event_list = case["events"]
-    events = json.dumps(event_list, separators=(",", ":"))
+    print(f"Chat template:\n{slot.get('chat_template') or ''}")
     # resolve_log_path() accepts absolute paths, including files outside this repo.
     # relative_to() raises ValueError for those; print the absolute path instead.
     repo_root = Path(__file__).parent
@@ -738,18 +784,25 @@ def main() -> None:
         if log_path.is_relative_to(repo_root)
         else log_path
     )
+    event_list = cases[0]["events"]
+    events = json.dumps(event_list, separators=(",", ":"))
     print(f"Log file: {displayed_log}")
     print(f"Security events supplied:\n{events}")
+    directory, manifest = compare_models.open_recorded_run(
+        output_root, profiles_directory, slots, cases
+    )
     print("\n--- Analysis ---", flush=True)
     result = run_hunt(
-        model_info["name"],
+        slot["name"],
         event_list,
         client=client,
-        capabilities=capabilities,
-        chat_template=template,
-        renderer=renderer,
-        model_max=model_info.get("context_length"),
+        capabilities=slot["capabilities"],
+        chat_template=slot.get("chat_template"),
+        renderer=renderer or None,
+        model_max=slot.get("context_length"),
     )
+    compare_models.annotate_result(result, slot, cases[0])
+    compare_models.save_result(directory, manifest, [], result)
     effective_think = result["request"].get("think")
     print(f"Thinking: {effective_think if effective_think is not None else 'unsupported or unavailable'}")
     if result["thinking"]:
@@ -762,6 +815,7 @@ def main() -> None:
     errors = result["validation_errors"] + ([result["error"]] if result["error"] else [])
     for error in errors:
         print(error, file=sys.stderr)
+    print(f"Report: {directory / 'report.html'}")
     if result["status"] != "ok":
         raise SystemExit(1)
 

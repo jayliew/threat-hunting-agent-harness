@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 from ollama import Client
 
 from main import (
+    KV_CACHE_TYPE,
     NUM_CTX,
     NUM_PREDICT,
     THINK,
@@ -221,7 +222,13 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
 @media(max-width:600px){body{padding:16px}.answers{grid-auto-flow:row;grid-template-columns:1fr}}
 </style></head><body><main>'''
     html += (f'<h1>Threat hunt model comparison</h1><p>{e(manifest["created_at"])} · '
-             f'{len(results)} / {total} runs recorded</p><p>Output validity checks format and cited IDs; '
+             f'{len(results)} / {total} runs recorded</p>'
+             f'<p>Request settings: num_ctx={e(settings.get("num_ctx"))}, '
+             f'num_predict={e(settings.get("num_predict"))}, '
+             f'think={e(settings.get("think"))}, '
+             f'kv_cache_type={e(settings.get("kv_cache_type"))} '
+             '(server env <code>OLLAMA_KV_CACHE_TYPE</code>; not a chat API option).</p>'
+             '<p>Output validity checks format and cited IDs; '
              'it does not establish detection accuracy. Wall time includes model loading. '
              'Runs are sequential, with a fresh conversation for every case. '
              'Context used is prompt tokens plus generated tokens, compared with the configured num_ctx. '
@@ -250,6 +257,7 @@ def run_comparison(client: Client, models: list[str], logs: list[str], output_ro
             "num_ctx": NUM_CTX,
             "num_predict": NUM_PREDICT,
             "think": THINK,
+            "kv_cache_type": KV_CACHE_TYPE,
         },
         "models": selected,
         "cases": [{k: v for k, v in case.items() if k != "events"} for case in cases],

@@ -252,6 +252,26 @@ class HuntTests(unittest.TestCase):
                 harness.main()
             self.assertEqual(exit.exception.code, 1)
 
+    def test_single_hunt_cli_defaults_to_no_timeout_and_forwards_seconds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'case.jsonl'
+            path.write_text(json.dumps(EVENTS[0])+'\n')
+            api = client()
+            result = harness.run_hunt('alpha', EVENTS, client=api)
+            base = ['main.py', str(path), '--model', 'alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]
+            with patch.object(sys, 'argv', base), \
+                    patch.object(harness, 'Client', return_value=api) as constructed, \
+                    patch.object(harness, 'run_hunt', return_value=result), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                harness.main()
+            constructed.assert_called_once_with(timeout=None)
+            with patch.object(sys, 'argv', base + ['--timeout', '45']), \
+                    patch.object(harness, 'Client', return_value=api) as constructed, \
+                    patch.object(harness, 'run_hunt', return_value=result), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                harness.main()
+            constructed.assert_called_once_with(timeout=45.0)
+
     def test_single_hunt_cli_rejects_bad_template_before_inference(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'case.jsonl'
@@ -647,6 +667,20 @@ class ComparisonTests(unittest.TestCase):
             compare_models.main()
         self.assertEqual(exit.exception.code, 1)
         self.assertEqual(len(list((self.root/'results').glob('*/report.html'))), 1)
+
+    def test_compare_cli_defaults_to_no_timeout_and_forwards_seconds(self):
+        api = client()
+        argv = ['compare_models.py', '--models', 'alpha', '--logs', self.logs[0], '--output-dir', str(self.root/'results'), '--profiles-dir', str(self.root/'profiles')]
+        with patch.object(compare_models, 'Client', return_value=api) as constructed, \
+                patch.object(sys, 'argv', argv), \
+                contextlib.redirect_stdout(io.StringIO()):
+            compare_models.main()
+        constructed.assert_called_once_with(timeout=None)
+        with patch.object(compare_models, 'Client', return_value=api) as constructed, \
+                patch.object(sys, 'argv', argv + ['--timeout', '45']), \
+                contextlib.redirect_stdout(io.StringIO()):
+            compare_models.main()
+        constructed.assert_called_once_with(timeout=45.0)
 
 
 class DeclaredProfileTests(unittest.TestCase):

@@ -27,6 +27,7 @@ from main import (
     NUM_PREDICT,
     SHIFT,
     THINK,
+    parse_timeout,
     preflight_models_and_logs,
     run_hunt,
 )
@@ -703,13 +704,6 @@ def run_comparison(
     return directory
 
 
-def positive_timeout(value: str) -> float:
-    number = float(value)
-    if not 0 < number < float("inf"):
-        raise argparse.ArgumentTypeError("timeout must be a positive, finite number")
-    return number
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--models", nargs="+", default=MODELS, help="Installed Ollama names (default: MODELS in compare_models.py)")
@@ -717,7 +711,15 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_ROOT, help="Parent for a new US Eastern Time named results directory")
     parser.add_argument("--profiles-dir", type=Path, default=DEFAULT_PROFILES_DIR, help="Directory of declared *.profile files (default: profiles/ next to this script)")
     parser.add_argument("--profile", nargs="+", type=Path, default=None, help="Profile file for this run. Repeat to test one model with different settings.")
-    parser.add_argument("--timeout", type=positive_timeout, default=300, help="HTTP operation timeout in seconds (default: 300)")
+    parser.add_argument(
+        "--timeout",
+        type=parse_timeout,
+        default=None,
+        help=(
+            "HTTP timeout in seconds for each Ollama request, or none to wait "
+            "indefinitely (default: none)"
+        ),
+    )
     args = parser.parse_args()
     try:
         directory = run_comparison(

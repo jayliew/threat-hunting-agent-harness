@@ -660,92 +660,36 @@ class DeclaredProfileTests(unittest.TestCase):
             Path(__file__).resolve().parent / "profiles" / "qwen3-32b.profile"
         )
         self.assertEqual(profile["source"], "profiles/qwen3-32b.profile")
-        self.assertEqual(profile["fields"]["model"], "qwen3:32b")
-        self.assertEqual(profile["fields"]["weight_precision"], "Developer Q8_0")
-        self.assertEqual(profile["fields"]["thinking"], "Enabled")
-        self.assertEqual(profile["fields"]["kv_cache"], "Q8_0")
-        self.assertEqual(profile["fields"]["planned_context_range"], "40,960")
-        self.assertEqual(profile["fields"]["repeat_penalty"], "1.0")
+        self.assertEqual(profile["fields"], {"model": "qwen3:32b", "num_ctx": "40,960"})
+        self.assertEqual(compare_models.profile_num_ctx(profile), 40960)
+        self.assertIn("# Weight precision:       Developer Q8_0", profile["text"])
+        self.assertIn("# KV cache:               Q8_0", profile["text"])
+        self.assertIn("# Thinking:               Enabled", profile["text"])
+        self.assertIn("# Repeat penalty:         1.0", profile["text"])
 
     def test_checked_in_profiles_match_the_planned_setups(self):
         expected = {
-            "qwen3-32b.profile": {
-                "model": "qwen3:32b",
-                "weight_precision": "Developer Q8_0",
-                "kv_cache": "Q8_0",
-                "thinking": "Enabled",
-                "planned_context_range": "40,960",
-                "repeat_penalty": "1.0",
-            },
-            "llama3.3-70b.profile": {
-                "model": "llama3.3:70b",
-                "weight_precision": "Q4_K_M",
-                "kv_cache": "Q8_0",
-                "thinking": "No native switch",
-                "planned_context_range": "16,384\u201324,576",
-                "repeat_penalty": "1.0",
-            },
-            "granite4.2-30b.profile": {
-                "model": "granite4.2:30b",
-                "weight_precision": "Developer Q8_0",
-                "kv_cache": "Q8_0",
-                "thinking": "High",
-                "planned_context_range": "40,960\u201349,152",
-                "repeat_penalty": "1.0",
-            },
-            "deepseek-r1-32b.profile": {
-                "model": "deepseek-r1:32b",
-                "weight_precision": "Q8_0",
-                "kv_cache": "Q8_0",
-                "thinking": "Enabled",
-                "planned_context_range": "40,960\u201353,248",
-                "repeat_penalty": "1.0",
-            },
-            "command-r.profile": {
-                "model": "command-r:latest",
-                "weight_precision": "Q8_0",
-                "kv_cache": "F16",
-                "thinking": "Not supported",
-                "planned_context_range": "16,384\u201328,672",
-                "repeat_penalty": "1.0",
-            },
-            "gemma4-31b.profile": {
-                "model": "gemma4:31b",
-                "weight_precision": "Developer QAT Q4_0",
-                "kv_cache": "F16",
-                "thinking": "Enabled",
-                "planned_context_range": "40,960\u201353,248",
-                "repeat_penalty": "1.0",
-            },
-            "mistral-small3.2-24b.profile": {
-                "model": "mistral-small3.2:24b",
-                "weight_precision": "Q8_0",
-                "kv_cache": "F16",
-                "thinking": "Not supported",
-                "planned_context_range": "16,384\u201328,672",
-                "repeat_penalty": "1.0",
-            },
-            "mistral-nemo-12b.profile": {
-                "model": "mistral-nemo:12b",
-                "weight_precision": "F16",
-                "kv_cache": "F16",
-                "thinking": "Not supported",
-                "planned_context_range": "16,384\u201328,672",
-                "repeat_penalty": "1.0",
-            },
-            "foundation-sec-8b-instruct.profile": {
-                "model": "foundation-sec-8b-instruct",
-                "weight_precision": "Existing developer Q8_0",
-                "kv_cache": "F16",
-                "thinking": "Not supported",
-                "planned_context_range": "16,384\u201324,576",
-                "repeat_penalty": "1.0",
-            },
+            "qwen3-32b.profile": ("qwen3:32b", "40,960", 40960),
+            "llama3.3-70b.profile": ("llama3.3:70b", "16,384", 16384),
+            "granite4.2-30b.profile": ("granite4.2:30b", "65,536", 65536),
+            "deepseek-r1-32b.profile": ("deepseek-r1:32b", "65,536", 65536),
+            "command-r.profile": ("command-r:latest", "131,072", 131072),
+            "gemma4-31b.profile": ("gemma4:31b", "32,768", 32768),
+            "mistral-small3.2-24b.profile": ("mistral-small3.2:24b", "131,072", 131072),
+            "mistral-nemo-12b.profile": ("mistral-nemo:12b", "131,072", 131072),
+            "foundation-sec-8b-instruct.profile": (
+                "foundation-sec-8b-instruct",
+                "131,072",
+                131072,
+            ),
         }
         root = Path(__file__).resolve().parent / "profiles"
-        for name, fields in expected.items():
+        for name, (model, text, number) in expected.items():
             profile = compare_models.parse_profile_file(root / name)
-            self.assertEqual(profile["fields"], fields)
+            self.assertEqual(profile["fields"], {"model": model, "num_ctx": text})
+            self.assertEqual(compare_models.profile_num_ctx(profile), number)
+            self.assertIn("# Weight precision:", profile["text"])
+            self.assertIn("# Repeat penalty:", profile["text"])
         self.assertIsNone(compare_models.quantization_note("Developer Q8_0", "Q8_0"))
         self.assertIsNone(compare_models.quantization_note("Developer QAT Q4_0", "Q4_0"))
         self.assertIsNone(
@@ -798,6 +742,47 @@ class DeclaredProfileTests(unittest.TestCase):
             sorted(path.name for path in (directory / "declared-profiles").iterdir()),
             ["direct.profile", "think.profile"],
         )
+
+    def test_profile_num_ctx_is_sent_and_allocated(self):
+        self.write_profile("alpha.profile", "Model: alpha\nnum_ctx: 16,384\n")
+        api = client()
+        with contextlib.redirect_stdout(io.StringIO()):
+            directory = compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertEqual(api.chat.call_args.kwargs["options"]["num_ctx"], 16384)
+        rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
+        self.assertEqual(rows[0]["request"]["options"]["num_ctx"], 16384)
+        self.assertEqual(rows[0]["context"]["allocated"], 16384)
+        manifest = json.loads((directory / "manifest.json").read_text())
+        self.assertEqual(manifest["models"][0]["num_ctx"], 16384)
+        self.assertEqual(manifest["request_settings"]["num_ctx"], harness.NUM_CTX)
+        html = (directory / "report.html").read_text()
+        self.assertIn("used 120 / allocated 16384", html)
+
+    def test_profile_without_num_ctx_uses_fallback(self):
+        self.write_profile("alpha.profile", "Model: alpha\n")
+        api = client()
+        with contextlib.redirect_stdout(io.StringIO()):
+            directory = compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertEqual(api.chat.call_args.kwargs["options"]["num_ctx"], harness.NUM_CTX)
+        rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
+        self.assertEqual(rows[0]["context"]["allocated"], harness.NUM_CTX)
+        manifest = json.loads((directory / "manifest.json").read_text())
+        self.assertEqual(manifest["models"][0]["num_ctx"], harness.NUM_CTX)
+
+    def test_bad_num_ctx_stops_before_chat(self):
+        self.write_profile("alpha.profile", "Model: alpha\nnum_ctx: 16,384\u201324,576\n")
+        api = client()
+        with self.assertRaises(ValueError) as error:
+            compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertIn("num_ctx must be a positive integer", str(error.exception))
+        self.assertFalse(api.chat.called)
+        self.assertFalse((self.root / "results").exists())
 
     def test_malformed_profile_stops_before_results_and_inference(self):
         self.write_profile("alpha.profile", "Weight quant: Q6_K\n")

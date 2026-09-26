@@ -83,7 +83,18 @@ Use it to check whether the model:
 
 You need Python 3.14+, [uv](https://docs.astral.sh/uv/), and [Ollama](https://ollama.com) running locally. This harness does not download weights. It talks to Ollama on your machine and will fail if the chosen model is not installed.
 
-1. On macOS, set the Ollama server environment before you start Ollama (or restart it afterward). These `launchctl` values enable flash attention, use an f16 KV cache, allow one parallel request, and keep one model loaded. They last until logout or reboot. Quit and reopen the Ollama app, or restart `ollama serve`, so the running server inherits them:
+1. Configure the Ollama **server** environment before you start Ollama (or restart it afterward). This harness expects an **f16** K/V cache (`OLLAMA_KV_CACHE_TYPE=f16`). That matches Ollama's built-in default, but set it explicitly—do not leave the cache type to an implicit server default. The running `ollama serve` process (or the Ollama desktop app) must inherit these variables at start; exporting them only in a later shell does not change an already-running server. The harness records `KV_CACHE_TYPE` from `main.py` on each hunt and in compare manifests; it cannot push the value over the chat API.
+
+   Also enable flash attention, allow one parallel request, and keep one model loaded:
+
+   | Variable                   | Harness value |
+   | -------------------------- | ------------- |
+   | `OLLAMA_FLASH_ATTENTION`   | `1`           |
+   | `OLLAMA_KV_CACHE_TYPE`     | `f16`         |
+   | `OLLAMA_NUM_PARALLEL`      | `1`           |
+   | `OLLAMA_MAX_LOADED_MODELS` | `1`           |
+
+   **macOS** (`launchctl`; values last until logout or reboot). Quit and reopen the Ollama app, or restart `ollama serve`, so the server inherits them:
 
 ```bash
 launchctl setenv OLLAMA_FLASH_ATTENTION 1
@@ -92,7 +103,32 @@ launchctl setenv OLLAMA_NUM_PARALLEL 1
 launchctl setenv OLLAMA_MAX_LOADED_MODELS 1
 ```
 
-2. Install Ollama and start it. On macOS that is typically `brew install ollama` then `ollama serve` (or open the Ollama app). Confirm it is up and see which models you already have:
+   **Linux (systemd):** put the same keys in the Ollama service unit (or a drop-in), then reload and restart so the server process inherits them. Example drop-in:
+
+```bash
+sudo mkdir -p /etc/systemd/system/ollama.service.d
+sudo tee /etc/systemd/system/ollama.service.d/override.conf >/dev/null <<'EOF'
+[Service]
+Environment="OLLAMA_FLASH_ATTENTION=1"
+Environment="OLLAMA_KV_CACHE_TYPE=f16"
+Environment="OLLAMA_NUM_PARALLEL=1"
+Environment="OLLAMA_MAX_LOADED_MODELS=1"
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+```
+
+   **Any host (foreground shell):** export the variables in the same environment that starts the server:
+
+```bash
+export OLLAMA_FLASH_ATTENTION=1
+export OLLAMA_KV_CACHE_TYPE=f16
+export OLLAMA_NUM_PARALLEL=1
+export OLLAMA_MAX_LOADED_MODELS=1
+ollama serve
+```
+
+2. Install Ollama and start it (if you have not already). On macOS that is typically `brew install ollama` then `ollama serve` (or open the Ollama app). Confirm it is up and see which models you already have:
 
 ```bash
 ollama list
@@ -121,7 +157,7 @@ uv run python main.py --model qwen3:32b
 uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
 ```
 
-The script prints the model name, the installed chat template, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It also prints input, thinking, and output tokens, how those generated tokens were split, and context used versus the configured `num_ctx`. It exits with an error instead of looking like a successful hunt when:
+The script prints the model name, the installed chat template, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It also prints the expected server K/V cache type (`KV_CACHE_TYPE`), thinking mode, input/thinking/output tokens, how those generated tokens were split, and context used versus the configured `num_ctx`. It exits with an error instead of looking like a successful hunt when:
 
 - the model is not installed (`ollama list`), lacks text completion, or its Ollama template cannot frame chat roles (`{{ .Prompt }}` with no `RENDERER`, no `.Messages`/role markers, or a Foundation-Sec name without `<|system|>/<|user|>/<|assistant|>`)
 - the log file is missing, unreadable, malformed, or contains no events
@@ -132,6 +168,12 @@ The script prints the model name, the installed chat template, the log file, the
 - context used (prompt tokens plus generated tokens) is at least the configured `num_ctx`
 
 Usage at or above 90% of `num_ctx`, while still under that window, prints a warning and does not by itself fail the run. Valid citations do not mean the explanation is right.
+
+## K/V cache type
+
+Before you run, set `KV_CACHE_TYPE` in `main.py` to the K/V cache quantization this harness expects on the Ollama server. The default is `f16`. Do not leave the server cache type implicit: configure `OLLAMA_KV_CACHE_TYPE` to the same value when starting Ollama (see [How to run](#how-to-run)). Quantized options such as `q8_0` or `q4_0` need flash attention and reduce KV memory; this harness standardizes on `f16` for reproducibility.
+
+`KV_CACHE_TYPE` is recorded on each hunt's `request` object and in compare `manifest.json` `request_settings`. It is not sent as a chat option; the server process must already be running with that environment.
 
 ## Thinking mode
 
@@ -162,9 +204,9 @@ Log paths are relative to the script (or absolute); a supplied output directory 
 
 - `report.html`: open in a browser for a dark-themed summary table and full answers side by side, grouped by case. Each model card and the summary table include quantization, thinking mode (enabled / disabled / not supported), context used vs allocated, and token counts (input, thinking, output, cached, uncached). A near-full context window is shown as a warning. Thinking traces can be expanded when present. Output and error text are HTML-escaped.
 - `results.jsonl`: one row per attempted model/case pair, saved immediately. Includes full raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages/options, prompt and input hashes, model digest, timings, token counts, and context allocated/used.
-- `manifest.json`: selected models (digest, capabilities, quantization, native context) plus shared request settings (`num_ctx`, `num_predict`, `think`) and input file identities. Pending cases remain visible in the report if the process is interrupted.
+- `manifest.json`: selected models (digest, capabilities, quantization, native context) plus shared request settings (`num_ctx`, `num_predict`, `think`, `kv_cache_type`) and input file identities. Pending cases remain visible in the report if the process is interrupted.
 
-Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Temperature, context size, answer budget, and the requested thinking mode come from `main.py`; capability-aware handling omits `think` for models without that capability. The last case for each model requests unloading afterward. The configurable HTTP operation timeout defaults to 300 seconds; it is not a total batch deadline.
+Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Temperature, context size, answer budget, thinking mode, and the expected server K/V cache type come from `main.py`; capability-aware handling omits `think` for models without that capability. The last case for each model requests unloading afterward. The configurable HTTP operation timeout defaults to 300 seconds; it is not a total batch deadline.
 
 Invalid, empty, truncated, and failed responses are retained. An individual inference error does not stop the remaining cases. The report updates after every saved result. Exit status is nonzero if any run is invalid or failed, if any run meets or exceeds the configured context window, if preflight fails, or if execution is interrupted; completed results remain available.
 

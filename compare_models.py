@@ -132,14 +132,15 @@ def context_label(allocated, used, model_max) -> str:
     return text
 
 
-def tokens_label(tokens: dict | None, thinking_enabled: bool) -> str:
+def tokens_label(tokens: dict | None) -> str:
     tokens = tokens or {}
-    output_note = " (includes thinking)" if thinking_enabled else ""
+    estimate = " (estimated)" if tokens.get("split") == "estimated" else ""
     return (
-        f"Input: {display(tokens.get('prompt_eval_count'))} · "
+        f"Input: {display(tokens.get('input_tokens'))} · "
+        f"Thinking: {display(tokens.get('thinking_tokens'))}{estimate} · "
+        f"Output: {display(tokens.get('output_tokens'))}{estimate} · "
         f"Cached: {display(tokens.get('prompt_eval_cached_count'))} · "
-        f"Uncached: {display(tokens.get('prompt_uncached_count'))} · "
-        f"Output: {display(tokens.get('eval_count'))}{output_note}"
+        f"Uncached: {display(tokens.get('prompt_uncached_count'))}"
     )
 
 
@@ -162,7 +163,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
                     f'<p>{e(context_label(settings.get("num_ctx"), None, model.get("context_length")))}<br>'
                     f'{framing_note(model)}'
                     f'Quantization: {e(quant)}<br>Thinking: {e(think)}<br>'
-                    f'{e(tokens_label(None, False))}</p></article>'
+                    f'{e(tokens_label(None))}</p></article>'
                 )
                 continue
             status = result["status"]
@@ -175,19 +176,22 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             allocated = context.get("allocated", settings.get("num_ctx"))
             used = context.get("used")
             model_max = context.get("model_max", model.get("context_length"))
-            thinking_enabled = think == "enabled"
             rows.append(
                 f'<tr><td>{e(case["name"])}</td><td>{name}</td>'
                 f'<td>{e(verdict)}</td><td class="{e(status)}">{e(status)}</td>'
                 f'<td>{len(result["unknown_evidence_ids"])}</td><td>{wall}</td><td>{load}</td>'
                 f'<td>{e(quant)}</td><td>{e(think)}</td>'
                 f'<td>{e(display(used))}</td><td>{e(display(allocated))}</td>'
-                f'<td>{e(display(tokens.get("prompt_eval_count")))}</td>'
-                f'<td>{e(display(tokens.get("prompt_eval_cached_count")))}</td>'
-                f'<td>{e(display(tokens.get("eval_count")))}</td></tr>'
+                f'<td>{e(display(tokens.get("input_tokens")))}</td>'
+                f'<td>{e(display(tokens.get("thinking_tokens")))}</td>'
+                f'<td>{e(display(tokens.get("output_tokens")))}</td>'
+                f'<td>{e(display(tokens.get("prompt_eval_cached_count")))}</td></tr>'
             )
             errors = result["validation_errors"] + ([result["error"]] if result["error"] else [])
             error_html = ''.join(f'<p class="error">{e(error)}</p>' for error in errors)
+            warning_html = ''.join(
+                f'<p class="warn">{e(warning)}</p>' for warning in result.get("warnings") or []
+            )
             thinking = (f'<details><summary>Thinking trace</summary><pre>{e(result["thinking"])}</pre></details>'
                         if result["thinking"] else '')
             cards.append(
@@ -196,10 +200,10 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
                 f'{framing_note(model)}'
                 f'Quantization: {e(quant)}<br>'
                 f'Thinking: {e(think)} · Load: {load}<br>'
-                f'{e(tokens_label(tokens, thinking_enabled))}<br>'
+                f'{e(tokens_label(tokens))}<br>'
                 f'Prompt processing: {seconds(timing.get("prompt_eval_duration_seconds"))} · '
                 f'Generation: {seconds(timing.get("eval_duration_seconds"))}</p>'
-                f'{error_html}<pre>{e(result["raw_content"]) or "No answer returned."}</pre>{thinking}</article>'
+                f'{warning_html}{error_html}<pre>{e(result["raw_content"]) or "No answer returned."}</pre>{thinking}</article>'
             )
         sections.append(f'<section><h2>{e(case["name"])}</h2><div class="answers">{"".join(cards)}</div></section>')
     total = len(manifest["models"]) * len(manifest["cases"])
@@ -213,19 +217,22 @@ th,td{text-align:left;padding:10px 14px;border-bottom:1px solid #2e3a48}th{backg
 .scroll{overflow:auto}.answers{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(300px,1fr);gap:16px;overflow-x:auto;padding-bottom:12px}
 article{padding:20px;border:1px solid #2e3a48;border-radius:10px;background:#1a222c;min-width:0}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,monospace}
-.ok{color:#3dd68c}.invalid,.error{color:#f07178}.pending{color:#8b9aab}summary{cursor:pointer}
+.ok{color:#3dd68c}.invalid,.error{color:#f07178}.warn{color:#e6b450}.pending{color:#8b9aab}summary{cursor:pointer}
 @media(max-width:600px){body{padding:16px}.answers{grid-auto-flow:row;grid-template-columns:1fr}}
 </style></head><body><main>'''
     html += (f'<h1>Threat hunt model comparison</h1><p>{e(manifest["created_at"])} · '
              f'{len(results)} / {total} runs recorded</p><p>Output validity checks format and cited IDs; '
              'it does not establish detection accuracy. Wall time includes model loading. '
              'Runs are sequential, with a fresh conversation for every case. '
-             'Context used is prompt tokens plus generated tokens. Output tokens include thinking when thinking is enabled. '
+             'Context used is prompt tokens plus generated tokens, compared with the configured num_ctx. '
+             'Thinking and output tokens split that generated count: exact when only one of those texts is present, '
+             'estimated by character length when both are present. '
+             'A run warns at 90% of num_ctx and is an error at or above num_ctx. '
              'A missing cached-token count is unknown, not zero.</p>'
              '<div class="scroll"><table><thead><tr><th>Case</th><th>Model</th><th>Verdict</th>'
              '<th>Output status</th><th>Unknown IDs</th><th>Wall time</th><th>Load time</th>'
              '<th>Quantization</th><th>Thinking</th><th>Context used</th><th>Context allocated</th>'
-             '<th>Input tokens</th><th>Cached tokens</th><th>Output tokens</th>'
+             '<th>Input tokens</th><th>Thinking tokens</th><th>Output tokens</th><th>Cached tokens</th>'
              f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>{"".join(sections)}</main></body></html>')
     temp = directory / "report.html.tmp"
     temp.write_text(html, encoding="utf-8")
@@ -269,6 +276,8 @@ def run_comparison(client: Client, models: list[str], logs: list[str], output_ro
                 results.append(result)
                 write_report(directory, manifest, results)
                 print(f'  {result["status"]} · {seconds(result["timing"]["wall_seconds"])}', flush=True)
+                for warning in result.get("warnings") or []:
+                    print(f"  {warning}", flush=True)
     return directory
 
 

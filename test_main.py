@@ -9,8 +9,10 @@ from unittest.mock import Mock
 from ollama import ChatResponse, Message
 
 from main import (
+    CONTEXT_WARN_RATIO,
     EVIDENCE_END,
     EVIDENCE_START,
+    NUM_CTX,
     SYSTEM_PROMPT,
     USER_TASK,
     build_messages,
@@ -20,6 +22,7 @@ from main import (
     chat_template_error,
     chat_think_kwargs,
     installed_renderer,
+    context_limit,
     context_usage,
     empty_tokens,
     incomplete_response_message,
@@ -29,6 +32,7 @@ from main import (
     load_security_events,
     model_detail_fields,
     native_context_length,
+    split_generated_tokens,
     usage_tokens,
 )
 
@@ -482,6 +486,10 @@ class UsageAndContextTests(unittest.TestCase):
                 "prompt_eval_cached_count": 20,
                 "prompt_uncached_count": 60,
                 "eval_count": 40,
+                "input_tokens": 80,
+                "thinking_tokens": None,
+                "output_tokens": None,
+                "split": "unknown",
             },
         )
 
@@ -493,7 +501,7 @@ class UsageAndContextTests(unittest.TestCase):
         tokens = {"prompt_eval_count": 80, "eval_count": 40}
         self.assertEqual(
             context_usage(32768, tokens, 131072),
-            {"allocated": 32768, "used": 120, "model_max": 131072},
+            {"allocated": 32768, "used": 120, "model_max": 131072, "limit": "ok"},
         )
 
     def test_context_used_falls_back_to_whichever_count_is_known(self) -> None:
@@ -505,7 +513,46 @@ class UsageAndContextTests(unittest.TestCase):
             context_usage(32768, {"prompt_eval_count": None, "eval_count": 40})["used"],
             40,
         )
-        self.assertIsNone(context_usage(32768, empty_tokens())["used"])
+        missing = context_usage(32768, empty_tokens())
+        self.assertIsNone(missing["used"])
+        self.assertEqual(missing["limit"], "unknown")
+
+    def test_split_is_exact_without_thinking_text(self) -> None:
+        self.assertEqual(split_generated_tokens(40, "", "answer"), (0, 40, "exact"))
+        self.assertEqual(split_generated_tokens(40, "   ", "answer"), (0, 40, "exact"))
+
+    def test_split_is_exact_when_the_answer_is_empty(self) -> None:
+        self.assertEqual(split_generated_tokens(40, "trace", ""), (40, 0, "exact"))
+        self.assertEqual(split_generated_tokens(40, "trace", "   "), (40, 0, "exact"))
+
+    def test_split_estimates_by_character_length_and_sums_to_eval_count(self) -> None:
+        thinking, output, split = split_generated_tokens(10, "abcd", "abcdef")
+        self.assertEqual(split, "estimated")
+        self.assertEqual((thinking, output), (4, 6))
+        self.assertEqual(thinking + output, 10)
+
+    def test_split_is_unknown_when_eval_count_is_missing(self) -> None:
+        self.assertEqual(
+            split_generated_tokens(None, "trace", "answer"),
+            (None, None, "unknown"),
+        )
+
+    def test_context_limit_warns_near_the_window_and_errors_at_it(self) -> None:
+        self.assertEqual(context_limit(100, None), ("unknown", None))
+        self.assertEqual(context_limit(100, 89), ("ok", None))
+        limit, message = context_limit(100, 90)
+        self.assertEqual(limit, "warn")
+        self.assertIn("90 / 100", message)
+        near = int(NUM_CTX * CONTEXT_WARN_RATIO)
+        if near < NUM_CTX * CONTEXT_WARN_RATIO:
+            near += 1
+        self.assertEqual(context_limit(NUM_CTX, near - 1)[0], "ok")
+        self.assertEqual(context_limit(NUM_CTX, near)[0], "warn")
+        self.assertEqual(context_limit(NUM_CTX, NUM_CTX - 1)[0], "warn")
+        limit, message = context_limit(NUM_CTX, NUM_CTX)
+        self.assertEqual(limit, "error")
+        self.assertIn(str(NUM_CTX), message)
+        self.assertEqual(context_limit(NUM_CTX, NUM_CTX + 1)[0], "error")
 
     def test_native_context_length_reads_model_info(self) -> None:
         info = SimpleNamespace(modelinfo={"qwen3.context_length": 40960})

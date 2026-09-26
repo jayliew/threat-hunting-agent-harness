@@ -60,7 +60,9 @@ class HuntTests(unittest.TestCase):
         self.assertEqual(result['sections']['Verdict'], 'benign')
         self.assertEqual(result['response']['message']['content'], ANSWER)
         self.assertEqual(result['timing']['load_duration_seconds'], 0.5)
+        self.assertEqual(result['timing']['prompt_eval_duration_seconds'], 0.2)
         self.assertEqual(result['timing']['eval_duration_seconds'], 1.3)
+        self.assertEqual(result['timing']['evaluation_seconds'], 1.5)
         self.assertEqual(api.chat.call_args.kwargs['think'], harness.THINK)
         self.assertEqual(result['request']['kv_cache_type'], harness.KV_CACHE_TYPE)
         self.assertEqual(harness.KV_CACHE_TYPE, 'f16')
@@ -130,6 +132,7 @@ class HuntTests(unittest.TestCase):
         self.assertIn('TimeoutError', result['error'])
         self.assertIsNone(result['response'])
         self.assertGreaterEqual(result['timing']['wall_seconds'], 0)
+        self.assertIsNone(result['timing']['evaluation_seconds'])
         self.assertEqual(result['tokens'], harness.empty_tokens())
         self.assertEqual(result['context']['allocated'], harness.NUM_CTX)
         self.assertIsNone(result['context']['used'])
@@ -141,6 +144,7 @@ class HuntTests(unittest.TestCase):
         self.assertEqual(result['status'], 'error')
         self.assertIn("{{ .Prompt }}", result['error'])
         self.assertFalse(api.chat.called)
+        self.assertIsNone(result['timing']['evaluation_seconds'])
         self.assertEqual(result['tokens'], harness.empty_tokens())
         self.assertIsNone(result['context']['used'])
 
@@ -220,6 +224,7 @@ class HuntTests(unittest.TestCase):
         )
         result = harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api, capabilities=['completion'])
         self.assertEqual(result['tokens'], harness.empty_tokens())
+        self.assertIsNone(result['timing']['evaluation_seconds'])
         self.assertIsNone(result['context']['used'])
         self.assertEqual(result['context']['allocated'], harness.NUM_CTX)
 
@@ -241,6 +246,11 @@ class HuntTests(unittest.TestCase):
                 f'{harness.NUM_CTX}',
                 out.getvalue(),
             )
+            self.assertIn(
+                f"{result['status']} · {compare_models.seconds(result['timing']['evaluation_seconds'])}",
+                out.getvalue(),
+            )
+            self.assertEqual(result['timing']['evaluation_seconds'], 1.5)
             result['status'] = 'invalid'
             result['validation_errors'] = ['Invalid output']
             with patch.object(sys, 'argv', ['main.py', str(path), '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
@@ -257,8 +267,8 @@ class HuntTests(unittest.TestCase):
             path = Path(tmp) / 'case.jsonl'
             path.write_text(json.dumps(EVENTS[0])+'\n')
             api = client()
-            result = harness.run_hunt('alpha', EVENTS, client=api)
-            base = ['main.py', str(path), '--model', 'alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]
+            result = harness.run_hunt('foundation-sec-alpha', EVENTS, client=api)
+            base = ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]
             with patch.object(sys, 'argv', base), \
                     patch.object(harness, 'Client', return_value=api) as constructed, \
                     patch.object(harness, 'run_hunt', return_value=result), \
@@ -359,9 +369,21 @@ class ComparisonTests(unittest.TestCase):
     def test_matrix_runs_sequentially_and_continues_after_failure(self):
         api = client()
         api.chat.side_effect = [response(), TimeoutError('slow'), response(ANSWER.replace('e1', 'e999')), response()]
-        directory = self.run_quietly(api)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            directory = compare_models.run_comparison(
+                api, ['foundation-sec-alpha', 'foundation-sec-8b-beta:1'], self.logs, self.root / 'results'
+            )
+        printed = out.getvalue()
+        self.assertIn('  ok · 1.50s', printed)
+        self.assertIn('  error · —', printed)
+        self.assertIn('  invalid · 1.50s', printed)
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
         self.assertEqual([r['status'] for r in rows], ['ok', 'error', 'invalid', 'ok'])
+        self.assertEqual(
+            [r['timing']['evaluation_seconds'] for r in rows],
+            [1.5, None, 1.5, 1.5],
+        )
+        self.assertEqual(rows[0]['timing']['load_duration_seconds'], 0.5)
         self.assertEqual([r['model'] for r in rows], ['foundation-sec-alpha:latest']*2 + ['foundation-sec-8b-beta:1']*2)
         self.assertEqual([r['case'] for r in rows], self.logs*2)
         self.assertEqual([r['model_digest'] for r in rows], ['digest-alpha']*2 + ['digest-beta']*2)
@@ -372,6 +394,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(rows[0]['prompt_sha256'], rows[2]['prompt_sha256'])
         html = (directory / 'report.html').read_text()
         self.assertIn('4 / 4 runs recorded', html)
+        self.assertIn('<th>Eval time</th>', html)
+        self.assertIn('excludes model load and unload', html)
+        self.assertIn('ok · 1.50s', html)
         self.assertIn('TimeoutError', html)
         self.assertIn('e999', html)
         self.assertIn('color-scheme:dark', html)
@@ -670,7 +695,7 @@ class ComparisonTests(unittest.TestCase):
 
     def test_compare_cli_defaults_to_no_timeout_and_forwards_seconds(self):
         api = client()
-        argv = ['compare_models.py', '--models', 'alpha', '--logs', self.logs[0], '--output-dir', str(self.root/'results'), '--profiles-dir', str(self.root/'profiles')]
+        argv = ['compare_models.py', '--models', 'foundation-sec-alpha', '--logs', self.logs[0], '--output-dir', str(self.root/'results'), '--profiles-dir', str(self.root/'profiles')]
         with patch.object(compare_models, 'Client', return_value=api) as constructed, \
                 patch.object(sys, 'argv', argv), \
                 contextlib.redirect_stdout(io.StringIO()):

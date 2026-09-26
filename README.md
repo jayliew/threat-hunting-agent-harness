@@ -168,7 +168,7 @@ Runs are sequential and grouped by model to reduce repeated loading. Every case 
 
 Invalid, empty, truncated, and failed responses are retained. An individual inference error does not stop the remaining cases. The report updates after every saved result. Exit status is nonzero if any run is invalid or failed, if any run meets or exceeds the configured context window, if preflight fails, or if execution is interrupted; completed results remain available.
 
-`ok` means the answer passed format and evidence-ID checks and stayed under the configured context window, not that its diagnosis is correct. Compare the full answers against each scenario's instructor notes. This first version performs one run per pair and does not assign detection-accuracy scores. Timing separates model loading, prompt processing, and generation; wall time includes loading and request overhead. These are observed timings, not a controlled cold/warm performance benchmark. Context allocated is the requested `num_ctx`. Context used is prompt tokens plus generated tokens for that turn. Thinking and output tokens divide that generated count: the split is exact when only one of those texts is present, and estimated from character length when both are present. A run warns when used tokens reach 90% of `num_ctx` and is an error when used tokens are at least `num_ctx`. A missing cached-token count is unknown, not zero. Identical context settings do not guarantee that different model tokenizers or native context limits see identical effective context; use inputs that fit every selected model.
+`ok` means the answer passed format and evidence-ID checks and stayed under the configured context window, not that its diagnosis is correct. Compare the full answers against each scenario's instructor notes. This first version performs one run per pair and does not assign detection-accuracy scores. Timing separates model loading, prompt processing, and generation; wall time includes loading and request overhead. These are observed timings, not a controlled cold/warm performance benchmark. Context allocated is the requested `num_ctx`. Context used is prompt tokens plus generated tokens for that turn. Thinking and output tokens divide that generated count: the split is exact when only one of those texts is present, and estimated from character length when both are present. A run warns when used tokens reach 90% of `num_ctx` and is an error when used tokens are at least `num_ctx`. Host warnings for partial or CPU-only Ollama placement, yellow or red memory pressure, and swap growth of at least 100 MiB during generation are included when detected and do not by themselves fail a run. A missing cached-token count is unknown, not zero. Identical context settings do not guarantee that different model tokenizers or native context limits see identical effective context; use inputs that fit every selected model.
 
 Run offline checks with:
 
@@ -181,6 +181,7 @@ uv run python -m unittest -v
 | Path | Role |
 | --- | --- |
 | `main.py` | Single-hunt CLI: prompt, log loading, one Ollama chat call (think only if supported), output and evidence-ID validation |
+| `host_signals.py` | Samples Ollama placement, macOS memory pressure, and swap during a hunt |
 | `compare_models.py` | Compare installed Ollama models across the same JSONL scenarios and write a report under `results/` |
 | `Modelfile.foundation-sec-8b-instruct` | Native `<|system|>/<|user|>/<|assistant|>` template for the Foundation-Sec GGUF import |
 | `logs/password-spray.jsonl` | Optional demo: ECS login / password-spray events |
@@ -191,6 +192,7 @@ uv run python -m unittest -v
 | `logs/scheduled-discovery.ecs.jsonl` | Optional demo: ECS authorized scanning that looks like an internal scan |
 | `test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |
 | `test_compare_models.py` | Unit tests for the comparison matrix, HTML report, and the shared hunt runner |
+| `test_host_signals.py` | Unit tests for placement, memory pressure, and swap warnings |
 | `pyproject.toml` | Project metadata and the `ollama` client |
 
 Keep the harness thin so the lesson stays in the open.

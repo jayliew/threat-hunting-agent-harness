@@ -52,7 +52,22 @@ def client():
     return result
 
 
+class QuietHostMonitor:
+    def start(self):
+        return None
+
+    def stop(self):
+        return []
+
+
 class HuntTests(unittest.TestCase):
+    def setUp(self):
+        self.host_monitor = patch.object(
+            harness, "HostMonitor", return_value=QuietHostMonitor()
+        )
+        self.host_monitor.start()
+        self.addCleanup(self.host_monitor.stop)
+
     def test_shared_hunt_preserves_request_response_and_timing(self):
         api = client()
         result = harness.run_hunt('alpha:latest', EVENTS, client=api, capabilities=['completion', 'thinking'])
@@ -291,6 +306,11 @@ class DefaultScenarioLogsTests(unittest.TestCase):
 
 class ComparisonTests(unittest.TestCase):
     def setUp(self):
+        self.host_monitor = patch.object(
+            harness, "HostMonitor", return_value=QuietHostMonitor()
+        )
+        self.host_monitor.start()
+        self.addCleanup(self.host_monitor.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
@@ -486,6 +506,8 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(rows[0]['context']['used'], 120)
         self.assertEqual(rows[0]['context']['limit'], 'ok')
         self.assertEqual(rows[0]['warnings'], [])
+        self.assertEqual(rows[0]['host']['signals'], [])
+        self.assertIn('<th>Host signals</th>', html)
         self.assertIn('Thinking: 0', html)
         self.assertEqual(rows[0]['context']['allocated'], harness.NUM_CTX)
         manifest = json.loads((directory / 'manifest.json').read_text())
@@ -602,6 +624,52 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('class="warn"', html)
         self.assertIn('Context window nearly full: used 30000 / 32768 configured tokens.', html)
         self.assertIn('<th>Thinking tokens</th>', html)
+
+    def test_report_shows_detected_host_signals(self):
+        directory = self.root / 'host'
+        directory.mkdir()
+        manifest = {
+            'created_at': 'now',
+            'request_settings': {'num_ctx': 32768, 'think': False},
+            'models': [{'name': 'alpha:latest', 'capabilities': ['completion']}],
+            'cases': [{'name': 'one.jsonl'}],
+        }
+        result = {
+            'case': 'one.jsonl',
+            'model': 'alpha:latest',
+            'status': 'ok',
+            'sections': {'Verdict': 'benign'},
+            'timing': {},
+            'unknown_evidence_ids': [],
+            'validation_errors': [],
+            'error': None,
+            'warnings': [
+                'Host: Ollama reports 83%/17% CPU/GPU rather than 100% GPU.',
+                'Host: memory pressure entered warning during inference.',
+                'Host: swap grew 128 MiB during generation.',
+            ],
+            'thinking': '',
+            'raw_content': ANSWER,
+            'request': {},
+            'tokens': {},
+            'context': {'allocated': 32768, 'used': 120, 'model_max': None, 'limit': 'ok'},
+            'host': {
+                'placement': '83%/17% CPU/GPU',
+                'pressure_baseline': 'normal',
+                'pressure_peak': 'warning',
+                'swap_used_bytes_start': 0,
+                'swap_used_bytes_end': 128 * 1024 * 1024,
+                'signals': ['cpu_gpu_split', 'memory_pressure', 'swap'],
+            },
+        }
+        compare_models.write_report(directory, manifest, [result])
+        html = (directory / 'report.html').read_text()
+        self.assertIn('<th>Host signals</th>', html)
+        self.assertIn('CPU/GPU split, memory pressure, swap', html)
+        self.assertIn('class="warn"', html)
+        self.assertIn('83%/17% CPU/GPU', html)
+        self.assertIn('memory pressure entered warning', html)
+        self.assertIn('swap grew 128 MiB', html)
 
     def test_cli_exits_nonzero_after_recording_invalid_runs(self):
         api = client()

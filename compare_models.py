@@ -509,6 +509,13 @@ def tokens_label(tokens: dict | None) -> str:
     )
 
 
+def format_num_predict(value: object) -> str:
+    """Label the sent num_predict. Ollama treats -1 as unlimited generation."""
+    if value == -1:
+        return "-1 (no limit)"
+    return str(value)
+
+
 def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
     """Static, escaped HTML: model responses are displayed only as text."""
     e = lambda value: escape(str(value))
@@ -589,7 +596,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
     html += (f'<h1>Threat hunt model comparison</h1><p>{e(manifest["created_at"])} · '
              f'{len(results)} / {total} runs recorded</p>'
              f'<p>Request settings: num_ctx={e(settings.get("num_ctx"))}, '
-             f'num_predict={e(settings.get("num_predict"))}, '
+             f'num_predict={e(format_num_predict(settings.get("num_predict")))}, '
              f'think={e(settings.get("think"))}, '
              f'kv_cache_type={e(settings.get("kv_cache_type"))} '
              '(server env <code>OLLAMA_KV_CACHE_TYPE</code>; not a chat API option).</p>'

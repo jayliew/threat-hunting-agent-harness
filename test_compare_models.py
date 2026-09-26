@@ -114,6 +114,8 @@ class HuntTests(unittest.TestCase):
         self.assertEqual(api.path, '/api/chat')
         self.assertFalse(api.stream)
         self.assertEqual(api.body['options']['num_ctx'], harness.NUM_CTX)
+        self.assertEqual(api.body['options']['num_predict'], -1)
+        self.assertEqual(result['request']['options']['num_predict'], harness.NUM_PREDICT)
 
     def test_invalid_evidence_and_partial_answer_are_preserved(self):
         api = client()
@@ -648,6 +650,24 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('Quantization: Q4_K_M · 7B · gguf', html)
         self.assertIn('Thinking: disabled', html)
         self.assertIn('Input: —', html)
+
+    def test_report_shows_unlimited_num_predict(self):
+        directory = self.root / 'unlimited'
+        directory.mkdir()
+        manifest = {
+            'created_at': 'now',
+            'request_settings': {
+                'num_ctx': 32768,
+                'num_predict': -1,
+                'think': False,
+                'kv_cache_type': 'f16',
+            },
+            'models': [],
+            'cases': [],
+        }
+        compare_models.write_report(directory, manifest, [])
+        html = (directory / 'report.html').read_text()
+        self.assertIn('num_predict=-1 (no limit)', html)
 
     def test_report_shows_thinking_tokens_and_context_warning(self):
         directory = self.root / 'think'

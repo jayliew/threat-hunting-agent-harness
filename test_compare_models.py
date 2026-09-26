@@ -660,36 +660,58 @@ class DeclaredProfileTests(unittest.TestCase):
             Path(__file__).resolve().parent / "profiles" / "qwen3-32b.profile"
         )
         self.assertEqual(profile["source"], "profiles/qwen3-32b.profile")
-        self.assertEqual(profile["fields"], {"model": "qwen3:32b", "num_ctx": "40,960"})
+        self.assertEqual(
+            profile["fields"],
+            {"model": "qwen3:32b", "thinking": "true", "num_ctx": "40,960"},
+        )
         self.assertEqual(compare_models.profile_num_ctx(profile), 40960)
-        self.assertIn("# Weight precision:       Developer Q8_0", profile["text"])
-        self.assertIn("# KV cache:               Q8_0", profile["text"])
-        self.assertIn("# Thinking:               Enabled", profile["text"])
-        self.assertIn("# Repeat penalty:         1.0", profile["text"])
+        self.assertIs(compare_models.profile_think(profile), True)
+        self.assertIn("# weight_precision=Developer Q8_0", profile["text"])
+        self.assertIn("# kv_cache=Q8_0", profile["text"])
+        self.assertIn("# repeat_penalty=1.0", profile["text"])
 
     def test_checked_in_profiles_match_the_planned_setups(self):
         expected = {
-            "qwen3-32b.profile": ("qwen3:32b", "40,960", 40960),
-            "llama3.3-70b.profile": ("llama3.3:70b", "16,384", 16384),
-            "granite4.2-30b.profile": ("granite4.2:30b", "65,536", 65536),
-            "deepseek-r1-32b.profile": ("deepseek-r1:32b", "65,536", 65536),
-            "command-r.profile": ("command-r:latest", "131,072", 131072),
-            "gemma4-31b.profile": ("gemma4:31b", "32,768", 32768),
-            "mistral-small3.2-24b.profile": ("mistral-small3.2:24b", "131,072", 131072),
-            "mistral-nemo-12b.profile": ("mistral-nemo:12b", "131,072", 131072),
+            "qwen3-32b.profile": ("qwen3:32b", "40,960", 40960, "true", True),
+            "llama3.3-70b.profile": ("llama3.3:70b", "16,384", 16384, None, None),
+            "granite4.2-30b.profile": ("granite4.2:30b", "65,536", 65536, "high", "high"),
+            "deepseek-r1-32b.profile": ("deepseek-r1:32b", "65,536", 65536, "true", True),
+            "command-r.profile": ("command-r:latest", "131,072", 131072, None, None),
+            "gemma4-31b.profile": ("gemma4:31b", "32,768", 32768, "true", True),
+            "mistral-small3.2-24b.profile": (
+                "mistral-small3.2:24b",
+                "131,072",
+                131072,
+                None,
+                None,
+            ),
+            "mistral-nemo-12b.profile": ("mistral-nemo:12b", "131,072", 131072, None, None),
             "foundation-sec-8b-instruct.profile": (
                 "foundation-sec-8b-instruct",
                 "131,072",
                 131072,
+                None,
+                None,
             ),
         }
         root = Path(__file__).resolve().parent / "profiles"
-        for name, (model, text, number) in expected.items():
+        for name, (model, text, number, thinking, parsed) in expected.items():
             profile = compare_models.parse_profile_file(root / name)
-            self.assertEqual(profile["fields"], {"model": model, "num_ctx": text})
+            fields = {"model": model, "num_ctx": text}
+            if thinking is not None:
+                fields["thinking"] = thinking
+            self.assertEqual(profile["fields"], fields)
             self.assertEqual(compare_models.profile_num_ctx(profile), number)
-            self.assertIn("# Weight precision:", profile["text"])
-            self.assertIn("# Repeat penalty:", profile["text"])
+            self.assertEqual(compare_models.profile_think(profile), parsed)
+            self.assertIn("# weight_precision=", profile["text"])
+            self.assertIn("# repeat_penalty=", profile["text"])
+            if thinking is None:
+                self.assertIn("# thinking=", profile["text"])
+            if name == "granite4.2-30b.profile":
+                self.assertIn(
+                    "# thinking levels: false, low, medium, high",
+                    profile["text"],
+                )
         self.assertIsNone(compare_models.quantization_note("Developer Q8_0", "Q8_0"))
         self.assertIsNone(compare_models.quantization_note("Developer QAT Q4_0", "Q4_0"))
         self.assertIsNone(
@@ -699,13 +721,13 @@ class DeclaredProfileTests(unittest.TestCase):
 
     def test_comments_and_blank_lines_are_ignored(self):
         profile = compare_models.parse_profile_text(
-            "# intended setup\n\nModel: qwen3:32b\n", "memory"
+            "# intended setup\n\nmodel=qwen3:32b\n", "memory"
         )
         self.assertEqual(profile["fields"], {"model": "qwen3:32b"})
 
     def test_ambiguous_profiles_stop_before_inference(self):
-        self.write_profile("think.profile", "Model: alpha\nTemperature: 0.6\n")
-        self.write_profile("direct.profile", "Model: alpha:latest\nTemperature: 0\n")
+        self.write_profile("think.profile", "model=alpha\ntemperature=0.6\n")
+        self.write_profile("direct.profile", "model=alpha:latest\ntemperature=0\n")
         api = client()
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
@@ -719,8 +741,8 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertFalse((self.root / "results").exists())
 
     def test_explicit_profiles_keep_same_model_runs_separate(self):
-        self.write_profile("think.profile", "Model: alpha\nTemperature: 0.6\n")
-        self.write_profile("direct.profile", "Model: alpha\nTemperature: 0\n")
+        self.write_profile("think.profile", "model=alpha\ntemperature=0.6\n")
+        self.write_profile("direct.profile", "model=alpha\ntemperature=0\n")
         api = client()
         with contextlib.redirect_stdout(io.StringIO()):
             directory = compare_models.run_comparison(
@@ -736,15 +758,15 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertEqual(len({row["run_key"] for row in rows}), 2)
         self.assertNotEqual(rows[0]["declared_profile"], rows[1]["declared_profile"])
         html = (directory / "report.html").read_text()
-        self.assertIn("Temperature: 0.6", html)
-        self.assertIn("Temperature: 0</pre>", html)
+        self.assertIn("temperature=0.6", html)
+        self.assertIn("temperature=0", html)
         self.assertEqual(
             sorted(path.name for path in (directory / "declared-profiles").iterdir()),
             ["direct.profile", "think.profile"],
         )
 
     def test_profile_num_ctx_is_sent_and_allocated(self):
-        self.write_profile("alpha.profile", "Model: alpha\nnum_ctx: 16,384\n")
+        self.write_profile("alpha.profile", "model=alpha\nnum_ctx=16,384\n")
         api = client()
         with contextlib.redirect_stdout(io.StringIO()):
             directory = compare_models.run_comparison(
@@ -761,7 +783,7 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertIn("used 120 / allocated 16384", html)
 
     def test_profile_without_num_ctx_uses_fallback(self):
-        self.write_profile("alpha.profile", "Model: alpha\n")
+        self.write_profile("alpha.profile", "model=alpha\n")
         api = client()
         with contextlib.redirect_stdout(io.StringIO()):
             directory = compare_models.run_comparison(
@@ -773,8 +795,68 @@ class DeclaredProfileTests(unittest.TestCase):
         manifest = json.loads((directory / "manifest.json").read_text())
         self.assertEqual(manifest["models"][0]["num_ctx"], harness.NUM_CTX)
 
+    def test_profile_thinking_is_sent_before_inference(self):
+        self.write_profile("alpha.profile", "model=alpha\nthinking=true\n")
+        api = client()
+        api.show.return_value.capabilities = ["completion", "thinking"]
+        seen = {}
+
+        def generate(**kwargs):
+            self.assertIs(kwargs["think"], True)
+            seen["before"] = True
+            return response()
+
+        api.chat.side_effect = generate
+        with contextlib.redirect_stdout(io.StringIO()):
+            directory = compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertTrue(seen["before"])
+        manifest = json.loads((directory / "manifest.json").read_text())
+        self.assertIs(manifest["models"][0]["think"], True)
+        html = (directory / "report.html").read_text()
+        self.assertIn("Thinking: enabled", html)
+
+    def test_profile_thinking_level_is_sent_before_inference(self):
+        self.write_profile("alpha.profile", "model=alpha\nthinking=high\n")
+        api = client()
+        api.show.return_value.capabilities = ["completion", "thinking"]
+
+        def generate(**kwargs):
+            self.assertEqual(kwargs["think"], "high")
+            return response()
+
+        api.chat.side_effect = generate
+        with contextlib.redirect_stdout(io.StringIO()):
+            compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+
+    def test_profile_thinking_without_capability_stops_before_chat(self):
+        self.write_profile("alpha.profile", "model=alpha\nthinking=true\n")
+        api = client()
+        with self.assertRaises(ValueError) as error:
+            compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertIn("thinking capability", str(error.exception))
+        self.assertFalse(api.chat.called)
+        self.assertFalse((self.root / "results").exists())
+
+    def test_bad_thinking_stops_before_chat(self):
+        self.write_profile("alpha.profile", "model=alpha\nthinking=sometimes\n")
+        api = client()
+        api.show.return_value.capabilities = ["completion", "thinking"]
+        with self.assertRaises(ValueError) as error:
+            compare_models.run_comparison(
+                api, ["alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertIn("thinking must be", str(error.exception))
+        self.assertFalse(api.chat.called)
+        self.assertFalse((self.root / "results").exists())
+
     def test_bad_num_ctx_stops_before_chat(self):
-        self.write_profile("alpha.profile", "Model: alpha\nnum_ctx: 16,384\u201324,576\n")
+        self.write_profile("alpha.profile", "model=alpha\nnum_ctx=16,384\u201324,576\n")
         api = client()
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
@@ -785,7 +867,7 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertFalse((self.root / "results").exists())
 
     def test_malformed_profile_stops_before_results_and_inference(self):
-        self.write_profile("alpha.profile", "Weight quant: Q6_K\n")
+        self.write_profile("alpha.profile", "weight_quant=Q6_K\n")
         api = client()
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
@@ -798,10 +880,10 @@ class DeclaredProfileTests(unittest.TestCase):
     def test_profile_is_saved_and_shown_before_inference(self):
         self.write_profile(
             "alpha.profile",
-            "Model: alpha\n"
-            "Weight quant: Q6_K\n"
-            "Temperature: <script>alert(1)</script>\n"
-            "KV cache: f16\n",
+            "model=alpha\n"
+            "weight_quant=Q6_K\n"
+            "temperature=<script>alert(1)</script>\n"
+            "kv_cache=f16\n",
         )
         api = client()
         api.show.return_value.details = SimpleNamespace(
@@ -857,7 +939,7 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertFalse((directory / "declared-profiles").exists())
 
     def test_single_hunt_records_profile_before_analysis(self):
-        self.write_profile("alpha.profile", "Model: alpha\nKV cache: f16\n")
+        self.write_profile("alpha.profile", "model=alpha\nkv_cache=f16\n")
         api = client()
         result = harness.run_hunt("alpha", EVENTS, client=api)
         output = self.root / "single-results"
@@ -866,7 +948,7 @@ class DeclaredProfileTests(unittest.TestCase):
         def fake_run(*args, **kwargs):
             saved = list(output.glob("*/declared-profiles/alpha.profile"))
             self.assertEqual(len(saved), 1)
-            self.assertIn("KV cache: f16", saved[0].read_text())
+            self.assertIn("kv_cache=f16", saved[0].read_text())
             report = saved[0].parents[1] / "report.html"
             self.assertIn("0 / 1 runs recorded", report.read_text())
             seen["before"] = True
@@ -882,7 +964,7 @@ class DeclaredProfileTests(unittest.TestCase):
             harness.main()
         self.assertTrue(seen["before"])
         printed = out.getvalue()
-        self.assertLess(printed.index("KV cache:"), printed.index("--- Analysis ---"))
+        self.assertLess(printed.index("kv_cache="), printed.index("--- Analysis ---"))
         rows = [
             json.loads(line)
             for path in output.glob("*/results.jsonl")
@@ -893,8 +975,8 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertEqual(rows[0]["status"], "ok")
 
     def test_single_hunt_requires_a_choice_when_settings_differ(self):
-        self.write_profile("think.profile", "Model: alpha\nTemperature: 0.6\nKV cache: f16\n")
-        self.write_profile("direct.profile", "Model: alpha\nTemperature: 0\nKV cache: q8_0\n")
+        self.write_profile("think.profile", "model=alpha\ntemperature=0.6\nkv_cache=f16\n")
+        self.write_profile("direct.profile", "model=alpha\ntemperature=0\nkv_cache=q8_0\n")
         api = client()
         output = self.root / "single-results"
         with patch.object(sys, "argv", [
@@ -957,7 +1039,7 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertEqual(exit.exception.code, 1)
         self.assertFalse(run.called)
         self.assertFalse(api.chat.called)
-        self.assertIn("expected 'Label: value'", err.getvalue())
+        self.assertIn("expected 'key=value'", err.getvalue())
 
 
 if __name__ == '__main__':

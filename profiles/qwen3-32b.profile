@@ -1,6 +1,6 @@
-Model:                  qwen3:32b
-# Weight precision:       Developer Q8_0
-# KV cache:               Q8_0
-# Thinking:               Enabled
-num_ctx:                40,960
-# Repeat penalty:         1.0
+model=qwen3:32b
+# weight_precision=Developer Q8_0
+# kv_cache=Q8_0
+thinking=true
+num_ctx=40,960
+# repeat_penalty=1.0

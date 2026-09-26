@@ -436,7 +436,14 @@ def declared_profiles_html(manifest: dict) -> str:
 
 
 def seconds(value: float | None) -> str:
-    return "—" if value is None else f"{value:.2f}s"
+    """Format a duration stored in seconds as minutes and seconds."""
+    if value is None:
+        return "—"
+    total = abs(float(value))
+    minutes = int(total // 60)
+    remainder = total - (minutes * 60)
+    text = f"{minutes}m {remainder:.2f}s"
+    return f"-{text}" if value < 0 else text
 
 
 def display(value) -> str:

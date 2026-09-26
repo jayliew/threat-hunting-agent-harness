@@ -334,9 +334,9 @@ class DefaultScenarioLogsTests(unittest.TestCase):
                 "logs/password-spray.jsonl",
                 "logs/http-beaconing.jsonl",
                 "logs/internal-network-scan.jsonl",
-                "logs/shared-vpn-logins.ecs.jsonl",
-                "logs/managed-telemetry.ecs.jsonl",
-                "logs/scheduled-discovery.ecs.jsonl",
+                "logs/shared-vpn-logins.jsonl",
+                "logs/managed-telemetry.jsonl",
+                "logs/scheduled-discovery.jsonl",
             ],
         )
 

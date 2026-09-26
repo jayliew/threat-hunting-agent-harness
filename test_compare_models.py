@@ -320,6 +320,14 @@ class HuntTests(unittest.TestCase):
             self.assertIn("log contains no events", err.getvalue())
 
 
+class DurationFormatTests(unittest.TestCase):
+    def test_displays_minutes_and_seconds(self):
+        self.assertEqual(compare_models.seconds(None), "—")
+        self.assertEqual(compare_models.seconds(1.5), "0m 1.50s")
+        self.assertEqual(compare_models.seconds(90.5), "1m 30.50s")
+        self.assertEqual(compare_models.seconds(125.2), "2m 5.20s")
+
+
 class ResultsDirectoryNameTests(unittest.TestCase):
     def test_eastern_daylight_sunday_morning(self):
         when = datetime(2026, 9, 20, 13, 28, tzinfo=timezone.utc)
@@ -374,9 +382,9 @@ class ComparisonTests(unittest.TestCase):
                 api, ['foundation-sec-alpha', 'foundation-sec-8b-beta:1'], self.logs, self.root / 'results'
             )
         printed = out.getvalue()
-        self.assertIn('  ok · 1.50s', printed)
+        self.assertIn('  ok · 0m 1.50s', printed)
         self.assertIn('  error · —', printed)
-        self.assertIn('  invalid · 1.50s', printed)
+        self.assertIn('  invalid · 0m 1.50s', printed)
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
         self.assertEqual([r['status'] for r in rows], ['ok', 'error', 'invalid', 'ok'])
         self.assertEqual(
@@ -396,7 +404,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('4 / 4 runs recorded', html)
         self.assertIn('<th>Eval time</th>', html)
         self.assertIn('excludes model load and unload', html)
-        self.assertIn('ok · 1.50s', html)
+        self.assertIn('ok · 0m 1.50s', html)
         self.assertIn('TimeoutError', html)
         self.assertIn('e999', html)
         self.assertIn('color-scheme:dark', html)

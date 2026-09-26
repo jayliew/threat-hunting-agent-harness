@@ -75,6 +75,25 @@ class HuntTests(unittest.TestCase):
         self.assertEqual(result['context']['used'], 120)
         self.assertEqual(result['context']['limit'], 'ok')
         self.assertEqual(result['warnings'], [])
+        self.assertEqual(
+            result['request']['options'],
+            {'temperature': 0, 'num_ctx': harness.NUM_CTX, 'num_predict': harness.NUM_PREDICT},
+        )
+
+    def test_disabled_num_predict_is_sent_and_a_long_answer_can_finish(self):
+        api = client()
+        chat = response()
+        chat.eval_count = 8000
+        api.chat.return_value = chat
+        result = harness.run_hunt(
+            'alpha:latest', EVENTS, client=api, capabilities=['completion'],
+            num_predict=-1, num_ctx=16384,
+        )
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(result['request']['options']['num_predict'], -1)
+        self.assertEqual(result['request']['options']['num_ctx'], 16384)
+        self.assertEqual(result['context']['allocated'], 16384)
+        self.assertEqual(result['generation'], {'num_ctx': 16384, 'num_predict': -1})
 
     def test_non_thinking_model_omits_think(self):
         api = client()
@@ -206,7 +225,7 @@ class HuntTests(unittest.TestCase):
             self.assertIn(ANSWER, out.getvalue())
             self.assertIn(
                 'Tokens: input 80 · thinking 0 · output 40 (exact) · context 120 / '
-                f'{harness.NUM_CTX}',
+                f'{harness.NUM_CTX} · num_predict {harness.NUM_PREDICT}',
                 out.getvalue(),
             )
             result['status'] = 'invalid'
@@ -350,8 +369,36 @@ class ComparisonTests(unittest.TestCase):
     def test_duplicate_aliases_and_paths_run_once(self):
         models, logs = compare_models.prepare_comparison(client(), ['alpha', 'alpha:latest'], self.logs*2)
         self.assertEqual(len(models), 1)
+        self.assertEqual(models[0]['profile'], None)
         self.assertEqual(len(logs), 2)
         self.assertIn("<|system|>", models[0]["chat_template"])
+
+    def test_same_model_with_two_profiles_stays_two_runs(self):
+        models, logs = compare_models.prepare_comparison(
+            client(), ['alpha@fast', 'alpha:latest@slow', 'alpha@fast'], self.logs[:1]
+        )
+        self.assertEqual([model['profile'] for model in models], ['fast', 'slow'])
+        self.assertEqual({model['name'] for model in models}, {'alpha:latest'})
+        self.assertEqual(len(logs), 1)
+
+    def test_generation_settings_follow_model_profile_and_log(self):
+        api = client()
+        settings = [
+            {'model': 'alpha', 'profile': 'fast', 'log': 'one.jsonl',
+             'num_ctx': 4096, 'num_predict': -1},
+            {'model': 'alpha', 'num_predict': 256},
+        ]
+        with patch.object(harness, 'GENERATION_SETTINGS', settings), \
+                contextlib.redirect_stdout(io.StringIO()):
+            compare_models.run_comparison(
+                api, ['alpha@fast', 'alpha'], self.logs, self.root / 'results'
+            )
+        options = [call.kwargs['options'] for call in api.chat.call_args_list]
+        self.assertEqual(options[0], {'temperature': 0, 'num_ctx': 4096, 'num_predict': -1})
+        self.assertEqual(options[1]['num_ctx'], harness.NUM_CTX)
+        self.assertEqual(options[1]['num_predict'], 256)
+        self.assertEqual(options[2]['num_predict'], 256)
+        self.assertEqual(options[3]['num_predict'], 256)
 
     def test_bare_prompt_template_fails_preflight_without_inference(self):
         api = client()

@@ -4,7 +4,7 @@ import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from ollama import ChatResponse, Message
 
@@ -15,6 +15,7 @@ from main import (
     NUM_CTX,
     SYSTEM_PROMPT,
     USER_TASK,
+    resolve_generation_settings,
     build_messages,
     allowed_evidence_ids,
     event_id,
@@ -195,6 +196,65 @@ class IncompleteResponseMessageTests(unittest.TestCase):
         self.assertIsNotNone(message)
         self.assertIn("token limit", message)
         self.assertIn("done_reason=unknown", message)
+
+    def test_disabled_cap_does_not_treat_a_finished_answer_as_truncated(self) -> None:
+        response = make_response(
+            "Verdict: suspicious\nThreat type: beaconing\n",
+            done_reason="stop",
+            eval_count=8000,
+        )
+        self.assertIsNone(incomplete_response_message(response, -1))
+
+    def test_disabled_cap_still_reports_a_length_stop(self) -> None:
+        response = make_response("Verdict: suspicious", done_reason="length", eval_count=8000)
+        message = incomplete_response_message(response, -1)
+        self.assertIsNotNone(message)
+        self.assertIn("eval_count=8000/disabled", message)
+
+
+class GenerationSettingsTests(unittest.TestCase):
+    def test_defaults_apply_when_nothing_matches(self) -> None:
+        with patch("main.GENERATION_SETTINGS", []):
+            chosen = resolve_generation_settings("qwen3:32b", None, "logs/http-beaconing.jsonl")
+        self.assertEqual(chosen, {"num_ctx": NUM_CTX, "num_predict": NUM_PREDICT})
+
+    def test_more_specific_entry_overrides_only_its_keys(self) -> None:
+        settings = [
+            {"log": "logs/http-beaconing.jsonl", "num_ctx": 8192},
+            {
+                "model": "qwen3:32b",
+                "profile": "thinking",
+                "log": "logs/http-beaconing.jsonl",
+                "num_ctx": 32768,
+                "num_predict": -1,
+            },
+            {"model": "qwen3:32b", "num_predict": 2048},
+        ]
+        with patch("main.GENERATION_SETTINGS", settings):
+            unnamed = resolve_generation_settings(
+                "qwen3:32b", None, "logs/http-beaconing.jsonl"
+            )
+            named = resolve_generation_settings(
+                "qwen3:32b", "thinking", "logs/http-beaconing.jsonl"
+            )
+            other_log = resolve_generation_settings(
+                "qwen3:32b", "thinking", "logs/password-spray.jsonl"
+            )
+        self.assertEqual(unnamed, {"num_ctx": 8192, "num_predict": 2048})
+        self.assertEqual(named, {"num_ctx": 32768, "num_predict": -1})
+        self.assertEqual(other_log, {"num_ctx": NUM_CTX, "num_predict": 2048})
+
+    def test_log_match_accepts_the_resolved_path(self) -> None:
+        absolute = str((REPO_ROOT / "logs" / "password-spray.jsonl").resolve())
+        settings = [{"log": "logs/password-spray.jsonl", "num_predict": 512}]
+        with patch("main.GENERATION_SETTINGS", settings):
+            chosen = resolve_generation_settings("any:latest", "other", absolute)
+        self.assertEqual(chosen["num_predict"], 512)
+
+    def test_zero_predict_is_rejected(self) -> None:
+        with patch("main.GENERATION_SETTINGS", [{"num_predict": 0}]):
+            with self.assertRaises(ValueError):
+                resolve_generation_settings("qwen3:32b")
 
 
 class HuntOutputValidationTests(unittest.TestCase):

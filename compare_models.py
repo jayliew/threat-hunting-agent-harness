@@ -17,11 +17,14 @@ from zoneinfo import ZoneInfo
 
 from ollama import Client
 
+import main as hunt_harness
 from main import (
     NUM_CTX,
     NUM_PREDICT,
     THINK,
+    generation_cap_label,
     preflight_models_and_logs,
+    resolve_generation_settings,
     run_hunt,
 )
 
@@ -144,23 +147,52 @@ def tokens_label(tokens: dict | None) -> str:
     )
 
 
+def model_heading(model: dict) -> str:
+    profile = model.get("profile")
+    if profile:
+        return f'{model["name"]} ({profile})'
+    return model["name"]
+
+
+def planned_generation(model: dict, case: dict, result: dict | None, settings: dict) -> dict:
+    """Settings for a card: the recorded hunt, or the match for a pending one."""
+    if result and result.get("generation"):
+        return result["generation"]
+    options = ((result or {}).get("request") or {}).get("options") or {}
+    if "num_ctx" in options and "num_predict" in options:
+        return {"num_ctx": options["num_ctx"], "num_predict": options["num_predict"]}
+    if result is None:
+        return resolve_generation_settings(
+            model["name"], model.get("profile"), case["name"]
+        )
+    return {
+        "num_ctx": settings.get("num_ctx", NUM_CTX),
+        "num_predict": settings.get("num_predict", NUM_PREDICT),
+    }
+
+
 def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
     """Static, escaped HTML: model responses are displayed only as text."""
     e = lambda value: escape(str(value))
     settings = manifest.get("request_settings") or {}
-    by_pair = {(r["case"], r["model"]): r for r in results}
+    by_pair = {
+        (r["case"], r["model"], r.get("profile")): r for r in results
+    }
     rows, sections = [], []
     for case in manifest["cases"]:
         cards = []
         for model in manifest["models"]:
-            result = by_pair.get((case["name"], model["name"]))
-            name = e(model["name"])
+            result = by_pair.get((case["name"], model["name"], model.get("profile")))
+            name = e(model_heading(model))
             think = thinking_label(result, model, settings)
             quant = quantization_label(model)
+            planned = planned_generation(model, case, result, settings)
+            cap = generation_cap_label(planned["num_predict"])
             if result is None:
                 cards.append(
                     f'<article><h3>{name}</h3><p class="pending">Pending</p>'
-                    f'<p>{e(context_label(settings.get("num_ctx"), None, model.get("context_length")))}<br>'
+                    f'<p>{e(context_label(planned["num_ctx"], None, model.get("context_length")))}<br>'
+                    f'Generation cap: {e(cap)}<br>'
                     f'{framing_note(model)}'
                     f'Quantization: {e(quant)}<br>Thinking: {e(think)}<br>'
                     f'{e(tokens_label(None))}</p></article>'
@@ -197,6 +229,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             cards.append(
                 f'<article><h3>{name}</h3><p class="{e(status)}">{e(status)} · {wall}</p>'
                 f'<p>{e(context_label(allocated, used, model_max))}<br>'
+                f'Generation cap: {e(cap)}<br>'
                 f'{framing_note(model)}'
                 f'Quantization: {e(quant)}<br>'
                 f'Thinking: {e(think)} · Load: {load}<br>'
@@ -224,7 +257,9 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
              f'{len(results)} / {total} runs recorded</p><p>Output validity checks format and cited IDs; '
              'it does not establish detection accuracy. Wall time includes model loading. '
              'Runs are sequential, with a fresh conversation for every case. '
-             'Context used is prompt tokens plus generated tokens, compared with the configured num_ctx. '
+             'Each run uses the num_ctx and num_predict matched to its model, profile, and log. '
+             'num_predict disabled means the generation cap is off. '
+             'Context used is prompt tokens plus generated tokens, compared with that run\'s num_ctx. '
              'Thinking and output tokens split that generated count: exact when only one of those texts is present, '
              'estimated by character length when both are present. '
              'A run warns at 90% of num_ctx and is an error at or above num_ctx. '
@@ -250,6 +285,7 @@ def run_comparison(client: Client, models: list[str], logs: list[str], output_ro
             "num_ctx": NUM_CTX,
             "num_predict": NUM_PREDICT,
             "think": THINK,
+            "generation_settings": hunt_harness.GENERATION_SETTINGS,
         },
         "models": selected,
         "cases": [{k: v for k, v in case.items() if k != "events"} for case in cases],
@@ -261,15 +297,19 @@ def run_comparison(client: Client, models: list[str], logs: list[str], output_ro
     with (directory / "results.jsonl").open("w", encoding="utf-8") as output:
         for model in selected:
             for index, case in enumerate(cases):
-                print(f'[{len(results)+1}/{len(selected)*len(cases)}] {model["name"]} · {case["name"]}', flush=True)
+                label = model_heading(model)
+                print(f'[{len(results)+1}/{len(selected)*len(cases)}] {label} · {case["name"]}', flush=True)
                 result = run_hunt(model["name"], case["events"], client=client,
                                   capabilities=model["capabilities"],
                                   chat_template=model.get("chat_template"),
                                   renderer=model.get("renderer") or None,
                                   model_max=model.get("context_length"),
+                                  log_file=case["name"],
+                                  profile=model.get("profile"),
                                   keep_alive=0 if index == len(cases)-1 else "5m")
                 result.update({"schema_version": 1, "case": case["name"], "log_path": case["path"],
-                               "events_sha256": case["events_sha256"], "model_digest": model["digest"]})
+                               "events_sha256": case["events_sha256"], "model_digest": model["digest"],
+                               "profile": model.get("profile")})
                 output.write(json.dumps(result) + "\n")
                 output.flush()
                 os.fsync(output.fileno())
@@ -290,7 +330,12 @@ def positive_timeout(value: str) -> float:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--models", nargs="+", default=MODELS, help="Installed Ollama names (default: MODELS in compare_models.py)")
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        default=MODELS,
+        help="Installed Ollama names, optionally name@profile (default: MODELS in compare_models.py)",
+    )
     parser.add_argument("--logs", nargs="+", default=DEFAULT_SCENARIO_LOGS, help="JSONL paths relative to the script, or absolute paths")
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_ROOT, help="Parent for a new US Eastern Time named results directory")
     parser.add_argument("--timeout", type=positive_timeout, default=300, help="HTTP operation timeout in seconds (default: 300)")

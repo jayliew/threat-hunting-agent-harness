@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import re
 import sys
@@ -16,6 +17,7 @@ from pathlib import Path
 from time import perf_counter
 
 from ollama import ChatResponse, Client
+from ollama._types import ChatRequest
 
 
 # Default Ollama model. Must already be installed locally (`ollama list`).
@@ -36,6 +38,10 @@ NUM_PREDICT = 1024
 # Warn when context used reaches this fraction of NUM_CTX. At or above
 # NUM_CTX the run is an error.
 CONTEXT_WARN_RATIO = 0.9
+# Context shift. Ollama 0.33 enables this when `shift` is omitted, except for
+# DeepSeek2, and slides older tokens out once num_ctx is full. Send False for
+# every model so a full window errors instead of shifting history.
+SHIFT = False
 # Thinking models (Qwen3, DeepSeek-R1, …): Ollama default is True if `think`
 # is omitted. Models without the thinking capability reject the argument
 # (HTTP 400: "does not support thinking"). Send think only when /api/show
@@ -553,6 +559,42 @@ def build_user_message(events: list[dict]) -> str:
     return f"{USER_TASK}\n\n{EVIDENCE_START}\n{serialized}\n{EVIDENCE_END}"
 
 
+def chat_accepts_shift(chat) -> bool:
+    """True when chat() can take a shift keyword, including **kwargs mocks."""
+    try:
+        signature = inspect.signature(chat)
+    except (TypeError, ValueError):
+        return False
+    parameters = signature.parameters
+    if "shift" in parameters:
+        return True
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+
+
+def send_chat(client: Client, request: dict):
+    """Send /api/chat with the request's context-shift flag.
+
+    ollama-python 0.6.2 builds ChatRequest without `shift` and drops unknown
+    fields, so client.chat(shift=False) raises TypeError. When chat() cannot
+    accept `shift`, serialize the known fields and set `shift` on the JSON body.
+    """
+    if chat_accepts_shift(client.chat):
+        return client.chat(**request)
+    payload = {key: value for key, value in request.items() if key != "shift"}
+    body = ChatRequest(**payload).model_dump(exclude_none=True)
+    body["shift"] = request["shift"]
+    return client._request(
+        ChatResponse,
+        "POST",
+        "/api/chat",
+        json=body,
+        stream=bool(request.get("stream", False)),
+    )
+
+
 def build_messages(events: list[dict]) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -590,7 +632,7 @@ def run_hunt(
         "chat_template": chat_template or "",
         "renderer": renderer or "",
         "request": {"model": model, "messages": messages, "options": options,
-                    "stream": False, "keep_alive": keep_alive},
+                    "stream": False, "keep_alive": keep_alive, "shift": SHIFT},
         "prompt_sha256": hashlib.sha256(
             json.dumps(messages, sort_keys=True).encode()
         ).hexdigest(),
@@ -623,7 +665,7 @@ def run_hunt(
                 result["error"] = error
                 result["timing"]["wall_seconds"] = perf_counter() - started
                 return result
-        response = client.chat(**result["request"])
+        response = send_chat(client, result["request"])
         content = response.message.content or ""
         result["response"] = response.model_dump(mode="json")
         result["raw_content"] = content

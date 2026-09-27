@@ -64,6 +64,8 @@ class HuntTests(unittest.TestCase):
         self.assertEqual(result['timing']['eval_duration_seconds'], 1.3)
         self.assertEqual(result['timing']['evaluation_seconds'], 1.5)
         self.assertEqual(api.chat.call_args.kwargs['think'], harness.THINK)
+        self.assertEqual(api.chat.call_args.kwargs['options']['seed'], harness.SEED)
+        self.assertEqual(result['request']['options']['seed'], harness.SEED)
         self.assertEqual(result['request']['kv_cache_type'], harness.KV_CACHE_TYPE)
         self.assertEqual(harness.KV_CACHE_TYPE, 'f16')
         self.assertNotIn('kv_cache_type', api.chat.call_args.kwargs)
@@ -115,6 +117,8 @@ class HuntTests(unittest.TestCase):
         self.assertFalse(api.stream)
         self.assertEqual(api.body['options']['num_ctx'], harness.NUM_CTX)
         self.assertEqual(api.body['options']['num_predict'], -1)
+        self.assertEqual(api.body['options']['seed'], 0)
+        self.assertEqual(result['request']['options']['seed'], harness.SEED)
         self.assertEqual(result['request']['options']['num_predict'], harness.NUM_PREDICT)
 
     def test_invalid_evidence_and_partial_answer_are_preserved(self):
@@ -578,8 +582,10 @@ class ComparisonTests(unittest.TestCase):
         self.assertFalse(rows[0]['request']['shift'])
         manifest = json.loads((directory / 'manifest.json').read_text())
         self.assertEqual(manifest['request_settings']['num_ctx'], harness.NUM_CTX)
+        self.assertEqual(manifest['request_settings']['seed'], harness.SEED)
         self.assertEqual(manifest['request_settings']['kv_cache_type'], harness.KV_CACHE_TYPE)
         self.assertFalse(manifest['request_settings']['shift'])
+        self.assertIn('seed=0', html)
         self.assertIn('Context shift is disabled for every model.', html)
         self.assertIsNone(manifest['models'][0]['quantization_level'])
         self.assertIn(f'kv_cache_type={harness.KV_CACHE_TYPE}', html)
@@ -1025,6 +1031,7 @@ class DeclaredProfileTests(unittest.TestCase):
         rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
         self.assertTrue(rows[0]["declared_profile"].endswith("alpha.profile"))
         self.assertEqual(api.chat.call_args.kwargs["options"]["temperature"], 0)
+        self.assertEqual(api.chat.call_args.kwargs["options"]["seed"], harness.SEED)
 
     def test_missing_profile_is_recorded_as_absent(self):
         api = client()

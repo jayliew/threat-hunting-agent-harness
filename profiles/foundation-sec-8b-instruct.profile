@@ -3,4 +3,7 @@ model=foundation-sec-8b-instruct
 # kv_cache=F16
 # thinking=Not supported
 num_ctx=131072
+temperature=0.2
+top_p=0.90
+top_k=40
 # repeat_penalty=1.0

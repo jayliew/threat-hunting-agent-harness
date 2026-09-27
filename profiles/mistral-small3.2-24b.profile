@@ -3,4 +3,7 @@ model=mistral-small3.2:24b
 # kv_cache=F16
 # thinking=Not supported
 num_ctx=131072
+temperature=0.15
+top_p=0.90
+top_k=40
 # repeat_penalty=1.0

@@ -6,7 +6,8 @@ Models are never downloaded; names must already appear in `ollama list`.
 
 Declared model profiles in profiles/*.profile are copied into that directory
 before inference. An uncommented num_ctx line is the context window sent for
-that model. A line that starts with # is kept and not applied.
+that model. Uncommented temperature, top_p, and top_k lines are the sampling
+options sent for that model. A line that starts with # is kept and not applied.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from html import escape
 import json
 import os
 from pathlib import Path
+import re
 import sys
 from zoneinfo import ZoneInfo
 
@@ -193,6 +195,59 @@ def profile_think(profile: dict | None) -> bool | str | None:
     return parse_thinking(raw, profile.get("source") or "profile")
 
 
+_PLAIN_DECIMAL = re.compile(r"(?:0|[1-9]\d*)(?:\.\d+)?")
+
+
+def parse_plain_decimal(value: str, source: str, field: str) -> float:
+    """Parse a profile decimal written as digits, with an optional fraction."""
+    text = value.strip()
+    if not _PLAIN_DECIMAL.fullmatch(text):
+        raise ValueError(
+            f"{source}: {field} must be a non-negative decimal with no commas "
+            f"(got {value!r})"
+        )
+    return float(text)
+
+
+def parse_temperature(value: str, source: str) -> float:
+    return parse_plain_decimal(value, source, "temperature")
+
+
+def parse_top_p(value: str, source: str) -> float:
+    number = parse_plain_decimal(value, source, "top_p")
+    if number > 1:
+        raise ValueError(
+            f"{source}: top_p must be a decimal from 0 through 1 (got {value!r})"
+        )
+    return number
+
+
+def parse_top_k(value: str, source: str) -> int:
+    """Parse a profile top_k as one positive integer. Commas are not allowed."""
+    text = value.strip()
+    if not text.isdigit() or int(text) <= 0:
+        raise ValueError(
+            f"{source}: top_k must be a positive integer with no commas (got {value!r})"
+        )
+    return int(text)
+
+
+def profile_sampling(profile: dict | None) -> dict:
+    """Sampling options for one setup. Missing lines keep the harness defaults."""
+    if profile is None:
+        return {}
+    fields = profile.get("fields", {})
+    source = profile.get("source") or "profile"
+    sampling: dict = {}
+    if "temperature" in fields:
+        sampling["temperature"] = parse_temperature(fields["temperature"], source)
+    if "top_p" in fields:
+        sampling["top_p"] = parse_top_p(fields["top_p"], source)
+    if "top_k" in fields:
+        sampling["top_k"] = parse_top_k(fields["top_k"], source)
+    return sampling
+
+
 def load_profiles(directory: Path) -> list[dict]:
     """Read every *.profile file. A missing directory means nothing was recorded.
 
@@ -345,6 +400,7 @@ def assign_run_slots(
             try:
                 num_ctx = profile_num_ctx(profile)
                 think = profile_think(profile)
+                sampling = profile_sampling(profile)
             except ValueError as error:
                 problems.append(str(error))
                 continue
@@ -358,6 +414,7 @@ def assign_run_slots(
             slot = dict(model)
             slot["num_ctx"] = num_ctx
             slot["think"] = think
+            slot["sampling"] = sampling
             if profile is None:
                 slot["run_key"] = model["name"]
                 slot["profile_source"] = None
@@ -713,6 +770,7 @@ def run_comparison(
                               model_max=slot.get("context_length"),
                               num_ctx=slot["num_ctx"],
                               think=slot.get("think"),
+                              sampling=slot.get("sampling"),
                               keep_alive=0 if index == len(cases)-1 else "5m")
             annotate_result(result, slot, case)
             save_result(directory, manifest, results, result)

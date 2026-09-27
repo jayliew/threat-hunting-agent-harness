@@ -3,4 +3,7 @@ model=deepseek-r1:32b
 # kv_cache=Q8_0
 thinking=true
 num_ctx=65536
+temperature=0.6
+top_p=0.95
+top_k=40
 # repeat_penalty=1.0

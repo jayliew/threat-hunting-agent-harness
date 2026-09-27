@@ -41,6 +41,10 @@ NUM_CTX = 32768
 # full window is still an error (apply_context_limit). done_reason=length
 # still fails the hunt when generation stops because the context is full.
 NUM_PREDICT = -1
+# Ollama /set parameter seed 0 (Modelfile: PARAMETER seed 0).
+# Always send options.seed. When seed is absent, Ollama uses -1, and a
+# negative seed selects a new random seed each run. 0 is a fixed seed.
+SEED = 0
 # Warn when context used reaches this fraction of the configured num_ctx.
 # At or above that window the run is an error.
 CONTEXT_WARN_RATIO = 0.9
@@ -744,7 +748,12 @@ def run_hunt(
     allocated = NUM_CTX if num_ctx is None else num_ctx
     requested_think = THINK if think is None else think
     messages = build_messages(events)
-    options = {"temperature": 0, "num_ctx": allocated, "num_predict": NUM_PREDICT}
+    options = {
+        "temperature": 0,
+        "seed": SEED,
+        "num_ctx": allocated,
+        "num_predict": NUM_PREDICT,
+    }
     tokens = empty_tokens()
     result = {
         "model": model,
@@ -964,6 +973,7 @@ def main() -> None:
     compare_models.annotate_result(result, slot, cases[0])
     compare_models.save_result(directory, manifest, [], result)
     print(f"KV cache type (server OLLAMA_KV_CACHE_TYPE): {KV_CACHE_TYPE}")
+    print(f"Seed: {SEED}")
     effective_think = result["request"].get("think")
     print(f"Thinking: {effective_think if effective_think is not None else 'unsupported or unavailable'}")
     if result["thinking"]:

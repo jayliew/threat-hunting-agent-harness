@@ -774,6 +774,7 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertIn("# weight_precision=Developer Q8_0", profile["text"])
         self.assertIn("# kv_cache=Q8_0", profile["text"])
         self.assertIn("# repeat_penalty=1.0", profile["text"])
+        self.assertIn("# basis: Qwen's explicit thinking-mode recommendation", profile["text"])
 
     def test_checked_in_profiles_match_the_planned_setups(self):
         expected = {
@@ -836,6 +837,7 @@ class DeclaredProfileTests(unittest.TestCase):
             self.assertEqual(compare_models.profile_think(profile), parsed)
             self.assertIn("# weight_precision=", profile["text"])
             self.assertIn("# repeat_penalty=", profile["text"])
+            self.assertIn("# basis:", profile["text"])
             if thinking is None:
                 self.assertIn("# thinking=", profile["text"])
             if name == "granite4.2-30b.profile":

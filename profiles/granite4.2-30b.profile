@@ -4,4 +4,7 @@ model=granite4.2:30b
 # thinking levels: false, low, medium, high
 thinking=high
 num_ctx=65536
+temperature=1.0
+top_p=0.95
+top_k=40
 # repeat_penalty=1.0

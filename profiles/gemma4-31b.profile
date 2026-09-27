@@ -3,4 +3,7 @@ model=gemma4:31b
 # kv_cache=F16
 thinking=true
 num_ctx=32768
+temperature=1.0
+top_p=0.95
+top_k=64
 # repeat_penalty=1.0

@@ -556,6 +556,16 @@ def context_label(allocated, used, model_max) -> str:
     return text
 
 
+def context_used_cell(used, allocated) -> str:
+    """Summary-table cell: used tokens and percent of allocated context."""
+    if used is None or used == "":
+        return "—"
+    if allocated is None or allocated == "" or allocated == 0:
+        return str(used)
+    percent = round(100 * float(used) / float(allocated))
+    return f"{used} ({percent}%)"
+
+
 def tokens_label(tokens: dict | None) -> str:
     tokens = tokens or {}
     estimate = " (estimated)" if tokens.get("split") == "estimated" else ""
@@ -601,8 +611,6 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             verdict = result["sections"].get("Verdict", "—")
             timing = result["timing"]
             evaluated = seconds(timing.get("evaluation_seconds"))
-            wall = seconds(timing.get("wall_seconds"))
-            load = seconds(timing.get("load_duration_seconds"))
             tokens = result.get("tokens") or {}
             context = result.get("context") or {}
             allocated = context.get("allocated", model.get("num_ctx", settings.get("num_ctx")))
@@ -610,10 +618,11 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             model_max = context.get("model_max", model.get("context_length"))
             rows.append(
                 f'<tr><td>{e(case["name"])}</td><td>{name}</td>'
+                f'<td>{e(quant)}</td>'
                 f'<td>{e(verdict)}</td><td class="{e(status)}">{e(status)}</td>'
-                f'<td>{len(result["unknown_evidence_ids"])}</td><td>{evaluated}</td><td>{wall}</td><td>{load}</td>'
-                f'<td>{e(quant)}</td><td>{e(think)}</td>'
-                f'<td>{e(display(used))}</td><td>{e(display(allocated))}</td>'
+                f'<td>{len(result["unknown_evidence_ids"])}</td><td>{evaluated}</td>'
+                f'<td>{e(think)}</td>'
+                f'<td>{e(context_used_cell(used, allocated))}</td><td>{e(display(allocated))}</td>'
                 f'<td>{e(display(tokens.get("input_tokens")))}</td>'
                 f'<td>{e(display(tokens.get("thinking_tokens")))}</td>'
                 f'<td>{e(display(tokens.get("output_tokens")))}</td>'
@@ -631,7 +640,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
                 f'<p>{e(context_label(allocated, used, model_max))}<br>'
                 f'{framing_note(model)}'
                 f'Quantization: {e(quant)}<br>'
-                f'Thinking: {e(think)} · Load: {load}<br>'
+                f'Thinking: {e(think)}<br>'
                 f'{e(tokens_label(tokens))}<br>'
                 f'Prompt processing: {seconds(timing.get("prompt_eval_duration_seconds"))} · '
                 f'Generation: {seconds(timing.get("eval_duration_seconds"))}</p>'
@@ -674,9 +683,9 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
              'Context shift is disabled for every model. '
              'A missing cached-token count is unknown, not zero.</p>'
              f'{declared_profiles_html(manifest)}'
-             '<div class="scroll"><table><thead><tr><th>Case</th><th>Model</th><th>Verdict</th>'
-             '<th>Output status</th><th>Unknown IDs</th><th>Eval time</th><th>Wall time</th><th>Load time</th>'
-             '<th>Quantization</th><th>Thinking</th><th>Context used</th><th>Context allocated</th>'
+             '<div class="scroll"><table><thead><tr><th>Case</th><th>Model</th><th>Quantization</th>'
+             '<th>Verdict</th><th>Output status</th><th>Unknown IDs</th><th>Eval time</th><th>Thinking</th>'
+             '<th>Context used</th><th>Context allocated</th>'
              '<th>Input tokens</th><th>Thinking tokens</th><th>Output tokens</th><th>Cached tokens</th>'
              f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>{"".join(sections)}</main></body></html>')
     temp = directory / "report.html.tmp"

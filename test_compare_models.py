@@ -334,6 +334,16 @@ class DurationFormatTests(unittest.TestCase):
         self.assertEqual(compare_models.seconds(125.2), "2m 5.20s")
 
 
+class ContextUsedCellTests(unittest.TestCase):
+    def test_includes_percent_of_allocated(self):
+        self.assertEqual(compare_models.context_used_cell(None, 32768), "—")
+        self.assertEqual(compare_models.context_used_cell(120, None), "120")
+        self.assertEqual(compare_models.context_used_cell(120, 0), "120")
+        self.assertEqual(compare_models.context_used_cell(120, 32768), "120 (0%)")
+        self.assertEqual(compare_models.context_used_cell(30000, 32768), "30000 (92%)")
+        self.assertEqual(compare_models.context_used_cell(32768, 32768), "32768 (100%)")
+
+
 class ResultsDirectoryNameTests(unittest.TestCase):
     def test_eastern_daylight_sunday_morning(self):
         when = datetime(2026, 9, 20, 13, 28, tzinfo=timezone.utc)
@@ -566,6 +576,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('Quantization: —', html)
         self.assertIn('Thinking: not supported', html)
         self.assertIn(f'used 120 / allocated {harness.NUM_CTX}', html)
+        self.assertIn(compare_models.context_used_cell(120, harness.NUM_CTX), html)
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
         self.assertEqual(rows[0]['tokens']['prompt_eval_count'], 80)
         self.assertEqual(rows[0]['tokens']['eval_count'], 40)

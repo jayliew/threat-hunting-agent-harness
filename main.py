@@ -561,24 +561,31 @@ Assess the supplied security events for evidence of a threat.
 - Cite event identifiers exactly as supplied in event.id. Do not invent identifiers or use ID ranges.
 
 ## Decision rules
-- suspicious: the events support a potentially malicious pattern or activity.
-- benign: the supplied activity is consistent with ordinary, non-malicious behavior; this does not establish that the wider environment is safe.
-- inconclusive: the evidence is insufficient or conflicting and does not support either assessment.
-- Name the most specific threat type supported by the events, or use none if no specific type is supported.
+Choose one verdict from <verdicts>. Name the most specific threat type supported by the events, or use none if no specific type is supported.
+
+<verdicts>
+<verdict name="suspicious">the events support a potentially malicious pattern or activity.</verdict>
+<verdict name="benign">the supplied activity is consistent with ordinary, non-malicious behavior; this does not establish that the wider environment is safe.</verdict>
+<verdict name="inconclusive">the evidence is insufficient or conflicting and does not support either assessment.</verdict>
+</verdicts>
 
 ## Output format
-Return exactly four labeled fields in the order below. Put each label at the start of a new line.
+Return exactly four labeled fields in the order in <output_fields>. Put each label at the start of a new line.
 Choose one verdict value. Replace the descriptions with your findings.
 Do not add a preamble, Markdown formatting, code fences, or text after the Evidence field.
 
+<output_fields>
 Verdict: suspicious, benign, or inconclusive
 Threat type: specific threat name, or none
 Summary: one short paragraph describing the observations and relevant uncertainty
 Evidence: comma-separated event IDs supporting the assessment, or none
+</output_fields>
 """.strip()
 
 USER_TASK = "Assess the security events below and return the four fields specified in the instructions."
 # These are ordinary application delimiters, not reserved LLM control tokens.
+TASK_START = "<task>"
+TASK_END = "</task>"
 EVIDENCE_START = "<security_events>"
 EVIDENCE_END = "</security_events>"
 
@@ -668,7 +675,7 @@ def build_user_message(events: list[dict]) -> str:
     # Keep delimiter-looking data inside the JSON string. JSON decoding recovers
     # the exact original values; this is framing, not an injection-proof boundary.
     serialized = serialized.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-    return f"{USER_TASK}\n\n{EVIDENCE_START}\n{serialized}\n{EVIDENCE_END}"
+    return f"{TASK_START}{USER_TASK}{TASK_END}\n{EVIDENCE_START}\n{serialized}\n{EVIDENCE_END}"
 
 
 def chat_accepts_shift(chat) -> bool:

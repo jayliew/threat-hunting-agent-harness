@@ -15,6 +15,8 @@ from main import (
     EVIDENCE_START,
     NUM_CTX,
     SYSTEM_PROMPT,
+    TASK_END,
+    TASK_START,
     USER_TASK,
     parse_timeout,
     build_messages,
@@ -119,8 +121,22 @@ class BuildMessagesTests(unittest.TestCase):
         self.assertTrue(all(set(m) == {"role", "content"} for m in messages))
         self.assertEqual(messages[0]["content"], SYSTEM_PROMPT)
         self.assertNotIn("ignore prior instructions", messages[0]["content"])
+        for heading in (
+            "## Role",
+            "## Task",
+            "## Evidence rules",
+            "## Decision rules",
+            "## Output format",
+        ):
+            self.assertIn(heading, SYSTEM_PROMPT)
+        self.assertIn("<verdicts>", SYSTEM_PROMPT)
+        self.assertIn("</verdicts>", SYSTEM_PROMPT)
+        self.assertIn("<output_fields>", SYSTEM_PROMPT)
+        self.assertIn("</output_fields>", SYSTEM_PROMPT)
         user = messages[1]["content"]
-        self.assertTrue(user.startswith(USER_TASK))
+        self.assertTrue(user.startswith(f"{TASK_START}{USER_TASK}{TASK_END}\n"))
+        self.assertEqual(user.count(TASK_START), 1)
+        self.assertEqual(user.count(TASK_END), 1)
         self.assertTrue(user.endswith(EVIDENCE_END))
         payload = user.split(EVIDENCE_START + "\n", 1)[1].rsplit("\n" + EVIDENCE_END, 1)[0]
         self.assertEqual(json.loads(payload), events)

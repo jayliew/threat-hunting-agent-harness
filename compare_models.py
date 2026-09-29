@@ -572,9 +572,7 @@ def tokens_label(tokens: dict | None) -> str:
     return (
         f"Input: {display(tokens.get('input_tokens'))} · "
         f"Thinking: {display(tokens.get('thinking_tokens'))}{estimate} · "
-        f"Output: {display(tokens.get('output_tokens'))}{estimate} · "
-        f"Cached: {display(tokens.get('prompt_eval_cached_count'))} · "
-        f"Uncached: {display(tokens.get('prompt_uncached_count'))}"
+        f"Output: {display(tokens.get('output_tokens'))}{estimate}"
     )
 
 
@@ -625,8 +623,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
                 f'<td>{e(context_used_cell(used, allocated))}</td><td>{e(display(allocated))}</td>'
                 f'<td>{e(display(tokens.get("input_tokens")))}</td>'
                 f'<td>{e(display(tokens.get("thinking_tokens")))}</td>'
-                f'<td>{e(display(tokens.get("output_tokens")))}</td>'
-                f'<td>{e(display(tokens.get("prompt_eval_cached_count")))}</td></tr>'
+                f'<td>{e(display(tokens.get("output_tokens")))}</td></tr>'
             )
             errors = result["validation_errors"] + ([result["error"]] if result["error"] else [])
             error_html = ''.join(f'<p class="error">{e(error)}</p>' for error in errors)
@@ -680,13 +677,12 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
              'Thinking and output tokens split that generated count: exact when only one of those texts is present, '
              'estimated by character length when both are present. '
              'A run warns at 90% of num_ctx and is an error at or above num_ctx. '
-             'Context shift is disabled for every model. '
-             'A missing cached-token count is unknown, not zero.</p>'
+             'Context shift is disabled for every model.</p>'
              f'{declared_profiles_html(manifest)}'
              '<div class="scroll"><table><thead><tr><th>Case</th><th>Model</th><th>Quantization</th>'
              '<th>Verdict</th><th>Output status</th><th>Unknown IDs</th><th>Eval time</th><th>Thinking</th>'
              '<th>Context used</th><th>Context allocated</th>'
-             '<th>Input tokens</th><th>Thinking tokens</th><th>Output tokens</th><th>Cached tokens</th>'
+             '<th>Input tokens</th><th>Thinking tokens</th><th>Output tokens</th>'
              f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>{"".join(sections)}</main></body></html>')
     temp = directory / "report.html.tmp"
     temp.write_text(html, encoding="utf-8")

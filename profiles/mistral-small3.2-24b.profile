@@ -2,5 +2,9 @@ model=mistral-small3.2:24b
 # weight_precision=Q8_0
 # kv_cache=F16
 # thinking=Not supported
-num_ctx=131,072
+num_ctx=131072
+# basis: Mistral's temperature guidance (https://huggingface.co/mistralai/Mistral-Small-3.2-24B-Instruct-2506); Ollama top-p/top-k defaults
+temperature=0.15
+top_p=0.90
+top_k=40
 # repeat_penalty=1.0

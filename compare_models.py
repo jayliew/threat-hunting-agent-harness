@@ -6,7 +6,8 @@ Models are never downloaded; names must already appear in `ollama list`.
 
 Declared model profiles in profiles/*.profile are copied into that directory
 before inference. An uncommented num_ctx line is the context window sent for
-that model. A line that starts with # is kept and not applied.
+that model. Uncommented temperature, top_p, and top_k lines are the sampling
+options sent for that model. A line that starts with # is kept and not applied.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from html import escape
 import json
 import os
 from pathlib import Path
+import re
 import sys
 from zoneinfo import ZoneInfo
 
@@ -42,9 +44,9 @@ DEFAULT_SCENARIO_LOGS = [
     "logs/password-spray.jsonl",
     "logs/http-beaconing.jsonl",
     "logs/internal-network-scan.jsonl",
-    "logs/shared-vpn-logins.ecs.jsonl",
-    "logs/managed-telemetry.ecs.jsonl",
-    "logs/scheduled-discovery.ecs.jsonl",
+    "logs/shared-vpn-logins.jsonl",
+    "logs/managed-telemetry.jsonl",
+    "logs/scheduled-discovery.jsonl",
 ]
 OUTPUT_ROOT = Path(__file__).parent / "results"
 DEFAULT_PROFILES_DIR = Path(__file__).parent / "profiles"
@@ -150,10 +152,12 @@ def parse_profile_file(path: Path) -> dict:
 
 
 def parse_num_ctx(value: str, source: str) -> int:
-    """Parse a profile num_ctx. Commas are allowed; ranges and other text are not."""
-    text = value.replace(",", "").strip()
+    """Parse a profile num_ctx as one positive integer. Commas are not allowed."""
+    text = value.strip()
     if not text.isdigit() or int(text) <= 0:
-        raise ValueError(f"{source}: num_ctx must be a positive integer (got {value!r})")
+        raise ValueError(
+            f"{source}: num_ctx must be a positive integer with no commas (got {value!r})"
+        )
     return int(text)
 
 
@@ -189,6 +193,59 @@ def profile_think(profile: dict | None) -> bool | str | None:
     if raw is None:
         return None
     return parse_thinking(raw, profile.get("source") or "profile")
+
+
+_PLAIN_DECIMAL = re.compile(r"(?:0|[1-9]\d*)(?:\.\d+)?")
+
+
+def parse_plain_decimal(value: str, source: str, field: str) -> float:
+    """Parse a profile decimal written as digits, with an optional fraction."""
+    text = value.strip()
+    if not _PLAIN_DECIMAL.fullmatch(text):
+        raise ValueError(
+            f"{source}: {field} must be a non-negative decimal with no commas "
+            f"(got {value!r})"
+        )
+    return float(text)
+
+
+def parse_temperature(value: str, source: str) -> float:
+    return parse_plain_decimal(value, source, "temperature")
+
+
+def parse_top_p(value: str, source: str) -> float:
+    number = parse_plain_decimal(value, source, "top_p")
+    if number > 1:
+        raise ValueError(
+            f"{source}: top_p must be a decimal from 0 through 1 (got {value!r})"
+        )
+    return number
+
+
+def parse_top_k(value: str, source: str) -> int:
+    """Parse a profile top_k as one positive integer. Commas are not allowed."""
+    text = value.strip()
+    if not text.isdigit() or int(text) <= 0:
+        raise ValueError(
+            f"{source}: top_k must be a positive integer with no commas (got {value!r})"
+        )
+    return int(text)
+
+
+def profile_sampling(profile: dict | None) -> dict:
+    """Sampling options for one setup. Missing lines keep the harness defaults."""
+    if profile is None:
+        return {}
+    fields = profile.get("fields", {})
+    source = profile.get("source") or "profile"
+    sampling: dict = {}
+    if "temperature" in fields:
+        sampling["temperature"] = parse_temperature(fields["temperature"], source)
+    if "top_p" in fields:
+        sampling["top_p"] = parse_top_p(fields["top_p"], source)
+    if "top_k" in fields:
+        sampling["top_k"] = parse_top_k(fields["top_k"], source)
+    return sampling
 
 
 def load_profiles(directory: Path) -> list[dict]:
@@ -343,6 +400,7 @@ def assign_run_slots(
             try:
                 num_ctx = profile_num_ctx(profile)
                 think = profile_think(profile)
+                sampling = profile_sampling(profile)
             except ValueError as error:
                 problems.append(str(error))
                 continue
@@ -356,6 +414,7 @@ def assign_run_slots(
             slot = dict(model)
             slot["num_ctx"] = num_ctx
             slot["think"] = think
+            slot["sampling"] = sampling
             if profile is None:
                 slot["run_key"] = model["name"]
                 slot["profile_source"] = None
@@ -407,7 +466,7 @@ def slot_label(model: dict) -> str:
 
 
 def declared_profiles_html(manifest: dict) -> str:
-    """Show the profile written down before inference, separate from the request."""
+    """Show the archived profile source file that drove each model's request."""
     blocks = []
     for model in manifest.get("models") or []:
         name = escape(slot_label(model))
@@ -429,8 +488,9 @@ def declared_profiles_html(manifest: dict) -> str:
         return ""
     return (
         "<h2>Declared profiles</h2>"
-        "<p>Recorded before inference. These notes are the setup you wrote down. "
-        "They are not the request sent to Ollama.</p>"
+        "<p>Recorded before inference. Uncommented profile values drive the Ollama "
+        "request; this block is the archived source file, including comments and "
+        "fields that are not chat options.</p>"
         f'<div class="answers">{"".join(blocks)}</div>'
     )
 
@@ -505,6 +565,13 @@ def tokens_label(tokens: dict | None) -> str:
         f"Cached: {display(tokens.get('prompt_eval_cached_count'))} · "
         f"Uncached: {display(tokens.get('prompt_uncached_count'))}"
     )
+
+
+def format_num_predict(value: object) -> str:
+    """Label the sent num_predict. Ollama treats -1 as unlimited generation."""
+    if value == -1:
+        return "-1 (no limit)"
+    return str(value)
 
 
 def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
@@ -587,10 +654,13 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
     html += (f'<h1>Threat hunt model comparison</h1><p>{e(manifest["created_at"])} · '
              f'{len(results)} / {total} runs recorded</p>'
              f'<p>Request settings: num_ctx={e(settings.get("num_ctx"))}, '
-             f'num_predict={e(settings.get("num_predict"))}, '
+             f'num_predict={e(format_num_predict(settings.get("num_predict")))}, '
              f'think={e(settings.get("think"))}, '
              f'kv_cache_type={e(settings.get("kv_cache_type"))} '
-             '(server env <code>OLLAMA_KV_CACHE_TYPE</code>; not a chat API option).</p>'
+             '(server env <code>OLLAMA_KV_CACHE_TYPE</code>; not a chat API option). '
+             'These are the harness fallbacks unless a profile overrides them; '
+             'they are not necessarily what each model was sent. '
+             'Each model card shows the context window and thinking value actually used.</p>'
              '<p>Output validity checks format and cited IDs; '
              'it does not establish detection accuracy. Eval time is prompt processing plus generation for that log and excludes model load and unload. '
              'Wall time includes model loading. '
@@ -704,6 +774,7 @@ def run_comparison(
                               model_max=slot.get("context_length"),
                               num_ctx=slot["num_ctx"],
                               think=slot.get("think"),
+                              sampling=slot.get("sampling"),
                               keep_alive=0 if index == len(cases)-1 else "5m")
             annotate_result(result, slot, case)
             save_result(directory, manifest, results, result)

@@ -44,9 +44,9 @@ REPO_ROOT = Path(__file__).resolve().parent
 PASSWORD_SPRAY = REPO_ROOT / "logs" / "password-spray.jsonl"
 HTTP_BEACONING = REPO_ROOT / "logs" / "http-beaconing.jsonl"
 INTERNAL_NETWORK_SCAN = REPO_ROOT / "logs" / "internal-network-scan.jsonl"
-SHARED_VPN_LOGINS = REPO_ROOT / "logs" / "shared-vpn-logins.ecs.jsonl"
-MANAGED_TELEMETRY = REPO_ROOT / "logs" / "managed-telemetry.ecs.jsonl"
-SCHEDULED_DISCOVERY = REPO_ROOT / "logs" / "scheduled-discovery.ecs.jsonl"
+SHARED_VPN_LOGINS = REPO_ROOT / "logs" / "shared-vpn-logins.jsonl"
+MANAGED_TELEMETRY = REPO_ROOT / "logs" / "managed-telemetry.jsonl"
+SCHEDULED_DISCOVERY = REPO_ROOT / "logs" / "scheduled-discovery.jsonl"
 GELF_KEYS = {"version", "short_message", "timestamp", "level", "_event_id"}
 
 
@@ -197,6 +197,28 @@ class IncompleteResponseMessageTests(unittest.TestCase):
         self.assertIsNotNone(message)
         self.assertIn("token limit", message)
         self.assertIn("done_reason=unknown", message)
+
+    def test_unlimited_budget_does_not_treat_eval_count_as_a_cap(self) -> None:
+        response = make_response(
+            "Verdict: suspicious\nThreat type: password spray\n",
+            done_reason="stop",
+            eval_count=2048,
+        )
+        self.assertIsNone(incomplete_response_message(response, -1))
+
+    def test_length_with_unlimited_budget_is_still_incomplete(self) -> None:
+        response = make_response(
+            "Verdict: suspicious",
+            done_reason="length",
+            eval_count=2048,
+        )
+        message = incomplete_response_message(response, -1)
+        self.assertIsNotNone(message)
+        self.assertIn("token limit", message)
+        self.assertIn("done_reason=length", message)
+        self.assertIn("eval_count=2048", message)
+        self.assertIn("unlimited", message)
+        self.assertNotIn("2048/-1", message)
 
 
 class HuntOutputValidationTests(unittest.TestCase):

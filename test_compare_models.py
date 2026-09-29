@@ -1085,6 +1085,11 @@ class DeclaredProfileTests(unittest.TestCase):
             self.assertIn("Q4_K_M", manifest["profiles"][0]["quantization_note"])
             report = saved[0].with_name("report.html").read_text()
             self.assertIn("Declared profiles", report)
+            self.assertIn(
+                "Uncommented profile values drive the Ollama request",
+                report,
+            )
+            self.assertIn("this block is the archived source file", report)
             self.assertIn("0 / 1 runs recorded", report)
             self.assertNotIn("<script>", report)
             self.assertIn("&lt;script&gt;", report)

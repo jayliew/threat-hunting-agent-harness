@@ -45,6 +45,9 @@ NUM_PREDICT = -1
 # Always send options.seed. When seed is absent, Ollama uses -1, and a
 # negative seed selects a new random seed each run. 0 is a fixed seed.
 SEED = 0
+# Fallback sampling temperature when the matched profile has no temperature
+# line. top_p and top_k are omitted unless that profile sets them.
+TEMPERATURE = 0
 # Warn when context used reaches this fraction of the configured num_ctx.
 # At or above that window the run is an error.
 CONTEXT_WARN_RATIO = 0.9
@@ -742,6 +745,7 @@ def run_hunt(
     model_max: int | None = None,
     num_ctx: int | None = None,
     think: bool | str | None = None,
+    sampling: dict | None = None,
 ) -> dict:
     """Run one fresh conversation; retain answers and failures for inspection."""
     client = client if client is not None else Client(timeout=None)
@@ -749,11 +753,13 @@ def run_hunt(
     requested_think = THINK if think is None else think
     messages = build_messages(events)
     options = {
-        "temperature": 0,
+        "temperature": TEMPERATURE,
         "seed": SEED,
         "num_ctx": allocated,
         "num_predict": NUM_PREDICT,
     }
+    if sampling:
+        options.update(sampling)
     tokens = empty_tokens()
     result = {
         "model": model,
@@ -969,6 +975,7 @@ def main() -> None:
         model_max=slot.get("context_length"),
         num_ctx=slot["num_ctx"],
         think=slot.get("think"),
+        sampling=slot.get("sampling"),
     )
     compare_models.annotate_result(result, slot, cases[0])
     compare_models.save_result(directory, manifest, [], result)

@@ -3,4 +3,8 @@ model=mistral-nemo:12b
 # kv_cache=F16
 # thinking=Not supported
 num_ctx=131072
+# basis: Mistral's temperature guidance (https://huggingface.co/mistralai/Mistral-Nemo-Instruct-2407); Ollama top-p/top-k defaults
+temperature=0.3
+top_p=0.90
+top_k=40
 # repeat_penalty=1.0

@@ -611,7 +611,6 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             verdict = result["sections"].get("Verdict", "—")
             timing = result["timing"]
             evaluated = seconds(timing.get("evaluation_seconds"))
-            load = seconds(timing.get("load_duration_seconds"))
             tokens = result.get("tokens") or {}
             context = result.get("context") or {}
             allocated = context.get("allocated", model.get("num_ctx", settings.get("num_ctx")))
@@ -641,7 +640,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
                 f'<p>{e(context_label(allocated, used, model_max))}<br>'
                 f'{framing_note(model)}'
                 f'Quantization: {e(quant)}<br>'
-                f'Thinking: {e(think)} · Load: {load}<br>'
+                f'Thinking: {e(think)}<br>'
                 f'{e(tokens_label(tokens))}<br>'
                 f'Prompt processing: {seconds(timing.get("prompt_eval_duration_seconds"))} · '
                 f'Generation: {seconds(timing.get("eval_duration_seconds"))}</p>'

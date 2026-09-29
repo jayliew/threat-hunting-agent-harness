@@ -35,7 +35,15 @@ DEFAULT_LOG_FILE = "logs/http-beaconing.jsonl"
 
 # Fallback context window when the matched profile has no num_ctx line.
 NUM_CTX = 32768
-NUM_PREDICT = 1024
+# Generation budget sent on every chat as options.num_predict.
+# Ollama treats -1 as infinite generation. Always send it so a Modelfile or
+# server default cannot cap the answer. The remaining bound is num_ctx; a
+# full window is still an error (apply_context_limit). done_reason=length
+# still fails the hunt when generation stops because the context is full.
+NUM_PREDICT = -1
+# Fallback sampling temperature when the matched profile has no temperature
+# line. top_p and top_k are omitted unless that profile sets them.
+TEMPERATURE = 0
 # Warn when context used reaches this fraction of the configured num_ctx.
 # At or above that window the run is an error.
 CONTEXT_WARN_RATIO = 0.9
@@ -48,9 +56,10 @@ SHIFT = False
 # without the thinking capability reject the argument (HTTP 400: "does not
 # support thinking"). Send think only when /api/show lists "thinking". For
 # those models, set True or False explicitly; do not leave the API default
-# implicit. Thinking tokens share NUM_PREDICT with the final answer; at
-# 1024 tokens, True can return an empty or truncated analysis. True keeps
-# the reasoning trace; False spends the budget on the structured verdict.
+# implicit. Generation has no token cap (NUM_PREDICT is -1). Thinking tokens
+# and the final answer still share the context window; a full num_ctx is an
+# error. True keeps the reasoning trace; False spends the window on the
+# structured verdict.
 THINK = False
 # K/V cache quantization for the Ollama server (`OLLAMA_KV_CACHE_TYPE`).
 # Ollama's built-in default is also f16, but this harness sets f16 explicitly
@@ -576,14 +585,18 @@ def incomplete_response_message(
     content = (response.message.content or "").strip()
     done_reason = response.done_reason or ""
     eval_count = response.eval_count
+    capped = num_predict > 0
     hit_limit = done_reason == "length" or (
-        eval_count is not None and eval_count >= num_predict
+        capped and eval_count is not None and eval_count >= num_predict
     )
     if hit_limit:
+        if capped:
+            budget = f"eval_count={eval_count}/{num_predict}"
+        else:
+            budget = f"eval_count={eval_count}, generation budget unlimited"
         return (
             f"Incomplete response: generation stopped at the token limit "
-            f"(done_reason={done_reason or 'unknown'}, "
-            f"eval_count={eval_count}/{num_predict})."
+            f"(done_reason={done_reason or 'unknown'}, {budget})."
         )
     if not content:
         return (
@@ -728,13 +741,16 @@ def run_hunt(
     model_max: int | None = None,
     num_ctx: int | None = None,
     think: bool | str | None = None,
+    sampling: dict | None = None,
 ) -> dict:
     """Run one fresh conversation; retain answers and failures for inspection."""
     client = client if client is not None else Client(timeout=None)
     allocated = NUM_CTX if num_ctx is None else num_ctx
     requested_think = THINK if think is None else think
     messages = build_messages(events)
-    options = {"temperature": 0, "num_ctx": allocated, "num_predict": NUM_PREDICT}
+    options = {"temperature": TEMPERATURE, "num_ctx": allocated, "num_predict": NUM_PREDICT}
+    if sampling:
+        options.update(sampling)
     tokens = empty_tokens()
     result = {
         "model": model,
@@ -950,6 +966,7 @@ def main() -> None:
         model_max=slot.get("context_length"),
         num_ctx=slot["num_ctx"],
         think=slot.get("think"),
+        sampling=slot.get("sampling"),
     )
     compare_models.annotate_result(result, slot, cases[0])
     compare_models.save_result(directory, manifest, [], result)

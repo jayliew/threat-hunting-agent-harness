@@ -68,7 +68,7 @@ Default single-hunt file for `main.py`. Synthetic [ECS](https://www.elastic.co/d
 The hour of traffic mixes ordinary work with a low-and-slow HTTP check-in:
 
 - `jlee` on `ws-014.corp.internal` (`10.47.12.88`) browses Office, GitHub, and LinkedIn, and syncs Outlook (`outlook.office365.com` / `198.51.100.30`) on an irregular schedule with varying payload sizes.
-- The same host also issues `GET /api/heartbeat` to `203.0.113.77:443` (a documentation IP, no hostname) about every 300 seconds with a few seconds of jitter, tiny stable byte counts, and an identical short user-agent. Those twelve events are `c01-e006`, `c01-e011`, `c01-e016`, `c01-e020`, `c01-e023`, `c01-e024`, `c01-e027`, `c01-e031`, `c01-e035`, `c01-e038`, `c01-e041`, and `c01-e043`.
+- The same host also issues `GET /nmtyxs/?12840192` to `203.0.113.77:443` (a documentation IP, no hostname) about every 300 seconds with a few seconds of jitter, tiny stable byte counts, and an identical short user-agent. Those twelve events are `c01-e006`, `c01-e011`, `c01-e016`, `c01-e020`, `c01-e023`, `c01-e024`, `c01-e027`, `c01-e031`, `c01-e035`, `c01-e038`, `c01-e041`, and `c01-e043`.
 - Cover traffic that can look periodic if you only glance at timestamps: Windows Update from `asmith` / `ws-022` (large, variable bodies), Slack presence polls from `bnguyen` / `ws-008` (~15 minutes apart with high jitter and changing sizes), plus DNS, NTP, and SMB.
 
 Ground truth for instructors (not present in the logs): verdict `suspicious`, threat type HTTP/C2 beaconing, evidence = the twelve `event.id`s to `203.0.113.77`.
@@ -152,7 +152,7 @@ Before you run, set `THINK` in `main.py` to `True` (on) or `False` (off) for mod
 
 The harness queries Ollama (`/api/show`) and sends `think` only when the model lists the `thinking` capability. Models without that capability reject the argument (`does not support thinking`), so it is omitted. Qwen3-class models enable thinking by default when the API omits `think`; for those models the harness always sends `think` explicitly.
 
-Thinking tokens and the final answer share the 1,024-token `num_predict` budget; with thinking on, the model can hit that limit mid-trace and return an empty or truncated analysis.
+Both `main.py` and `compare_models.py` always send `num_predict=-1` (no output-token limit). Thinking tokens and the final answer still share the configured `num_ctx`. A full context window is an error. A reply that stops with `done_reason=length` is still a failed hunt.
 
 ## Compare models across scenarios
 
@@ -167,15 +167,19 @@ model=qwen3:32b
 # weight_precision=Developer Q8_0
 # kv_cache=Q8_0
 thinking=true
-num_ctx=40,960
+num_ctx=40960
+# basis: Qwen's explicit thinking-mode recommendation (https://huggingface.co/Qwen/Qwen3-32B)
+temperature=0.6
+top_p=0.95
+top_k=20
 # repeat_penalty=1.0
 ```
 
-The other recorded setups are `llama3.3:70b` (`num_ctx` 16,384), `granite4.2:30b` (65,536, `thinking=high`), `deepseek-r1:32b` (65,536, `thinking=true`), `command-r:latest` (131,072), `gemma4:31b` (32,768, `thinking=true`), `mistral-small3.2:24b` (131,072), `mistral-nemo:12b` (131,072), and `foundation-sec-8b-instruct` (131,072). `thinking` stays commented on models that do not support it. Granite 4.2 accepts several reasoning levels (`false`, `low`, `medium`, `high`); its profile comments those values and sets the highest, `high`. Qwen3, DeepSeek-R1, and Gemma 4 are on or off, so their profiles use `thinking=true`.
+The other recorded setups are `llama3.3:70b` (`num_ctx` 16384), `granite4.2:30b` (65536, `thinking=high`), `deepseek-r1:32b` (65536, `thinking=true`), `command-r:latest` (131072), `gemma4:31b` (32768, `thinking=true`), `mistral-small3.2:24b` (131072), `mistral-nemo:12b` (131072), and `foundation-sec-8b-instruct` (131072). `thinking` stays commented on models that do not support it. Granite 4.2 accepts several reasoning levels (`false`, `low`, `medium`, `high`); its profile comments those values and sets the highest, `high`. Qwen3, DeepSeek-R1, and Gemma 4 are on or off, so their profiles use `thinking=true`.
 
-Both `main.py` and `compare_models.py` load the chosen profile before the first inference call, print it, and copy it into the results directory. A model with no file is reported as having no declared profile. If an uncommented weight quant differs from the installed Ollama quantization, the report keeps both and notes the difference. A malformed profile, including a `num_ctx` that is not a positive integer, stops the run before any results directory is created.
+Both `main.py` and `compare_models.py` load the chosen profile before the first inference call, print it, and copy it into the results directory. A model with no file is reported as having no declared profile. If an uncommented weight quant differs from the installed Ollama quantization, the report keeps both and notes the difference. A malformed profile, including a `num_ctx` that is not one positive integer written as digits only, stops the run before any results directory is created. Commas are not allowed in that value.
 
-A matched profile's `num_ctx` is the context window sent for that hunt, overriding the model's usual context size. A model with no profile, or a profile with no `num_ctx` line, uses 32,768 from `NUM_CTX` in `main.py`. An uncommented `thinking` line is resolved before inference and sent as the Ollama `think` argument (`true`, `false`, `low`, `medium`, or `high`) when the installed model lists the thinking capability. A profile that sets `thinking` for a model without that capability stops the run before any chat call. A profile with no `thinking` line uses `THINK` in `main.py`. Weight precision, KV cache, and repeat penalty stay commented out. The saved profile is what distinguishes two runs of the same model when those settings later differ.
+A matched profile's `num_ctx` is the context window sent for that hunt, overriding the model's usual context size. A model with no profile, or a profile with no `num_ctx` line, uses 32768 from `NUM_CTX` in `main.py`. An uncommented `thinking` line is resolved before inference and sent as the Ollama `think` argument (`true`, `false`, `low`, `medium`, or `high`) when the installed model lists the thinking capability. A profile that sets `thinking` for a model without that capability stops the run before any chat call. A profile with no `thinking` line uses `THINK` in `main.py`. An uncommented `temperature`, `top_p`, or `top_k` line is sent as the matching Ollama sampling option. A missing `temperature` line uses `0` from `TEMPERATURE` in `main.py`. Missing `top_p` and `top_k` lines are left off the request. `temperature` is a non-negative decimal, `top_p` is a decimal from 0 through 1, and `top_k` is a positive integer; commas and other text stop the run before any results directory is created. Weight precision, KV cache, and repeat penalty stay commented out. The saved profile is what distinguishes two runs of the same model when those settings later differ.
 
 Edit the `MODELS` and `DEFAULT_SCENARIO_LOGS` lists at the top of `compare_models.py`, then run:
 
@@ -183,7 +187,7 @@ Edit the `MODELS` and `DEFAULT_SCENARIO_LOGS` lists at the top of `compare_model
 uv run python compare_models.py
 ```
 
-The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all six scenarios: password spray, HTTP beaconing, internal network scanning, shared VPN logins (`logs/shared-vpn-logins.ecs.jsonl`), managed telemetry (`logs/managed-telemetry.ecs.jsonl`), and scheduled discovery (`logs/scheduled-discovery.ecs.jsonl`): 18 runs. Use names from `ollama list`. All configured models and input files are checked before inference starts, including whether the installed Ollama chat template is the native framing for that model family; missing models, unrecognized names, and models with the wrong template are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
+The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all six scenarios: password spray, HTTP beaconing, internal network scanning, shared VPN logins (`logs/shared-vpn-logins.jsonl`), managed telemetry (`logs/managed-telemetry.jsonl`), and scheduled discovery (`logs/scheduled-discovery.jsonl`): 18 runs. Use names from `ollama list`. All configured models and input files are checked before inference starts, including whether the installed Ollama chat template is the native framing for that model family; missing models, unrecognized names, and models with the wrong template are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
 
 You can override the lists without editing code:
 
@@ -201,7 +205,7 @@ Log paths are relative to the script (or absolute); a supplied output directory 
 - `results.jsonl`: one row per attempted model/case pair, saved immediately. Includes full raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages/options, prompt and input hashes, model digest, the declared profile path when one matched, timings, token counts, and context allocated/used.
 - `manifest.json`: selected models (digest, capabilities, quantization, native context, and the `num_ctx` sent for that model), declared profiles, plus shared request settings (`num_ctx` as the fallback when a profile does not set one, `num_predict`, `think`, `shift`, `kv_cache_type`) and input file identities. Pending cases remain visible in the report if the process is interrupted.
 
-Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Temperature, answer budget, and context shift come from `main.py`. The context window is the matched profile's `num_ctx`, or `NUM_CTX` when that line is absent. The thinking mode is the matched profile's `thinking` line, or `THINK` when that line is absent, and it is placed on the request before the chat call when the model lists the thinking capability. Context shift is sent for every model. The last case for each model requests unloading afterward. Each Ollama HTTP request waits until it finishes. Pass `--timeout` with a positive number of seconds to limit one request; `--timeout none` is the same unlimited wait as the default. It is not a total batch deadline.
+Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Sampling comes from the matched profile's `temperature`, `top_p`, and `top_k`. A missing `temperature` line uses `0` from `TEMPERATURE` in `main.py`, and missing `top_p` and `top_k` lines are omitted. `num_predict` (`-1`, no output-token limit) and context shift come from `main.py`. The context window is the matched profile's `num_ctx`, or `NUM_CTX` when that line is absent. The thinking mode is the matched profile's `thinking` line, or `THINK` when that line is absent, and it is placed on the request before the chat call when the model lists the thinking capability. Context shift is sent for every model. The last case for each model requests unloading afterward. Each Ollama HTTP request waits until it finishes. Pass `--timeout` with a positive number of seconds to limit one request; `--timeout none` is the same unlimited wait as the default. It is not a total batch deadline.
 
 Invalid, empty, truncated, and failed responses are retained. An individual inference error does not stop the remaining cases. The report updates after every saved result. Exit status is nonzero if any run is invalid or failed, if any run meets or exceeds the configured context window, if preflight fails, or if execution is interrupted; completed results remain available.
 
@@ -224,9 +228,9 @@ uv run python -m unittest -v
 | `logs/password-spray.jsonl` | Optional demo: ECS login / password-spray events |
 | `logs/http-beaconing.jsonl` | Default demo: ECS HTTP beaconing among legitimate traffic |
 | `logs/internal-network-scan.jsonl` | Optional demo: ECS internal scanning among legitimate traffic |
-| `logs/shared-vpn-logins.ecs.jsonl` | Optional demo: ECS shared-VPN logins that look like spraying |
-| `logs/managed-telemetry.ecs.jsonl` | Optional demo: ECS managed check-ins that look like beaconing |
-| `logs/scheduled-discovery.ecs.jsonl` | Optional demo: ECS authorized scanning that looks like an internal scan |
+| `logs/shared-vpn-logins.jsonl` | Optional demo: ECS shared-VPN logins that look like spraying |
+| `logs/managed-telemetry.jsonl` | Optional demo: ECS managed check-ins that look like beaconing |
+| `logs/scheduled-discovery.jsonl` | Optional demo: ECS authorized scanning that looks like an internal scan |
 | `test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |
 | `test_compare_models.py` | Unit tests for the comparison matrix, HTML report, and the shared hunt runner |
 | `pyproject.toml` | Project metadata and the `ollama` client |

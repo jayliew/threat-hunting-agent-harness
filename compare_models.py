@@ -556,6 +556,16 @@ def context_label(allocated, used, model_max) -> str:
     return text
 
 
+def context_used_cell(used, allocated) -> str:
+    """Summary-table cell: used tokens and percent of allocated context."""
+    if used is None or used == "":
+        return "—"
+    if allocated is None or allocated == "" or allocated == 0:
+        return str(used)
+    percent = round(100 * float(used) / float(allocated))
+    return f"{used} ({percent}%)"
+
+
 def tokens_label(tokens: dict | None) -> str:
     tokens = tokens or {}
     estimate = " (estimated)" if tokens.get("split") == "estimated" else ""
@@ -601,7 +611,6 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             verdict = result["sections"].get("Verdict", "—")
             timing = result["timing"]
             evaluated = seconds(timing.get("evaluation_seconds"))
-            wall = seconds(timing.get("wall_seconds"))
             load = seconds(timing.get("load_duration_seconds"))
             tokens = result.get("tokens") or {}
             context = result.get("context") or {}
@@ -614,7 +623,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
                 f'<td>{e(verdict)}</td><td class="{e(status)}">{e(status)}</td>'
                 f'<td>{len(result["unknown_evidence_ids"])}</td><td>{evaluated}</td>'
                 f'<td>{e(think)}</td>'
-                f'<td>{e(display(used))}</td><td>{e(display(allocated))}</td>'
+                f'<td>{e(context_used_cell(used, allocated))}</td><td>{e(display(allocated))}</td>'
                 f'<td>{e(display(tokens.get("input_tokens")))}</td>'
                 f'<td>{e(display(tokens.get("thinking_tokens")))}</td>'
                 f'<td>{e(display(tokens.get("output_tokens")))}</td>'

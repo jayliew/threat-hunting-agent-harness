@@ -1,6 +1,6 @@
 # MVP answer keys — human grading only
 
-These keys cover the six current ECS evidence packages. Keep this file out of model prompts. The harness sends the selected JSONL events; it does not load these keys. Grade only what the supplied events justify, not the author's hidden scenario intent.
+These keys cover the seven current ECS evidence packages. Keep this file out of model prompts. The harness sends the selected JSONL events; it does not load these keys. Grade only what the supplied events justify, not the author's hidden scenario intent.
 
 ## How to grade
 
@@ -14,7 +14,7 @@ For each response, mark three checks **pass** or **fail**, with a short reason:
 
 Record output-format validity separately using the harness. An analytical case passes when all three checks pass. If the answer is invalid or truncated, record that execution/format failure; do not silently omit it from results. Model names can be hidden during grading to reduce bias.
 
-Expected verdicts below are the preferred assessments under the harness's definitions: `suspicious` means potentially malicious, not proven malicious; `benign` applies to the observed activity, not the entire environment. None of these six is designed as an inconclusive case. Review a well-supported alternative manually and record your reason; do not accept generic uncertainty as a substitute for analyzing the available context. Apply the same judgment to every model.
+Expected verdicts below are the preferred assessments under the harness's definitions: `suspicious` means potentially malicious, not proven malicious; `benign` applies to the observed activity, not the entire environment; `inconclusive` applies when the supplied evidence does not support either assessment. Case c07 tests that last judgment. Review a well-supported alternative manually and record your reason; do not accept generic uncertainty as a substitute for analyzing the available context. Apply the same judgment to every model.
 
 Exact wording is not required. Threat-type synonyms are acceptable. Counts and precise timing below are reference facts, not requirements to recite every number. Approximate timing is fine. A short paragraph can pass. Representative citations are sufficient when they support the stated relationships; models need not cite every listed event or reproduce an exact evidence set. Distinguish a benign alternative offered as a hypothesis from a benign explanation actually supported by records.
 
@@ -23,7 +23,7 @@ Suggested worksheet:
 | Model/configuration | Case | Format valid | Interpretation | Evidence | Restraint | Failure/review note |
 | --- | --- | --- | --- | --- | --- | --- |
 
-Run each case as a fresh conversation. To select all six from the repository directory, use `uv run python compare_models.py --logs logs/*.jsonl`. The default list may cover fewer cases. All records in a file belong to that case's independent scenario; do not join reused addresses across files.
+Run each case as a fresh conversation. The default comparison covers all seven cases; `uv run python compare_models.py --logs logs/*.jsonl` also selects all seven from the repository directory. All records in a file belong to that case's independent scenario; do not join reused addresses across files.
 
 ## c01 — HTTP beaconing
 
@@ -120,3 +120,19 @@ Run each case as a fresh conversation. To select all six from the repository dir
 **Appropriate uncertainty:** The pattern is consistent with ordinary retries behind shared egress. The actual cause of each failure (such as a typo) is not recorded. MFA and verified device bindings support the explanation but do not categorically exclude abuse.
 
 **Must not claim:** Confirmed spraying solely from shared IP, that MFA proves absence of compromise, password reuse, observed password typos, or that successful password validation alone issued a fully authenticated application session.
+
+## c07 — Opaque sync transfers
+
+**Input:** [opaque-sync-transfers.jsonl](../logs/opaque-sync-transfers.jsonl) — 8 events.
+
+**Expected verdict:** `inconclusive`. **Threat type:** `none`; a possible data-transfer risk may be discussed as a hypothesis in the summary.
+
+**Must notice:** `10.47.12.104` resolves `sync-gateway.example.net` to `203.0.113.84` and makes two established, uninspected TLS connections to that address. The connections carry substantial outbound bytes. An inventory record shows a file-sync client installed on the host, but does not link it to either connection or configure that destination. Endpoint process/network attribution is unavailable during both transfers. The records support neither a verified managed sync nor a specific malicious transfer.
+
+**Reference facts:** The two flows end at 09:04:45 and 09:11:52 UTC, sending 8 MiB and 10 MiB respectively, with 64 KiB and 80 KiB returned. DNS answers at 09:03:02 and 09:10:05 map the queried name to the flow destination. The sensor is disconnected from 09:01 to 09:13:30, and the recovery event says buffered events for that interval are unavailable. The unrelated internal portal flow does not explain the external transfers.
+
+**Supporting evidence:** `c07-e003`, `c07-e004`, `c07-e006`, `c07-e007` establish the DNS/flow relationship and transfer sizes. `c07-e001` records installed software without a destination or process link. `c07-e002` and `c07-e008` establish the attribution gap. Cite representative DNS/flow events plus the software and sensor context; the internal flow `c07-e005` is optional background.
+
+**Appropriate uncertainty:** The hostname and installed client make legitimate sync plausible, while the upload-heavy external flows merit investigation. Neither the TLS payload nor the originating process, transfer purpose, destination ownership, or authorization is supplied. A passing answer identifies those limits and explains why they prevent a firmer verdict. A well-supported `suspicious` alternative should be reviewed manually under the common rubric rather than rejected solely for its label.
+
+**Must not claim:** Confirmed exfiltration, malware, deliberate sensor tampering, that the installed client produced the flows, that the hostname proves a trusted service, or that an established TLS connection proves a successful file upload. The sensor gap limits attribution; it is not itself evidence of attacker interference.

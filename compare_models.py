@@ -48,6 +48,7 @@ DEFAULT_SCENARIO_LOGS = [
     "logs/shared-vpn-logins.jsonl",
     "logs/managed-telemetry.jsonl",
     "logs/scheduled-discovery.jsonl",
+    "logs/opaque-sync-transfers.jsonl",
 ]
 OUTPUT_ROOT = Path(__file__).parent / "results"
 DEFAULT_PROFILES_DIR = Path(__file__).parent / "profiles"

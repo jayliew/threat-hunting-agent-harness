@@ -340,6 +340,13 @@ class DurationFormatTests(unittest.TestCase):
         self.assertEqual(compare_models.duration_seconds_one_decimal(1.01), "1.1s")
         self.assertEqual(compare_models.duration_seconds_one_decimal(1.001), "1.1s")
 
+    def test_collapsible_run_details_default_closed(self):
+        html = compare_models.collapsible_run_details("line one<br>line two")
+        self.assertIn('<details class="run-details">', html)
+        self.assertIn("<summary>Show run details</summary>", html)
+        self.assertNotIn("<details class=\"run-details\" open", html)
+        self.assertIn("line one<br>line two", html)
+
 
 class ContextUsedCellTests(unittest.TestCase):
     def test_includes_percent_of_allocated(self):
@@ -736,6 +743,7 @@ class ComparisonTests(unittest.TestCase):
         }
         compare_models.write_report(directory, manifest, [result])
         html = (directory / 'report.html').read_text()
+        self.assertIn('<summary>Show run details</summary>', html)
         self.assertIn('Thinking: enabled', html)
         self.assertIn('Thinking: 12 (estimated)', html)
         self.assertIn('Output: 28 (estimated)', html)

@@ -602,6 +602,16 @@ def format_num_predict(value: object) -> str:
     return str(value)
 
 
+def collapsible_run_details(inner_html: str) -> str:
+    """Wrap run metadata; collapsed until the reader opens it."""
+    return (
+        '<details class="run-details">'
+        '<summary>Show run details</summary>'
+        f'<div class="run-details-body">{inner_html}</div>'
+        "</details>"
+    )
+
+
 def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
     """Static, escaped HTML: model responses are displayed only as text."""
     e = lambda value: escape(str(value))
@@ -617,12 +627,15 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             quant = quantization_label(model)
             show_thinking_tokens = think != "not supported"
             if result is None:
-                cards.append(
-                    f'<article><h3>{name}</h3><p class="pending">Pending</p>'
-                    f'<p>{e(context_label(model.get("num_ctx", settings.get("num_ctx")), None, model.get("context_length")))}<br>'
+                pending_details = (
+                    f'{e(context_label(model.get("num_ctx", settings.get("num_ctx")), None, model.get("context_length")))}<br>'
                     f'{framing_note(model)}'
                     f'Quantization: {e(quant)}<br>Thinking: {e(think)}<br>'
-                    f'{e(tokens_label(None, include_thinking=show_thinking_tokens))}</p></article>'
+                    f'{e(tokens_label(None, include_thinking=show_thinking_tokens))}'
+                )
+                cards.append(
+                    f'<article><h3>{name}</h3><p class="pending">Pending</p>'
+                    f'{collapsible_run_details(pending_details)}</article>'
                 )
                 continue
             status = result["status"]
@@ -656,15 +669,18 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             )
             thinking = (f'<details><summary>Thinking trace</summary><pre>{e(result["thinking"])}</pre></details>'
                         if result["thinking"] else '')
-            cards.append(
-                f'<article><h3>{name}</h3><p class="{e(status)}">{e(status)} · {evaluated}</p>'
-                f'<p>{e(context_label(allocated, used, model_max))}<br>'
+            run_details = (
+                f'{e(context_label(allocated, used, model_max))}<br>'
                 f'{framing_note(model)}'
                 f'Quantization: {e(quant)}<br>'
                 f'Thinking: {e(think)}<br>'
                 f'{e(tokens_label(tokens, include_thinking=show_thinking_tokens))}<br>'
                 f'Prompt processing: {duration_seconds_one_decimal(timing.get("prompt_eval_duration_seconds"))} · '
-                f'Generation: {duration_seconds_one_decimal(timing.get("eval_duration_seconds"))}</p>'
+                f'Generation: {duration_seconds_one_decimal(timing.get("eval_duration_seconds"))}'
+            )
+            cards.append(
+                f'<article><h3>{name}</h3><p class="{e(status)}">{e(status)} · {evaluated}</p>'
+                f'{collapsible_run_details(run_details)}'
                 f'{warning_html}{error_html}<pre>{e(result["raw_content"]) or "No answer returned."}</pre>{thinking}</article>'
             )
         sections.append(f'<section><h2>{e(case["name"])}</h2><div class="answers">{"".join(cards)}</div></section>')
@@ -680,6 +696,8 @@ th,td{text-align:left;padding:10px 14px;border-bottom:1px solid #2e3a48}th{backg
 article{padding:20px;border:1px solid #2e3a48;border-radius:10px;background:#1a222c;min-width:0}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,monospace}
 .ok{color:#3dd68c}.invalid,.error{color:#f07178}.warn{color:#e6b450}.pending{color:#8b9aab}summary{cursor:pointer}
+.run-details{margin:8px 0 12px}.run-details summary{display:inline-block;padding:6px 12px;border:1px solid #2e3a48;border-radius:6px;background:#222c38;color:#e7edf3;font-size:14px;list-style:none}
+.run-details summary::-webkit-details-marker{display:none}.run-details-body{margin-top:8px;color:#9aa8b5;line-height:1.6}
 @media(max-width:600px){body{padding:16px}.answers{grid-auto-flow:row;grid-template-columns:1fr}}
 </style></head><body><main>'''
     html += (f'<h1>Threat hunt model comparison</h1><p>{e(manifest["created_at"])} · '

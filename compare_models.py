@@ -520,10 +520,10 @@ def framing_note(model: dict) -> str:
 
 
 def quantization_label(model: dict) -> str:
+    """Quantization and size for the report. Omit file format (for example gguf)."""
     parts = [
         model.get("quantization_level"),
         model.get("parameter_size"),
-        model.get("format"),
     ]
     return " · ".join(part for part in parts if part) or "—"
 

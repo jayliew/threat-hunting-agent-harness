@@ -361,7 +361,7 @@ class ResultsDirectoryNameTests(unittest.TestCase):
 
 
 class DefaultScenarioLogsTests(unittest.TestCase):
-    def test_default_scenario_logs_include_all_six_fixtures(self):
+    def test_default_scenario_logs_include_all_seven_fixtures(self):
         self.assertEqual(
             compare_models.DEFAULT_SCENARIO_LOGS,
             [
@@ -371,6 +371,7 @@ class DefaultScenarioLogsTests(unittest.TestCase):
                 "logs/shared-vpn-logins.jsonl",
                 "logs/managed-telemetry.jsonl",
                 "logs/scheduled-discovery.jsonl",
+                "logs/opaque-sync-transfers.jsonl",
             ],
         )
 

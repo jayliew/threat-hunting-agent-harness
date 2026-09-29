@@ -248,7 +248,7 @@ class HuntTests(unittest.TestCase):
             self.assertEqual(run.call_args.args[:2], ('foundation-sec-alpha:latest', EVENTS))
             self.assertIn(ANSWER, out.getvalue())
             self.assertIn(
-                'Tokens: input 80 · thinking 0 · output 40 (exact) · context 120 / '
+                'Tokens: input 80 · output 40 (exact) · context 120 / '
                 f'{harness.NUM_CTX}',
                 out.getvalue(),
             )
@@ -332,6 +332,13 @@ class DurationFormatTests(unittest.TestCase):
         self.assertEqual(compare_models.seconds(1.5), "0m 1.50s")
         self.assertEqual(compare_models.seconds(90.5), "1m 30.50s")
         self.assertEqual(compare_models.seconds(125.2), "2m 5.20s")
+
+    def test_duration_seconds_one_decimal_rounds_up(self):
+        self.assertEqual(compare_models.duration_seconds_one_decimal(None), "—")
+        self.assertEqual(compare_models.duration_seconds_one_decimal(0.2), "0.2s")
+        self.assertEqual(compare_models.duration_seconds_one_decimal(1.3), "1.3s")
+        self.assertEqual(compare_models.duration_seconds_one_decimal(1.01), "1.1s")
+        self.assertEqual(compare_models.duration_seconds_one_decimal(1.001), "1.1s")
 
 
 class ContextUsedCellTests(unittest.TestCase):
@@ -588,7 +595,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(rows[0]['context']['used'], 120)
         self.assertEqual(rows[0]['context']['limit'], 'ok')
         self.assertEqual(rows[0]['warnings'], [])
-        self.assertIn('Thinking: 0', html)
+        self.assertNotIn('Thinking: 0', html)
+        self.assertIn('Input: 80', html)
+        self.assertIn('Output: 40', html)
         self.assertEqual(rows[0]['context']['allocated'], harness.NUM_CTX)
         self.assertFalse(rows[0]['request']['shift'])
         manifest = json.loads((directory / 'manifest.json').read_text())

@@ -15,6 +15,7 @@ import argparse
 from datetime import datetime
 from html import escape
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -507,6 +508,16 @@ def seconds(value: float | None) -> str:
     return f"-{text}" if value < 0 else text
 
 
+def duration_seconds_one_decimal(value: float | None) -> str:
+    """Format seconds rounded up to one decimal place (for prompt/generation timing)."""
+    if value is None:
+        return "—"
+    total = float(value)
+    sign = "-" if total < 0 else ""
+    rounded = math.ceil(abs(total) * 10) / 10
+    return f"{sign}{rounded:.1f}s"
+
+
 def display(value) -> str:
     return "—" if value is None or value == "" else str(value)
 
@@ -566,16 +577,22 @@ def context_used_cell(used, allocated) -> str:
     return f"{used} ({percent}%)"
 
 
-def tokens_label(tokens: dict | None) -> str:
+def tokens_label(tokens: dict | None, *, include_thinking: bool = True) -> str:
     tokens = tokens or {}
     estimate = " (estimated)" if tokens.get("split") == "estimated" else ""
-    return (
-        f"Input: {display(tokens.get('input_tokens'))} · "
-        f"Thinking: {display(tokens.get('thinking_tokens'))}{estimate} · "
-        f"Output: {display(tokens.get('output_tokens'))}{estimate} · "
-        f"Cached: {display(tokens.get('prompt_eval_cached_count'))} · "
-        f"Uncached: {display(tokens.get('prompt_uncached_count'))}"
+    parts = [f"Input: {display(tokens.get('input_tokens'))}"]
+    if include_thinking:
+        parts.append(
+            f"Thinking: {display(tokens.get('thinking_tokens'))}{estimate}"
+        )
+    parts.extend(
+        [
+            f"Output: {display(tokens.get('output_tokens'))}{estimate}",
+            f"Cached: {display(tokens.get('prompt_eval_cached_count'))}",
+            f"Uncached: {display(tokens.get('prompt_uncached_count'))}",
+        ]
     )
+    return " · ".join(parts)
 
 
 def format_num_predict(value: object) -> str:
@@ -598,13 +615,14 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             name = e(slot_label(model))
             think = thinking_label(result, model, settings)
             quant = quantization_label(model)
+            show_thinking_tokens = think != "not supported"
             if result is None:
                 cards.append(
                     f'<article><h3>{name}</h3><p class="pending">Pending</p>'
                     f'<p>{e(context_label(model.get("num_ctx", settings.get("num_ctx")), None, model.get("context_length")))}<br>'
                     f'{framing_note(model)}'
                     f'Quantization: {e(quant)}<br>Thinking: {e(think)}<br>'
-                    f'{e(tokens_label(None))}</p></article>'
+                    f'{e(tokens_label(None, include_thinking=show_thinking_tokens))}</p></article>'
                 )
                 continue
             status = result["status"]
@@ -616,6 +634,9 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             allocated = context.get("allocated", model.get("num_ctx", settings.get("num_ctx")))
             used = context.get("used")
             model_max = context.get("model_max", model.get("context_length"))
+            thinking_tokens_cell = (
+                display(tokens.get("thinking_tokens")) if show_thinking_tokens else "—"
+            )
             rows.append(
                 f'<tr><td>{e(case["name"])}</td><td>{name}</td>'
                 f'<td>{e(quant)}</td>'
@@ -624,7 +645,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
                 f'<td>{e(think)}</td>'
                 f'<td>{e(context_used_cell(used, allocated))}</td><td>{e(display(allocated))}</td>'
                 f'<td>{e(display(tokens.get("input_tokens")))}</td>'
-                f'<td>{e(display(tokens.get("thinking_tokens")))}</td>'
+                f'<td>{e(thinking_tokens_cell)}</td>'
                 f'<td>{e(display(tokens.get("output_tokens")))}</td>'
                 f'<td>{e(display(tokens.get("prompt_eval_cached_count")))}</td></tr>'
             )
@@ -641,9 +662,9 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
                 f'{framing_note(model)}'
                 f'Quantization: {e(quant)}<br>'
                 f'Thinking: {e(think)}<br>'
-                f'{e(tokens_label(tokens))}<br>'
-                f'Prompt processing: {seconds(timing.get("prompt_eval_duration_seconds"))} · '
-                f'Generation: {seconds(timing.get("eval_duration_seconds"))}</p>'
+                f'{e(tokens_label(tokens, include_thinking=show_thinking_tokens))}<br>'
+                f'Prompt processing: {duration_seconds_one_decimal(timing.get("prompt_eval_duration_seconds"))} · '
+                f'Generation: {duration_seconds_one_decimal(timing.get("eval_duration_seconds"))}</p>'
                 f'{warning_html}{error_html}<pre>{e(result["raw_content"]) or "No answer returned."}</pre>{thinking}</article>'
             )
         sections.append(f'<section><h2>{e(case["name"])}</h2><div class="answers">{"".join(cards)}</div></section>')

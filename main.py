@@ -304,13 +304,15 @@ def format_token_report(result: dict) -> str:
     def show(value) -> str:
         return "unknown" if value is None else str(value)
 
-    return (
-        f"Tokens: input {show(tokens.get('input_tokens'))} · "
-        f"thinking {show(tokens.get('thinking_tokens'))} · "
+    parts = [f"Tokens: input {show(tokens.get('input_tokens'))}"]
+    if "think" in result.get("request", {}):
+        parts.append(f"thinking {show(tokens.get('thinking_tokens'))}")
+    parts.append(
         f"output {show(tokens.get('output_tokens'))} "
         f"({tokens.get('split') or 'unknown'}) · "
         f"context {show(context.get('used'))} / {show(context.get('allocated'))}"
     )
+    return " · ".join(parts)
 
 
 FOUNDATION_SEC_MARKERS = ("<|system|>", "<|user|>", "<|assistant|>")

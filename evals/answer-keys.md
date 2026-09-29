@@ -33,7 +33,7 @@ Run each case as a fresh conversation. To select all six from the repository dir
 
 **Must notice:** `10.47.12.88` repeatedly contacts `203.0.113.77:443` with near-five-minute timing and small, stable byte counts. The combination supports automated beacon-like behavior distinct from the surrounding traffic. Calling it merely "HTTPS traffic" misses the pattern.
 
-**Reference facts:** Twelve `GET /api/heartbeat` requests, all HTTP 204, with the same user-agent. Intervals average about 300.4 seconds and range from 287.3 to 314.3 seconds. Sent counts are 187–218 bytes and received counts 65–92 bytes.
+**Reference facts:** Twelve `GET /nmtyxs/?12840192` requests, all HTTP 204, with the same user-agent. Intervals average about 300.4 seconds and range from 287.3 to 314.3 seconds. Sent counts are 187–218 bytes and received counts 65–92 bytes.
 
 **Supporting evidence:** `c01-e006`, `c01-e011`, `c01-e016`, `c01-e020`, `c01-e023`, `c01-e024`, `c01-e027`, `c01-e031`, `c01-e035`, `c01-e038`, `c01-e041`, `c01-e043`. For example, several early and later requests support recurrence; a single request does not establish periodicity. Slack traffic (`c01-e003`, `c01-e017`, `c01-e026`, `c01-e036`) is a useful comparison, not required citation material.
 

@@ -1,6 +1,6 @@
 # MVP answer keys — human grading only
 
-These keys cover the six current ECS evidence packages. Keep this file out of model prompts. The harness sends the selected JSONL events; it does not load these keys. Grade only what the supplied events justify, not the author's hidden scenario intent.
+These keys cover the six current ECS evidence packages. Keep this file out of model prompts. The harness sends the selected JSONL events; it does not load these keys. Grade only what ****the supplied events justify, not the author's hidden scenario intent.
 
 ## How to grade
 

@@ -668,6 +668,11 @@ class ComparisonTests(unittest.TestCase):
         compare_models.write_report(directory, manifest, [])
         html = (directory / 'report.html').read_text()
         self.assertIn('num_predict=-1 (no limit)', html)
+        self.assertIn(
+            'These are the harness fallbacks unless a profile overrides them',
+            html,
+        )
+        self.assertIn('not necessarily what each model was sent', html)
 
     def test_report_shows_thinking_tokens_and_context_warning(self):
         directory = self.root / 'think'

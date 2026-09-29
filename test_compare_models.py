@@ -674,6 +674,11 @@ class ComparisonTests(unittest.TestCase):
         compare_models.write_report(directory, manifest, [])
         html = (directory / 'report.html').read_text()
         self.assertIn('num_predict=-1 (no limit)', html)
+        self.assertIn(
+            'These are the harness fallbacks unless a profile overrides them',
+            html,
+        )
+        self.assertIn('not necessarily what each model was sent', html)
 
     def test_report_shows_thinking_tokens_and_context_warning(self):
         directory = self.root / 'think'
@@ -762,13 +767,25 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertEqual(profile["source"], "profiles/qwen3-32b.profile")
         self.assertEqual(
             profile["fields"],
-            {"model": "qwen3:32b", "thinking": "true", "num_ctx": "40960"},
+            {
+                "model": "qwen3:32b",
+                "thinking": "true",
+                "num_ctx": "40960",
+                "temperature": "0.6",
+                "top_p": "0.95",
+                "top_k": "20",
+            },
         )
         self.assertEqual(compare_models.profile_num_ctx(profile), 40960)
         self.assertIs(compare_models.profile_think(profile), True)
+        self.assertEqual(
+            compare_models.profile_sampling(profile),
+            {"temperature": 0.6, "top_p": 0.95, "top_k": 20},
+        )
         self.assertIn("# weight_precision=Developer Q8_0", profile["text"])
         self.assertIn("# kv_cache=Q8_0", profile["text"])
         self.assertIn("# repeat_penalty=1.0", profile["text"])
+        self.assertIn("# basis: Qwen's explicit thinking-mode recommendation", profile["text"])
 
     def test_checked_in_profiles_match_the_planned_setups(self):
         expected = {
@@ -794,17 +811,44 @@ class DeclaredProfileTests(unittest.TestCase):
                 None,
             ),
         }
+        sampling = {
+            "qwen3-32b.profile": ("0.6", 0.6, "0.95", 0.95, "20", 20),
+            "llama3.3-70b.profile": ("0.2", 0.2, "0.90", 0.9, "40", 40),
+            "granite4.2-30b.profile": ("1.0", 1.0, "0.95", 0.95, "40", 40),
+            "deepseek-r1-32b.profile": ("0.6", 0.6, "0.95", 0.95, "40", 40),
+            "command-r.profile": ("0.3", 0.3, "0.90", 0.9, "40", 40),
+            "gemma4-31b.profile": ("1.0", 1.0, "0.95", 0.95, "64", 64),
+            "mistral-small3.2-24b.profile": ("0.15", 0.15, "0.90", 0.9, "40", 40),
+            "mistral-nemo-12b.profile": ("0.3", 0.3, "0.90", 0.9, "40", 40),
+            "foundation-sec-8b-instruct.profile": ("0.2", 0.2, "0.90", 0.9, "40", 40),
+        }
         root = Path(__file__).resolve().parent / "profiles"
         for name, (model, text, number, thinking, parsed) in expected.items():
             profile = compare_models.parse_profile_file(root / name)
-            fields = {"model": model, "num_ctx": text}
+            temperature, temperature_value, top_p, top_p_value, top_k, top_k_value = sampling[name]
+            fields = {
+                "model": model,
+                "num_ctx": text,
+                "temperature": temperature,
+                "top_p": top_p,
+                "top_k": top_k,
+            }
             if thinking is not None:
                 fields["thinking"] = thinking
             self.assertEqual(profile["fields"], fields)
+            self.assertEqual(
+                compare_models.profile_sampling(profile),
+                {
+                    "temperature": temperature_value,
+                    "top_p": top_p_value,
+                    "top_k": top_k_value,
+                },
+            )
             self.assertEqual(compare_models.profile_num_ctx(profile), number)
             self.assertEqual(compare_models.profile_think(profile), parsed)
             self.assertIn("# weight_precision=", profile["text"])
             self.assertIn("# repeat_penalty=", profile["text"])
+            self.assertIn("# basis:", profile["text"])
             if thinking is None:
                 self.assertIn("# thinking=", profile["text"])
             if name == "granite4.2-30b.profile":
@@ -881,6 +925,47 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertEqual(manifest["request_settings"]["num_ctx"], harness.NUM_CTX)
         html = (directory / "report.html").read_text()
         self.assertIn("used 120 / allocated 16384", html)
+
+    def test_profile_sampling_is_sent(self):
+        self.write_profile(
+            "alpha.profile",
+            "model=foundation-sec-alpha\n"
+            "temperature=0.2\n"
+            "top_p=0.90\n"
+            "top_k=40\n",
+        )
+        api = client()
+        with contextlib.redirect_stdout(io.StringIO()):
+            compare_models.run_comparison(
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        options = api.chat.call_args.kwargs["options"]
+        self.assertEqual(options["temperature"], 0.2)
+        self.assertEqual(options["top_p"], 0.9)
+        self.assertEqual(options["top_k"], 40)
+
+    def test_profile_without_sampling_keeps_temperature_zero(self):
+        self.write_profile("alpha.profile", "model=foundation-sec-alpha\n")
+        api = client()
+        with contextlib.redirect_stdout(io.StringIO()):
+            compare_models.run_comparison(
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        options = api.chat.call_args.kwargs["options"]
+        self.assertEqual(options["temperature"], harness.TEMPERATURE)
+        self.assertNotIn("top_p", options)
+        self.assertNotIn("top_k", options)
+
+    def test_bad_sampling_stops_before_chat(self):
+        self.write_profile("alpha.profile", "model=foundation-sec-alpha\ntop_p=1.5\n")
+        api = client()
+        with self.assertRaises(ValueError) as error:
+            compare_models.run_comparison(
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        self.assertIn("top_p must be a decimal from 0 through 1", str(error.exception))
+        self.assertFalse(api.chat.called)
+        self.assertFalse((self.root / "results").exists())
 
     def test_profile_without_num_ctx_uses_fallback(self):
         self.write_profile("alpha.profile", "model=foundation-sec-alpha\n")
@@ -991,7 +1076,7 @@ class DeclaredProfileTests(unittest.TestCase):
             "alpha.profile",
             "model=foundation-sec-alpha\n"
             "weight_quant=Q6_K\n"
-            "temperature=<script>alert(1)</script>\n"
+            "note=<script>alert(1)</script>\n"
             "kv_cache=f16\n",
         )
         api = client()
@@ -1011,6 +1096,11 @@ class DeclaredProfileTests(unittest.TestCase):
             self.assertIn("Q4_K_M", manifest["profiles"][0]["quantization_note"])
             report = saved[0].with_name("report.html").read_text()
             self.assertIn("Declared profiles", report)
+            self.assertIn(
+                "Uncommented profile values drive the Ollama request",
+                report,
+            )
+            self.assertIn("this block is the archived source file", report)
             self.assertIn("0 / 1 runs recorded", report)
             self.assertNotIn("<script>", report)
             self.assertIn("&lt;script&gt;", report)

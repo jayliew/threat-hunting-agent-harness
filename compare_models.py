@@ -466,7 +466,7 @@ def slot_label(model: dict) -> str:
 
 
 def declared_profiles_html(manifest: dict) -> str:
-    """Show the profile written down before inference, separate from the request."""
+    """Show the archived profile source file that drove each model's request."""
     blocks = []
     for model in manifest.get("models") or []:
         name = escape(slot_label(model))
@@ -488,8 +488,9 @@ def declared_profiles_html(manifest: dict) -> str:
         return ""
     return (
         "<h2>Declared profiles</h2>"
-        "<p>Recorded before inference. These notes are the setup you wrote down. "
-        "They are not the request sent to Ollama.</p>"
+        "<p>Recorded before inference. Uncommented profile values drive the Ollama "
+        "request; this block is the archived source file, including comments and "
+        "fields that are not chat options.</p>"
         f'<div class="answers">{"".join(blocks)}</div>'
     )
 

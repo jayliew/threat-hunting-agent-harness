@@ -45,7 +45,7 @@ The evidence serializer escapes `<`, `>`, and `&` using JSON Unicode escapes. Th
 
 ## Demo scenarios
 
-Use the [private MVP answer keys](evals/answer-keys.md) to grade all six cases manually. They define expected assessments, supporting evidence, and unsupported claims; keep them out of the model prompt.
+Use the [private MVP answer keys](evals/answer-keys.md) to grade all seven cases manually. They define expected assessments, supporting evidence, and unsupported claims; keep them out of the model prompt.
 
 ### Password spray (`logs/password-spray.jsonl`)
 
@@ -68,7 +68,7 @@ Default single-hunt file for `main.py`. Synthetic [ECS](https://www.elastic.co/d
 The hour of traffic mixes ordinary work with a low-and-slow HTTP check-in:
 
 - `jlee` on `ws-014.corp.internal` (`10.47.12.88`) browses Office, GitHub, and LinkedIn, and syncs Outlook (`outlook.office365.com` / `198.51.100.30`) on an irregular schedule with varying payload sizes.
-- The same host also issues `GET /api/heartbeat` to `203.0.113.77:443` (a documentation IP, no hostname) about every 300 seconds with a few seconds of jitter, tiny stable byte counts, and an identical short user-agent. Those twelve events are `c01-e006`, `c01-e011`, `c01-e016`, `c01-e020`, `c01-e023`, `c01-e024`, `c01-e027`, `c01-e031`, `c01-e035`, `c01-e038`, `c01-e041`, and `c01-e043`.
+- The same host also issues `GET /nmtyxs/?12840192` to `203.0.113.77:443` (a documentation IP, no hostname) about every 300 seconds with a few seconds of jitter, tiny stable byte counts, and an identical short user-agent. Those twelve events are `c01-e006`, `c01-e011`, `c01-e016`, `c01-e020`, `c01-e023`, `c01-e024`, `c01-e027`, `c01-e031`, `c01-e035`, `c01-e038`, `c01-e041`, and `c01-e043`.
 - Cover traffic that can look periodic if you only glance at timestamps: Windows Update from `asmith` / `ws-022` (large, variable bodies), Slack presence polls from `bnguyen` / `ws-008` (~15 minutes apart with high jitter and changing sizes), plus DNS, NTP, and SMB.
 
 Ground truth for instructors (not present in the logs): verdict `suspicious`, threat type HTTP/C2 beaconing, evidence = the twelve `event.id`s to `203.0.113.77`.
@@ -154,6 +154,8 @@ The harness queries Ollama (`/api/show`) and sends `think` only when the model l
 
 Both `main.py` and `compare_models.py` always send `num_predict=-1` (no output-token limit). Thinking tokens and the final answer still share the configured `num_ctx`. A full context window is an error. A reply that stops with `done_reason=length` is still a failed hunt.
 
+Every chat also sends `options.seed=0` (`SEED` in `main.py`). That is the API form of Ollama's `/set parameter seed 0` and Modelfile `PARAMETER seed 0`. When `seed` is absent, Ollama uses `-1`, and a negative seed selects a new random seed on each run. Seed `0` is a fixed seed.
+
 ## Compare models across scenarios
 
 Each model used in a test or eval has its own file in `profiles/`. The file is that model's setup for the run: which installed Ollama name to call, and the request values to use for it. Ollama and the model's Modelfile already have defaults, such as `PARAMETER num_ctx`. An uncommented profile value is sent on the chat request and may override those defaults for that call. `num_ctx` is the eval context window. The harness sends it as `options.num_ctx`, which replaces the Modelfile context size and Ollama's default for the request. A `#` line stays in the file for a later change and leaves the Ollama or Modelfile default in place. Blank lines are ignored.
@@ -187,7 +189,7 @@ Edit the `MODELS` and `DEFAULT_SCENARIO_LOGS` lists at the top of `compare_model
 uv run python compare_models.py
 ```
 
-The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all six scenarios: password spray, HTTP beaconing, internal network scanning, shared VPN logins (`logs/shared-vpn-logins.jsonl`), managed telemetry (`logs/managed-telemetry.jsonl`), and scheduled discovery (`logs/scheduled-discovery.jsonl`): 18 runs. Use names from `ollama list`. All configured models and input files are checked before inference starts, including whether the installed Ollama chat template is the native framing for that model family; missing models, unrecognized names, and models with the wrong template are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
+The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all seven scenarios: password spray, HTTP beaconing, internal network scanning, shared VPN logins (`logs/shared-vpn-logins.jsonl`), managed telemetry (`logs/managed-telemetry.jsonl`), scheduled discovery (`logs/scheduled-discovery.jsonl`), and opaque sync transfers (`logs/opaque-sync-transfers.jsonl`): 21 runs. Use names from `ollama list`. All configured models and input files are checked before inference starts, including whether the installed Ollama chat template is the native framing for that model family; missing models, unrecognized names, and models with the wrong template are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
 
 You can override the lists without editing code:
 
@@ -203,9 +205,9 @@ Log paths are relative to the script (or absolute); a supplied output directory 
 - `report.html`: open in a browser for a dark-themed summary table and full answers side by side, grouped by case. Declared profiles appear above the table, including models with none recorded. Each model card and the summary table include quantization, thinking mode (enabled / disabled / not supported), context used vs allocated, and token counts (input, thinking, output, cached, uncached). A near-full context window is shown as a warning. Thinking traces can be expanded when present. Output, profile, and error text are HTML-escaped.
 - `declared-profiles/`: a copy of each matching profile, written before inference. The initial report already lists those profiles at `0 / N` runs recorded.
 - `results.jsonl`: one row per attempted model/case pair, saved immediately. Includes full raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages/options, prompt and input hashes, model digest, the declared profile path when one matched, timings, token counts, and context allocated/used.
-- `manifest.json`: selected models (digest, capabilities, quantization, native context, and the `num_ctx` sent for that model), declared profiles, plus shared request settings (`num_ctx` as the fallback when a profile does not set one, `num_predict`, `think`, `shift`, `kv_cache_type`) and input file identities. Pending cases remain visible in the report if the process is interrupted.
+- `manifest.json`: selected models (digest, capabilities, quantization, native context, and the `num_ctx` sent for that model), declared profiles, plus shared request settings (`num_ctx` as the fallback when a profile does not set one, `num_predict`, `seed`, `think`, `shift`, `kv_cache_type`) and input file identities. Pending cases remain visible in the report if the process is interrupted.
 
-Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Sampling comes from the matched profile's `temperature`, `top_p`, and `top_k`. A missing `temperature` line uses `0` from `TEMPERATURE` in `main.py`, and missing `top_p` and `top_k` lines are omitted. `num_predict` (`-1`, no output-token limit) and context shift come from `main.py`. The context window is the matched profile's `num_ctx`, or `NUM_CTX` when that line is absent. The thinking mode is the matched profile's `thinking` line, or `THINK` when that line is absent, and it is placed on the request before the chat call when the model lists the thinking capability. Context shift is sent for every model. The last case for each model requests unloading afterward. Each Ollama HTTP request waits until it finishes. Pass `--timeout` with a positive number of seconds to limit one request; `--timeout none` is the same unlimited wait as the default. It is not a total batch deadline.
+Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Sampling comes from the matched profile's `temperature`, `top_p`, and `top_k`. A missing `temperature` line uses `0` from `TEMPERATURE` in `main.py`, and missing `top_p` and `top_k` lines are omitted. `seed` (`0`, a fixed seed), `num_predict` (`-1`, no output-token limit), and context shift come from `main.py`. The context window is the matched profile's `num_ctx`, or `NUM_CTX` when that line is absent. The thinking mode is the matched profile's `thinking` line, or `THINK` when that line is absent, and it is placed on the request before the chat call when the model lists the thinking capability. Context shift is sent for every model. The last case for each model requests unloading afterward. Each Ollama HTTP request waits until it finishes. Pass `--timeout` with a positive number of seconds to limit one request; `--timeout none` is the same unlimited wait as the default. It is not a total batch deadline.
 
 Invalid, empty, truncated, and failed responses are retained. An individual inference error does not stop the remaining cases. The report updates after every saved result. Exit status is nonzero if any run is invalid or failed, if any run meets or exceeds the configured context window, if preflight fails, or if execution is interrupted; completed results remain available.
 
@@ -231,6 +233,7 @@ uv run python -m unittest -v
 | `logs/shared-vpn-logins.jsonl` | Optional demo: ECS shared-VPN logins that look like spraying |
 | `logs/managed-telemetry.jsonl` | Optional demo: ECS managed check-ins that look like beaconing |
 | `logs/scheduled-discovery.jsonl` | Optional demo: ECS authorized scanning that looks like an internal scan |
+| `logs/opaque-sync-transfers.jsonl` | Optional demo: ECS host and network evidence with an inconclusive transfer assessment |
 | `test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |
 | `test_compare_models.py` | Unit tests for the comparison matrix, HTML report, and the shared hunt runner |
 | `pyproject.toml` | Project metadata and the `ollama` client |

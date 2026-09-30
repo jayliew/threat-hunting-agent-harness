@@ -41,6 +41,10 @@ NUM_CTX = 32768
 # full window is still an error (apply_context_limit). done_reason=length
 # still fails the hunt when generation stops because the context is full.
 NUM_PREDICT = -1
+# Ollama /set parameter seed 0 (Modelfile: PARAMETER seed 0).
+# Always send options.seed. When seed is absent, Ollama uses -1, and a
+# negative seed selects a new random seed each run. 0 is a fixed seed.
+SEED = 0
 # Fallback sampling temperature when the matched profile has no temperature
 # line. top_p and top_k are omitted unless that profile sets them.
 TEMPERATURE = 0
@@ -555,10 +559,12 @@ Assess the supplied security events for evidence of a threat.
 - Base factual claims only on the supplied events. Do not invent users, addresses, timestamps, or event IDs.
 - Distinguish observations from hypotheses. Do not claim a specific attack or successful compromise unless the evidence supports it.
 - Cite event identifiers exactly as supplied in event.id. Do not invent identifiers or use ID ranges.
+- For a benign verdict, the Evidence field must cite both the observed activity and the records that corroborate its routine or authorized explanation.
 
 ## Decision rules
+- Choose exactly one verdict for every case: suspicious, benign, or inconclusive. Inconclusive is a valid final assessment; do not force a benign or suspicious choice when the evidence is insufficient or conflicting.
 - suspicious: the events support a potentially malicious pattern or activity.
-- benign: the supplied activity is consistent with ordinary, non-malicious behavior; this does not establish that the wider environment is safe.
+- benign: choose only when the supplied events positively support a routine or authorized explanation for the observed activity. A plausible explanation or absence of threat indicators alone is insufficient. This does not establish that the wider environment is safe.
 - inconclusive: the evidence is insufficient or conflicting and does not support either assessment.
 - Name the most specific threat type supported by the events, or use none if no specific type is supported.
 
@@ -573,7 +579,10 @@ Summary: one short paragraph describing the observations and relevant uncertaint
 Evidence: comma-separated event IDs supporting the assessment, or none
 """.strip()
 
-USER_TASK = "Assess the security events below and return the four fields specified in the instructions."
+USER_TASK = (
+    "Assess the security events below. Choose one verdict: suspicious, benign, "
+    "or inconclusive. Return the four fields specified in the instructions."
+)
 # These are ordinary application delimiters, not reserved LLM control tokens.
 EVIDENCE_START = "<security_events>"
 EVIDENCE_END = "</security_events>"
@@ -748,7 +757,12 @@ def run_hunt(
     allocated = NUM_CTX if num_ctx is None else num_ctx
     requested_think = THINK if think is None else think
     messages = build_messages(events)
-    options = {"temperature": TEMPERATURE, "num_ctx": allocated, "num_predict": NUM_PREDICT}
+    options = {
+        "temperature": TEMPERATURE,
+        "seed": SEED,
+        "num_ctx": allocated,
+        "num_predict": NUM_PREDICT,
+    }
     if sampling:
         options.update(sampling)
     tokens = empty_tokens()
@@ -971,6 +985,7 @@ def main() -> None:
     compare_models.annotate_result(result, slot, cases[0])
     compare_models.save_result(directory, manifest, [], result)
     print(f"KV cache type (server OLLAMA_KV_CACHE_TYPE): {KV_CACHE_TYPE}")
+    print(f"Seed: {SEED}")
     effective_think = result["request"].get("think")
     print(f"Thinking: {effective_think if effective_think is not None else 'unsupported or unavailable'}")
     if result["thinking"]:

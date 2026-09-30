@@ -64,12 +64,21 @@ class HuntTests(unittest.TestCase):
         self.assertEqual(result['timing']['eval_duration_seconds'], 1.3)
         self.assertEqual(result['timing']['evaluation_seconds'], 1.5)
         self.assertEqual(api.chat.call_args.kwargs['think'], harness.THINK)
+        self.assertEqual(api.chat.call_args.kwargs['options']['seed'], harness.SEED)
+        self.assertEqual(result['request']['options']['seed'], harness.SEED)
         self.assertEqual(result['request']['kv_cache_type'], harness.KV_CACHE_TYPE)
         self.assertEqual(harness.KV_CACHE_TYPE, 'f16')
         self.assertNotIn('kv_cache_type', api.chat.call_args.kwargs)
         self.assertFalse(api.chat.call_args.kwargs['shift'])
         self.assertFalse(result['request']['shift'])
         self.assertEqual(len(api.chat.call_args.kwargs['messages']), 2)
+        messages = api.chat.call_args.kwargs['messages']
+        self.assertIn('suspicious, benign, or inconclusive', messages[0]['content'])
+        self.assertIn('suspicious, benign, or inconclusive', messages[1]['content'])
+        self.assertIn('A plausible explanation or absence of threat indicators alone is insufficient.',
+                      messages[0]['content'])
+        self.assertIn('the Evidence field must cite both the observed activity and the records that corroborate',
+                      messages[0]['content'])
         self.assertFalse(api.show.called)
         self.assertEqual(result['tokens']['prompt_eval_count'], 80)
         self.assertEqual(result['tokens']['eval_count'], 40)
@@ -115,6 +124,8 @@ class HuntTests(unittest.TestCase):
         self.assertFalse(api.stream)
         self.assertEqual(api.body['options']['num_ctx'], harness.NUM_CTX)
         self.assertEqual(api.body['options']['num_predict'], -1)
+        self.assertEqual(api.body['options']['seed'], 0)
+        self.assertEqual(result['request']['options']['seed'], harness.SEED)
         self.assertEqual(result['request']['options']['num_predict'], harness.NUM_PREDICT)
 
     def test_invalid_evidence_and_partial_answer_are_preserved(self):
@@ -330,6 +341,16 @@ class DurationFormatTests(unittest.TestCase):
         self.assertEqual(compare_models.seconds(125.2), "2m 5.20s")
 
 
+class ContextUsedCellTests(unittest.TestCase):
+    def test_includes_percent_of_allocated(self):
+        self.assertEqual(compare_models.context_used_cell(None, 32768), "—")
+        self.assertEqual(compare_models.context_used_cell(120, None), "120")
+        self.assertEqual(compare_models.context_used_cell(120, 0), "120")
+        self.assertEqual(compare_models.context_used_cell(120, 32768), "120 (0%)")
+        self.assertEqual(compare_models.context_used_cell(30000, 32768), "30000 (92%)")
+        self.assertEqual(compare_models.context_used_cell(32768, 32768), "32768 (100%)")
+
+
 class ResultsDirectoryNameTests(unittest.TestCase):
     def test_eastern_daylight_sunday_morning(self):
         when = datetime(2026, 9, 20, 13, 28, tzinfo=timezone.utc)
@@ -347,7 +368,7 @@ class ResultsDirectoryNameTests(unittest.TestCase):
 
 
 class DefaultScenarioLogsTests(unittest.TestCase):
-    def test_default_scenario_logs_include_all_six_fixtures(self):
+    def test_default_scenario_logs_include_all_seven_fixtures(self):
         self.assertEqual(
             compare_models.DEFAULT_SCENARIO_LOGS,
             [
@@ -357,6 +378,7 @@ class DefaultScenarioLogsTests(unittest.TestCase):
                 "logs/shared-vpn-logins.jsonl",
                 "logs/managed-telemetry.jsonl",
                 "logs/scheduled-discovery.jsonl",
+                "logs/opaque-sync-transfers.jsonl",
             ],
         )
 
@@ -562,6 +584,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('Quantization: —', html)
         self.assertIn('Thinking: not supported', html)
         self.assertIn(f'used 120 / allocated {harness.NUM_CTX}', html)
+        self.assertIn(compare_models.context_used_cell(120, harness.NUM_CTX), html)
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
         self.assertEqual(rows[0]['tokens']['prompt_eval_count'], 80)
         self.assertEqual(rows[0]['tokens']['eval_count'], 40)
@@ -578,8 +601,10 @@ class ComparisonTests(unittest.TestCase):
         self.assertFalse(rows[0]['request']['shift'])
         manifest = json.loads((directory / 'manifest.json').read_text())
         self.assertEqual(manifest['request_settings']['num_ctx'], harness.NUM_CTX)
+        self.assertEqual(manifest['request_settings']['seed'], harness.SEED)
         self.assertEqual(manifest['request_settings']['kv_cache_type'], harness.KV_CACHE_TYPE)
         self.assertFalse(manifest['request_settings']['shift'])
+        self.assertIn('seed=0', html)
         self.assertIn('Context shift is disabled for every model.', html)
         self.assertIsNone(manifest['models'][0]['quantization_level'])
         self.assertIn(f'kv_cache_type={harness.KV_CACHE_TYPE}', html)
@@ -668,6 +693,11 @@ class ComparisonTests(unittest.TestCase):
         compare_models.write_report(directory, manifest, [])
         html = (directory / 'report.html').read_text()
         self.assertIn('num_predict=-1 (no limit)', html)
+        self.assertIn(
+            'These are the harness fallbacks unless a profile overrides them',
+            html,
+        )
+        self.assertIn('not necessarily what each model was sent', html)
 
     def test_report_shows_thinking_tokens_and_context_warning(self):
         directory = self.root / 'think'
@@ -1085,6 +1115,11 @@ class DeclaredProfileTests(unittest.TestCase):
             self.assertIn("Q4_K_M", manifest["profiles"][0]["quantization_note"])
             report = saved[0].with_name("report.html").read_text()
             self.assertIn("Declared profiles", report)
+            self.assertIn(
+                "Uncommented profile values drive the Ollama request",
+                report,
+            )
+            self.assertIn("this block is the archived source file", report)
             self.assertIn("0 / 1 runs recorded", report)
             self.assertNotIn("<script>", report)
             self.assertIn("&lt;script&gt;", report)
@@ -1105,6 +1140,7 @@ class DeclaredProfileTests(unittest.TestCase):
         rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
         self.assertTrue(rows[0]["declared_profile"].endswith("alpha.profile"))
         self.assertEqual(api.chat.call_args.kwargs["options"]["temperature"], 0)
+        self.assertEqual(api.chat.call_args.kwargs["options"]["seed"], harness.SEED)
 
     def test_missing_profile_is_recorded_as_absent(self):
         api = client()

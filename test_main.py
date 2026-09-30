@@ -24,6 +24,7 @@ from main import (
     chat_template_error,
     chat_think_kwargs,
     installed_renderer,
+    installed_model_error,
     context_limit,
     context_usage,
     empty_tokens,
@@ -513,6 +514,27 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertIn("PARAMETER stop <|end_of_text|>", text)
         self.assertNotIn("<|start_header_id|>", text)
         self.assertNotIn("{{ .Prompt }}", template)
+
+    def test_foundation_sec_parser_and_stops(self) -> None:
+        from types import SimpleNamespace
+
+        info = SimpleNamespace(
+            template="<|system|>\n<|user|>\n<|assistant|>\n",
+            modelfile="",
+            parameters='stop "<|end_of_text|>"\n',
+        )
+        name = "foundation-sec-8b-instruct:latest"
+        self.assertIsNone(installed_model_error(name, info))
+        info.modelfile = "PARSER llama3\n"
+        self.assertIn("without a PARSER", installed_model_error(name, info))
+        info.modelfile = ""
+        for parameters in (None, "", 'stop "<|eot_id|>"',
+                           'stop "<|end_of_text|>"\nstop "Verdict:"'):
+            with self.subTest(parameters=parameters):
+                info.parameters = parameters
+                self.assertIn("must use only stop", installed_model_error(name, info))
+        info.parameters = 'stop "unterminated'
+        self.assertIn("malformed stop", installed_model_error(name, info))
 
     def test_inspect_installed_model_blocks_before_chat(self) -> None:
         api = Mock()

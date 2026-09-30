@@ -11,6 +11,7 @@ import hashlib
 import inspect
 import json
 import re
+import shlex
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -469,13 +470,45 @@ def chat_template_error(
     return None
 
 
+def installed_model_error(model: str, info) -> str | None:
+    """Validate native framing and Foundation-Sec's plain-text/EOS contract."""
+    modelfile = getattr(info, "modelfile", None)
+    error = chat_template_error(model, info.template or "", installed_renderer(modelfile))
+    if error:
+        return error
+    framing = expected_chat_framing(model)
+    if framing is None or framing.label != "Foundation-Sec-8B-Instruct":
+        return None
+    # This checkpoint emits plain text, without a thinking or tool-call parser.
+    if isinstance(modelfile, str) and re.search(r"(?im)^\s*PARSER\s+\S+", modelfile):
+        return f"{model!r} must use plain-text output without a PARSER directive. {FOUNDATION_SEC_HINT}"
+    parameters = getattr(info, "parameters", None)
+    stops = []
+    if isinstance(parameters, str):
+        try:
+            for line in parameters.splitlines():
+                parts = shlex.split(line)
+                if parts and parts[0].lower() == "stop":
+                    if len(parts) != 2:
+                        raise ValueError("invalid stop parameter")
+                    stops.append(parts[1])
+        except ValueError:
+            return f"{model!r} has malformed stop parameters. {FOUNDATION_SEC_HINT}"
+    if set(stops) != {"<|end_of_text|>"}:
+        return (
+            f"{model!r} must use only stop <|end_of_text|>; installed stops: {stops!r}. "
+            f"{FOUNDATION_SEC_HINT}"
+        )
+    return None
+
+
 def inspect_installed_model(client: Client, model: str) -> tuple[str, list[str], str | None]:
     """Read /api/show and refuse models whose framing is not the trained one."""
     info = client.show(model)
     template = info.template or ""
     capabilities = list(info.capabilities or [])
     renderer = installed_renderer(getattr(info, "modelfile", None))
-    error = chat_template_error(model, template, renderer)
+    error = installed_model_error(model, info)
     if error:
         raise ValueError(error)
     return template, capabilities, renderer
@@ -505,7 +538,7 @@ def preflight_models_and_logs(
                 raise ValueError("model does not support text completion")
             template = info.template or ""
             renderer = installed_renderer(getattr(info, "modelfile", None))
-            error = chat_template_error(canonical, template, renderer)
+            error = installed_model_error(canonical, info)
             if error:
                 raise ValueError(error)
             selected.append({
@@ -801,6 +834,9 @@ def run_hunt(
     try:
         if capabilities is None:
             info = client.show(model)
+            error = installed_model_error(model, info)
+            if error:
+                raise ValueError(error)
             capabilities = info.capabilities or []
             if not inspected_template:
                 result["chat_template"] = info.template or ""

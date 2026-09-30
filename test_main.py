@@ -9,7 +9,11 @@ from unittest.mock import Mock
 
 from ollama import ChatResponse, Message
 
-from main import (
+from model_config import (
+    chat_template_error, installed_renderer, installed_model_error, is_bare_prompt_template, inspect_installed_model,
+)
+
+from harness import (
     CONTEXT_WARN_RATIO,
     EVIDENCE_END,
     EVIDENCE_START,
@@ -21,17 +25,12 @@ from main import (
     allowed_evidence_ids,
     event_id,
     event_sort_key,
-    chat_template_error,
     chat_think_kwargs,
-    installed_renderer,
-    installed_model_error,
     context_limit,
     context_usage,
     empty_tokens,
     incomplete_response_message,
-    inspect_installed_model,
     invalid_hunt_output_message,
-    is_bare_prompt_template,
     load_security_events,
     model_detail_fields,
     native_context_length,

@@ -48,6 +48,8 @@ def client():
     result.show.return_value.template = (
         "<|system|>\n{{ .System }}\n<|user|>\n{{ .Content }}\n<|assistant|>\n"
     )
+    result.show.return_value.parameters = 'stop "<|end_of_text|>"\n'
+    result.show.return_value.modelfile = ""
     result.chat.return_value = response()
     return result
 
@@ -160,6 +162,25 @@ class HuntTests(unittest.TestCase):
         self.assertIsNone(result['timing']['evaluation_seconds'])
         self.assertEqual(result['tokens'], harness.empty_tokens())
         self.assertIsNone(result['context']['used'])
+
+    def test_foundation_configuration_blocks_both_entry_points(self):
+        for modelfile, parameters, expected in (
+            ("PARSER llama3\n", 'stop "<|end_of_text|>"', "without a PARSER"),
+            ("", 'stop "<|eot_id|>"', "must use only stop"),
+            ("", "", "must use only stop"),
+        ):
+            with self.subTest(modelfile=modelfile, parameters=parameters):
+                api = client()
+                api.show.return_value.modelfile = modelfile
+                api.show.return_value.parameters = parameters
+                with self.assertRaisesRegex(ValueError, expected):
+                    compare_models.prepare_comparison(
+                        api, ['foundation-sec-alpha'], ['logs/http-beaconing.jsonl']
+                    )
+                result = harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api)
+                self.assertEqual(result['status'], 'error')
+                self.assertIn(expected, result['error'])
+                api.chat.assert_not_called()
 
     def test_run_hunt_records_native_context_from_show(self):
         api = client()
@@ -618,6 +639,7 @@ class ComparisonTests(unittest.TestCase):
             return SimpleNamespace(
                 capabilities=['completion', 'thinking'] if thinking else ['completion'],
                 template=template,
+                parameters='stop "<|end_of_text|>"\n',
                 details=SimpleNamespace(
                     quantization_level='Q4_K_M' if thinking else 'Q8_0',
                     parameter_size='32.8B' if thinking else '8B',

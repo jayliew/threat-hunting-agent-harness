@@ -105,7 +105,9 @@ ollama pull hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF
 ollama create foundation-sec-8b-instruct -f Modelfile.foundation-sec-8b-instruct
 ```
 
-The pull installs `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest`. That name has no native chat template (`{{ .Prompt }}`). The `ollama create` step is required so the script default `foundation-sec-8b-instruct` sends `<|system|>`, `<|user|>`, and `<|assistant|>`. Another installed name is usable when preflight recognizes that family's chat template; pass it with `--model`.
+The pull installs `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest`. That name has no native chat template (`{{ .Prompt }}`). The `ollama create` step is required so the script default `foundation-sec-8b-instruct` sends `<|system|>`, `<|user|>`, and `<|assistant|>`. Re-run that create command after updating the Modelfile to refresh an existing wrapper; it reuses the downloaded weights. Another installed name is usable when preflight recognizes that family's chat template; pass it with `--model`.
+
+Foundation-Sec uses plain-text output with no Ollama `PARSER` directive, and its only configured stop sequence must be `<|end_of_text|>` (EOS token 128001 in the [upstream generation configuration](https://huggingface.co/fdtn-ai/Foundation-Sec-8B-Instruct/blob/main/generation_config.json)). Both CLIs validate those settings through the shared preflight before inference. The wrapper also appends EOS to completed assistant turns, matching the upstream chat template. The harness parses the returned text into `Verdict`, `Threat type`, `Summary`, and `Evidence`; that application parser is separate from Ollama's output parser.
 
 4. From this repo, install Python deps and run a hunt. Default is the HTTP-beaconing file and `foundation-sec-8b-instruct`:
 

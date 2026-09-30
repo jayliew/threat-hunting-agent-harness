@@ -559,11 +559,12 @@ Assess the supplied security events for evidence of a threat.
 - Base factual claims only on the supplied events. Do not invent users, addresses, timestamps, or event IDs.
 - Distinguish observations from hypotheses. Do not claim a specific attack or successful compromise unless the evidence supports it.
 - Cite event identifiers exactly as supplied in event.id. Do not invent identifiers or use ID ranges.
+- For a benign verdict, the Evidence field must cite both the observed activity and the records that corroborate its routine or authorized explanation.
 
 ## Decision rules
 - Choose exactly one verdict for every case: suspicious, benign, or inconclusive. Inconclusive is a valid final assessment; do not force a benign or suspicious choice when the evidence is insufficient or conflicting.
 - suspicious: the events support a potentially malicious pattern or activity.
-- benign: the supplied activity is consistent with ordinary, non-malicious behavior; this does not establish that the wider environment is safe.
+- benign: choose only when the supplied events positively support a routine or authorized explanation for the observed activity. A plausible explanation or absence of threat indicators alone is insufficient. This does not establish that the wider environment is safe.
 - inconclusive: the evidence is insufficient or conflicting and does not support either assessment.
 - Name the most specific threat type supported by the events, or use none if no specific type is supported.
 

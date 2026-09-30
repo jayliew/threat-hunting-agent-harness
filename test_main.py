@@ -118,9 +118,14 @@ class BuildMessagesTests(unittest.TestCase):
         self.assertEqual([m["role"] for m in messages], ["system", "user"])
         self.assertTrue(all(set(m) == {"role", "content"} for m in messages))
         self.assertEqual(messages[0]["content"], SYSTEM_PROMPT)
+        self.assertIn(
+            "Choose exactly one verdict for every case: suspicious, benign, or inconclusive.",
+            messages[0]["content"],
+        )
         self.assertNotIn("ignore prior instructions", messages[0]["content"])
         user = messages[1]["content"]
         self.assertTrue(user.startswith(USER_TASK))
+        self.assertIn("Choose one verdict: suspicious, benign, or inconclusive.", user)
         self.assertTrue(user.endswith(EVIDENCE_END))
         payload = user.split(EVIDENCE_START + "\n", 1)[1].rsplit("\n" + EVIDENCE_END, 1)[0]
         self.assertEqual(json.loads(payload), events)

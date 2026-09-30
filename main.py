@@ -561,6 +561,7 @@ Assess the supplied security events for evidence of a threat.
 - Cite event identifiers exactly as supplied in event.id. Do not invent identifiers or use ID ranges.
 
 ## Decision rules
+- Choose exactly one verdict for every case: suspicious, benign, or inconclusive. Inconclusive is a valid final assessment; do not force a benign or suspicious choice when the evidence is insufficient or conflicting.
 - suspicious: the events support a potentially malicious pattern or activity.
 - benign: the supplied activity is consistent with ordinary, non-malicious behavior; this does not establish that the wider environment is safe.
 - inconclusive: the evidence is insufficient or conflicting and does not support either assessment.
@@ -577,7 +578,10 @@ Summary: one short paragraph describing the observations and relevant uncertaint
 Evidence: comma-separated event IDs supporting the assessment, or none
 """.strip()
 
-USER_TASK = "Assess the security events below and return the four fields specified in the instructions."
+USER_TASK = (
+    "Assess the security events below. Choose one verdict: suspicious, benign, "
+    "or inconclusive. Return the four fields specified in the instructions."
+)
 # These are ordinary application delimiters, not reserved LLM control tokens.
 EVIDENCE_START = "<security_events>"
 EVIDENCE_END = "</security_events>"

@@ -45,7 +45,7 @@ The evidence serializer escapes `<`, `>`, and `&` using JSON Unicode escapes. Th
 
 ## Demo scenarios
 
-Use the [private MVP answer keys](evals/answer-keys.md) to grade all six cases manually. They define expected assessments, supporting evidence, and unsupported claims; keep them out of the model prompt.
+Use the [private MVP answer keys](evals/answer-keys.md) to grade all seven cases manually. They define expected assessments, supporting evidence, and unsupported claims; keep them out of the model prompt.
 
 ### Password spray (`logs/password-spray.jsonl`)
 
@@ -189,7 +189,7 @@ Edit the `MODELS` and `DEFAULT_SCENARIO_LOGS` lists at the top of `compare_model
 uv run python compare_models.py
 ```
 
-The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all six scenarios: password spray, HTTP beaconing, internal network scanning, shared VPN logins (`logs/shared-vpn-logins.jsonl`), managed telemetry (`logs/managed-telemetry.jsonl`), and scheduled discovery (`logs/scheduled-discovery.jsonl`): 18 runs. Use names from `ollama list`. All configured models and input files are checked before inference starts, including whether the installed Ollama chat template is the native framing for that model family; missing models, unrecognized names, and models with the wrong template are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
+The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all seven scenarios: password spray, HTTP beaconing, internal network scanning, shared VPN logins (`logs/shared-vpn-logins.jsonl`), managed telemetry (`logs/managed-telemetry.jsonl`), scheduled discovery (`logs/scheduled-discovery.jsonl`), and opaque sync transfers (`logs/opaque-sync-transfers.jsonl`): 21 runs. Use names from `ollama list`. All configured models and input files are checked before inference starts, including whether the installed Ollama chat template is the native framing for that model family; missing models, unrecognized names, and models with the wrong template are reported together and are never downloaded automatically. Names without a tag resolve to `:latest` when that installed name exists.
 
 You can override the lists without editing code:
 
@@ -233,6 +233,7 @@ uv run python -m unittest -v
 | `logs/shared-vpn-logins.jsonl` | Optional demo: ECS shared-VPN logins that look like spraying |
 | `logs/managed-telemetry.jsonl` | Optional demo: ECS managed check-ins that look like beaconing |
 | `logs/scheduled-discovery.jsonl` | Optional demo: ECS authorized scanning that looks like an internal scan |
+| `logs/opaque-sync-transfers.jsonl` | Optional demo: ECS host and network evidence with an inconclusive transfer assessment |
 | `test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |
 | `test_compare_models.py` | Unit tests for the comparison matrix, HTML report, and the shared hunt runner |
 | `pyproject.toml` | Project metadata and the `ollama` client |

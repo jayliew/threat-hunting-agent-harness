@@ -1,18 +1,18 @@
 # ECS lookalike evidence packages
 
-These three synthetic, selected evidence excerpts are intended to test false positives and evidence-based uncertainty. They are not full captures, authentic vendor exports, or proof that the surrounding environment is safe. All public IPs are documentation addresses; example.net names and organization-specific products are fictional. Filenames and these instructor notes are not sent to the model by the harness.
+These four synthetic, selected evidence excerpts are intended to test false positives and evidence-based uncertainty. They are not full captures, authentic vendor exports, or proof that the surrounding environment is safe. All public IPs are documentation addresses; example.net names and organization-specific products are fictional. Filenames and these instructor notes are not sent to the model by the harness.
 
 ## Representation and collection semantics
 
 Each `.jsonl` line is one JSON event document using nested [Elastic Common Schema 8.17](https://www.elastic.co/guide/en/ecs/8.17/index.html) fields. These are document bodies, not Elasticsearch Bulk API action/document pairs; use a JSON/NDJSON ingestion pipeline and ECS-compatible mappings for Elasticsearch. No cluster or index setup is included.
 
 - `@timestamp`: UTC ISO 8601 occurrence time with milliseconds. For firewall flow summaries it is the flow end time; `event.start`, `event.end`, and `event.duration` supply the interval. Durations are integer **nanoseconds**.
-- `event.id`: short string in the form `c01-e001`, with a neutral case prefix and an event number. IDs are unique across the six files; prefixes do not encode the expected verdict. Keep existing IDs stable when reordering or extending a case. `event.created`: later collector read time. `event.category` and `event.type` are arrays. `event.outcome` describes the operation, not whether the activity is malicious.
+- `event.id`: short string in the form `c01-e001`, with a neutral case prefix and an event number. IDs are unique across the seven files; prefixes do not encode the expected verdict. Keep existing IDs stable when reordering or extending a case. `event.created`: later collector read time. `event.category` and `event.type` are arrays. `event.outcome` describes the operation, not whether the activity is malicious.
 - Scan connection outcomes (`internal-network-scan.jsonl` and `scheduled-discovery.jsonl`) describe transport connection establishment or a UDP reply: `established`/`replied` → `success`; initial-SYN rejection (`reset`), `timeout`, or `incomplete` handshake → `failure`. Firewall permission is recorded separately by `event.action: allow` or `event.type: allowed`. A SYN/ACK without completion is not an established connection; a reset after a completed handshake does not undo successful establishment. A failed connection does not imply a failed scan job or malicious activity.
 - `event.dataset` identifies the simulated source; `observer` identifies the observing appliance or management system. `host` identifies the endpoint or server on which the recorded event occurred.
 - `http.request.bytes` and `http.response.bytes` count application headers plus body, excluding TCP/TLS overhead. A `204` has zero response-body bytes. The proxy records decrypted HTTPS transactions and explicitly records inspection under `corp.proxy.tls_inspected`.
 - Firewall `source.bytes` and `destination.bytes` count IP packet bytes, including IP/TCP headers, from initiator to responder and back. `network.bytes`/`network.packets` are directional totals. Endpoint connection-start records do not claim complete byte counts.
-- Custom, non-ECS fields live exclusively under `corp`. The `corp.vpn` and `corp.auth` objects contain identity/session/device-binding observations; `corp.deployment` contains applied package configuration; `corp.endpoint` contains a deployment reference; `corp.proxy` contains TLS inspection status; `corp.change`, `corp.asset`, and `corp.scan` contain approval, asset, and job records; `corp.flow` contains normalized state and observed TCP flag unions. These require custom mappings if indexed. The executable SHA-256 is a synthetic fixture value, not a real software reputation indicator.
+- Custom, non-ECS fields live exclusively under `corp`. The `corp.vpn` and `corp.auth` objects contain identity/session/device-binding observations; `corp.deployment` contains applied package configuration; `corp.endpoint` contains deployment or sensor-health details; `corp.proxy` contains TLS inspection status; `corp.change`, `corp.asset`, and `corp.scan` contain approval, asset, and job records; `corp.flow` contains normalized flow details and observed TCP flag unions. These require custom mappings if indexed. The executable SHA-256 is a synthetic fixture value, not a real software reputation indicator.
 
 ## Evidence ID prefixes
 
@@ -24,6 +24,7 @@ Each `.jsonl` line is one JSON event document using nested [Elastic Common Schem
 | `password-spray.jsonl` | `c04` |
 | `scheduled-discovery.jsonl` | `c05` |
 | `shared-vpn-logins.jsonl` | `c06` |
+| `opaque-sync-transfers.jsonl` | `c07` |
 
 Cite IDs verbatim, for example `c01-e006`. Historical reports retain the IDs in their saved input; rerun the updated fixtures when comparing current evidence citations.
 
@@ -51,9 +52,15 @@ Expected assessment: **benign**, threat type **none**, with the summary explicit
 
 Useful evidence includes approval, job start, representative flows across destinations/ports and job completion. Removing approval/execution context should leave scanning visible with authorization unknown. Changing the source, scope, account or time outside the approved window should change the assessment.
 
+## Opaque sync transfers: `opaque-sync-transfers.jsonl`
+
+24 events: one installed-software inventory, three endpoint process starts, two sensor-health records, seven DNS answers, and eleven firewall flow summaries. Two external flows send 8 MiB and 10 MiB to the same documentation IP. The remaining DNS, host, and network records provide surrounding activity from this workstation and another host. The firewall did not inspect the two focal flows' payloads, and the endpoint sensor was disconnected during both.
+
+Expected assessment: **inconclusive**, threat type **none**. The installed sync client and hostname provide a plausible ordinary explanation, but the records do not bind that process to the flows or establish destination ownership or authorization. The transfer sizes warrant investigation, yet they do not prove exfiltration. A model should cite the flows and the attribution gap, then name the evidence needed to resolve the case.
+
 ## Evaluation cautions
 
-See the [private answer keys for all six cases](../evals/answer-keys.md) for the three-check manual grading rubric and current evidence IDs.
+See the [private answer keys for all seven cases](../evals/answer-keys.md) for the three-check manual grading rubric and current evidence IDs.
 
 Keep instructor expectations out of the model prompt. Score supporting and conflicting claims, evidence relevance, and uncertainty separately from output-format validity; do not require every event to be cited.
 

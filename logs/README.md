@@ -54,7 +54,7 @@ Useful evidence includes approval, job start, representative flows across destin
 
 ## Opaque sync transfers: `opaque-sync-transfers.jsonl`
 
-8 events: installed-software inventory, endpoint-sensor disconnect and recovery, two DNS answers, two outbound TLS flow summaries, and one unrelated internal flow. The external flows send 8 MiB and 10 MiB to the same documentation IP. The firewall did not inspect the payload, and the endpoint sensor was disconnected during both flows.
+24 events: one installed-software inventory, three endpoint process starts, two sensor-health records, seven DNS answers, and eleven firewall flow summaries. Two external flows send 8 MiB and 10 MiB to the same documentation IP. The remaining DNS, host, and network records provide surrounding activity from this workstation and another host. The firewall did not inspect the two focal flows' payloads, and the endpoint sensor was disconnected during both.
 
 Expected assessment: **inconclusive**, threat type **none**. The installed sync client and hostname provide a plausible ordinary explanation, but the records do not bind that process to the flows or establish destination ownership or authorization. The transfer sizes warrant investigation, yet they do not prove exfiltration. A model should cite the flows and the attribution gap, then name the evidence needed to resolve the case.
 

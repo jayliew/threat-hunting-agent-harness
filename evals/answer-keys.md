@@ -123,15 +123,15 @@ Run each case as a fresh conversation. The default comparison covers all seven c
 
 ## c07 — Opaque sync transfers
 
-**Input:** [opaque-sync-transfers.jsonl](../logs/opaque-sync-transfers.jsonl) — 8 events.
+**Input:** [opaque-sync-transfers.jsonl](../logs/opaque-sync-transfers.jsonl) — 24 events.
 
 **Expected verdict:** `inconclusive`. **Threat type:** `none`; a possible data-transfer risk may be discussed as a hypothesis in the summary.
 
 **Must notice:** `10.47.12.104` resolves `sync-gateway.example.net` to `203.0.113.84` and makes two established, uninspected TLS connections to that address. The connections carry substantial outbound bytes. An inventory record shows a file-sync client installed on the host, but does not link it to either connection or configure that destination. Endpoint process/network attribution is unavailable during both transfers. The records support neither a verified managed sync nor a specific malicious transfer.
 
-**Reference facts:** The two flows end at 09:04:45 and 09:11:52 UTC, sending 8 MiB and 10 MiB respectively, with 64 KiB and 80 KiB returned. DNS answers at 09:03:02 and 09:10:05 map the queried name to the flow destination. The sensor is disconnected from 09:01 to 09:13:30, and the recovery event says buffered events for that interval are unavailable. The unrelated internal portal flow does not explain the external transfers.
+**Reference facts:** The two flows end at 09:04:45 and 09:11:52 UTC, sending 8 MiB and 10 MiB respectively, with 64 KiB and 80 KiB returned. DNS answers at 09:03:02 and 09:10:05 map the queried name to the flow destination. The sensor is disconnected from 09:01 to 09:13:30, and the recovery event says buffered events for that interval are unavailable. Three other process starts occur before or after that gap; none is linked to either transfer. Other DNS and firewall events show routine-looking internal and external traffic from this workstation and a second host, without explaining the two focal transfers.
 
-**Supporting evidence:** `c07-e003`, `c07-e004`, `c07-e006`, `c07-e007` establish the DNS/flow relationship and transfer sizes. `c07-e001` records installed software without a destination or process link. `c07-e002` and `c07-e008` establish the attribution gap. Cite representative DNS/flow events plus the software and sensor context; the internal flow `c07-e005` is optional background.
+**Supporting evidence:** `c07-e003`, `c07-e004`, `c07-e006`, `c07-e007` establish the DNS/flow relationship and transfer sizes. `c07-e001` records installed software without a destination or process link. `c07-e002` and `c07-e008` establish the attribution gap. `c07-e009`, `c07-e012`, and `c07-e023` show endpoint process telemetry on either side of the gap but do not attribute its network flows. Cite representative DNS/flow events plus the software and sensor context; background events such as `c07-e005`, `c07-e014`, and `c07-e021` are optional comparisons.
 
 **Appropriate uncertainty:** The hostname and installed client make legitimate sync plausible, while the upload-heavy external flows merit investigation. Neither the TLS payload nor the originating process, transfer purpose, destination ownership, or authorization is supplied. A passing answer identifies those limits and explains why they prevent a firmer verdict. A well-supported `suspicious` alternative should be reviewed manually under the common rubric rather than rejected solely for its label.
 

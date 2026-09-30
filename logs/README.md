@@ -1,6 +1,6 @@
 # ECS lookalike evidence packages
 
-These four synthetic, selected evidence excerpts are intended to test false positives and evidence-based uncertainty. They are not full captures, authentic vendor exports, or proof that the surrounding environment is safe. All public IPs are documentation addresses; example.net names and organization-specific products are fictional. Filenames and these instructor notes are not sent to the model by the harness.
+These four synthetic, selected evidence excerpts are intended to test false positives and evidence-based uncertainty. They are not full captures, authentic vendor exports, or proof that the surrounding environment is safe. All public IPs are documentation addresses; jayliew.com names and organization-specific products are fictional. Filenames and these instructor notes are not sent to the model by the harness.
 
 ## Representation and collection semantics
 

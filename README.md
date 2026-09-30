@@ -146,17 +146,17 @@ The script prints the model name, the declared profile, the installed chat templ
 
 Usage at or above 90% of `num_ctx`, while still under that window, prints a warning and does not by itself fail the run. Valid citations do not mean the explanation is right.
 
-Context shift is off for every model, including DeepSeek2. `SHIFT` in `main.py` defaults to `False`, and every chat request sends that value as `shift`. Ollama 0.33 enables context shift when the field is omitted, except for DeepSeek2, and slides older tokens out once `num_ctx` is full. With shift off, a full window stays an error.
+Context shift is off for every model, including DeepSeek2. `SHIFT` in `harness.py` defaults to `False`, and every chat request sends that value as `shift`. Ollama 0.33 enables context shift when the field is omitted, except for DeepSeek2, and slides older tokens out once `num_ctx` is full. With shift off, a full window stays an error.
 
 ## Thinking mode
 
-Before you run, set `THINK` in `main.py` to `True` (on) or `False` (off) for models that support thinking. Do not leave the choice implicit.
+Before you run, set `THINK` in `harness.py` to `True` (on) or `False` (off) for models that support thinking. Do not leave the choice implicit.
 
 The harness queries Ollama (`/api/show`) and sends `think` only when the model lists the `thinking` capability. Models without that capability reject the argument (`does not support thinking`), so it is omitted. Qwen3-class models enable thinking by default when the API omits `think`; for those models the harness always sends `think` explicitly.
 
 Both `main.py` and `compare_models.py` always send `num_predict=-1` (no output-token limit). Thinking tokens and the final answer still share the configured `num_ctx`. A full context window is an error. A reply that stops with `done_reason=length` is still a failed hunt.
 
-Every chat also sends `options.seed=0` (`SEED` in `main.py`). That is the API form of Ollama's `/set parameter seed 0` and Modelfile `PARAMETER seed 0`. When `seed` is absent, Ollama uses `-1`, and a negative seed selects a new random seed on each run. Seed `0` is a fixed seed.
+Every chat also sends `options.seed=0` (`SEED` in `harness.py`). That is the API form of Ollama's `/set parameter seed 0` and Modelfile `PARAMETER seed 0`. When `seed` is absent, Ollama uses `-1`, and a negative seed selects a new random seed on each run. Seed `0` is a fixed seed.
 
 ## Compare models across scenarios
 
@@ -183,7 +183,7 @@ The other recorded setups are `llama3.3:70b` (`num_ctx` 16384), `granite4.2:30b`
 
 Both `main.py` and `compare_models.py` load the chosen profile before the first inference call, print it, and copy it into the results directory. A model with no file is reported as having no declared profile. If an uncommented weight quant differs from the installed Ollama quantization, the report keeps both and notes the difference. A malformed profile, including a `num_ctx` that is not one positive integer written as digits only, stops the run before any results directory is created. Commas are not allowed in that value.
 
-A matched profile's `num_ctx` is the context window sent for that hunt, overriding the model's usual context size. A model with no profile, or a profile with no `num_ctx` line, uses 32768 from `NUM_CTX` in `main.py`. An uncommented `thinking` line is resolved before inference and sent as the Ollama `think` argument (`true`, `false`, `low`, `medium`, or `high`) when the installed model lists the thinking capability. A profile that sets `thinking` for a model without that capability stops the run before any chat call. A profile with no `thinking` line uses `THINK` in `main.py`. An uncommented `temperature`, `top_p`, or `top_k` line is sent as the matching Ollama sampling option. A missing `temperature` line uses `0` from `TEMPERATURE` in `main.py`. Missing `top_p` and `top_k` lines are left off the request. `temperature` is a non-negative decimal, `top_p` is a decimal from 0 through 1, and `top_k` is a positive integer; commas and other text stop the run before any results directory is created. Weight precision, KV cache, and repeat penalty stay commented out. The saved profile is what distinguishes two runs of the same model when those settings later differ.
+A matched profile's `num_ctx` is the context window sent for that hunt, overriding the model's usual context size. A model with no profile, or a profile with no `num_ctx` line, uses 32768 from `NUM_CTX` in `harness.py`. An uncommented `thinking` line is resolved before inference and sent as the Ollama `think` argument (`true`, `false`, `low`, `medium`, or `high`) when the installed model lists the thinking capability. A profile that sets `thinking` for a model without that capability stops the run before any chat call. A profile with no `thinking` line uses `THINK` in `harness.py`. An uncommented `temperature`, `top_p`, or `top_k` line is sent as the matching Ollama sampling option. A missing `temperature` line uses `0` from `TEMPERATURE` in `harness.py`. Missing `top_p` and `top_k` lines are left off the request. `temperature` is a non-negative decimal, `top_p` is a decimal from 0 through 1, and `top_k` is a positive integer; commas and other text stop the run before any results directory is created. Weight precision, KV cache, and repeat penalty stay commented out. The saved profile is what distinguishes two runs of the same model when those settings later differ.
 
 Edit the `MODELS` and `DEFAULT_SCENARIO_LOGS` lists at the top of `compare_models.py`, then run:
 
@@ -209,7 +209,7 @@ Log paths are relative to the script (or absolute); a supplied output directory 
 - `results.jsonl`: one row per attempted model/case pair, saved immediately. Includes full raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages/options, prompt and input hashes, model digest, the declared profile path when one matched, timings, token counts, and context allocated/used.
 - `manifest.json`: selected models (digest, capabilities, quantization, native context, and the `num_ctx` sent for that model), declared profiles, plus shared request settings (`num_ctx` as the fallback when a profile does not set one, `num_predict`, `seed`, `think`, `shift`, `kv_cache_type`) and input file identities. Pending cases remain visible in the report if the process is interrupted.
 
-Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Sampling comes from the matched profile's `temperature`, `top_p`, and `top_k`. A missing `temperature` line uses `0` from `TEMPERATURE` in `main.py`, and missing `top_p` and `top_k` lines are omitted. `seed` (`0`, a fixed seed), `num_predict` (`-1`, no output-token limit), and context shift come from `main.py`. The context window is the matched profile's `num_ctx`, or `NUM_CTX` when that line is absent. The thinking mode is the matched profile's `thinking` line, or `THINK` when that line is absent, and it is placed on the request before the chat call when the model lists the thinking capability. Context shift is sent for every model. The last case for each model requests unloading afterward. Each Ollama HTTP request waits until it finishes. Pass `--timeout` with a positive number of seconds to limit one request; `--timeout none` is the same unlimited wait as the default. It is not a total batch deadline.
+Runs are sequential and grouped by model to reduce repeated loading. Every case receives a fresh conversation. Sampling comes from the matched profile's `temperature`, `top_p`, and `top_k`. A missing `temperature` line uses `0` from `TEMPERATURE` in `harness.py`, and missing `top_p` and `top_k` lines are omitted. `seed` (`0`, a fixed seed), `num_predict` (`-1`, no output-token limit), and context shift come from `harness.py`. The context window is the matched profile's `num_ctx`, or `NUM_CTX` when that line is absent. The thinking mode is the matched profile's `thinking` line, or `THINK` when that line is absent, and it is placed on the request before the chat call when the model lists the thinking capability. Context shift is sent for every model. The last case for each model requests unloading afterward. Each Ollama HTTP request waits until it finishes. Pass `--timeout` with a positive number of seconds to limit one request; `--timeout none` is the same unlimited wait as the default. It is not a total batch deadline.
 
 Invalid, empty, truncated, and failed responses are retained. An individual inference error does not stop the remaining cases. The report updates after every saved result. Exit status is nonzero if any run is invalid or failed, if any run meets or exceeds the configured context window, if preflight fails, or if execution is interrupted; completed results remain available.
 
@@ -221,12 +221,39 @@ Run offline checks with:
 uv run python -m unittest -v
 ```
 
+## Adding a model
+
+Both CLIs use `harness.py` for preflight, prompts, inference, and output validation, `model_profiles.py` for evaluation settings, and `run_reports.py` for saving results. Neither CLI imports the other.
+
+Model package requirements live in `model_formats.toml` and are applied by the generic validator in `model_config.py`. Add an ordered `[[formats]]` rule using the checkpoint's published template and generation settings. Name matching is case-insensitive; the first matching regular expression wins. Include local wrapper names in the pattern when they differ from the upstream name. Unknown names fail preflight. Use either `markers` for an Ollama template or `renderers` for an Ollama built-in renderer.
+
+For example, a future model with ordinary template framing could declare:
+
+```toml
+[[formats]]
+label = "Example Instruct"
+name_pattern = "example-instruct"
+markers = ["<user>", "<assistant>"]
+parsers = []
+required_stops = ["<end>"]
+hint = "Create example-instruct using Modelfile.example-instruct."
+```
+
+Replace these example tokens with the model's actual tokens. `parsers = []` requires no Ollama `PARSER` directive; a nonempty array lists accepted parsers. Omitting `parsers` leaves the parser unconstrained. `required_stops` lists sequences that must be configured. Additional stops are accepted unless `allowed_stops` is present, which restricts them to that list. Foundation-Sec currently declares an exact EOS-only policy; that policy belongs to its registry entry rather than Python conditionals. These are package checks: template marker presence alone does not prove that every rendered conversation matches the training template.
+
+If an imported GGUF lacks correct framing, add a model-specific `Modelfile` and create a local wrapper, as with Foundation-Sec. The registry validates the installed package; it does not download models or rewrite installed templates. Add a `profiles/*.profile` file for that wrapper's evaluation settings. Both CLIs then use the same configuration and validation without changes to their code.
+
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `main.py` | Single-hunt CLI: prompt, log loading, one Ollama chat call (think only if supported), output and evidence-ID validation |
+| `main.py` | Single-hunt CLI using the shared harness, profiles, and report writer |
 | `compare_models.py` | Compare installed Ollama models across the same JSONL scenarios and write a report under `results/` |
+| `harness.py` | Shared defaults, log loading, preflight, prompts, inference, token accounting, and hunt-output validation |
+| `model_config.py` | Generic validation of installed templates, renderers, parsers, and stop sequences |
+| `model_formats.toml` | Ordered, declarative model format requirements |
+| `model_profiles.py` | Shared profile loading, settings validation, and run selection |
+| `run_reports.py` | Shared run directories, profile snapshots, result persistence, and HTML reports |
 | `profiles/*.profile` | Per-model eval setup. Uncommented values may override Ollama and Modelfile defaults for that run |
 | `Modelfile.foundation-sec-8b-instruct` | Native `<|system|>/<|user|>/<|assistant|>` template for the Foundation-Sec GGUF import |
 | `logs/password-spray.jsonl` | Optional demo: ECS login / password-spray events |
@@ -238,6 +265,7 @@ uv run python -m unittest -v
 | `logs/opaque-sync-transfers.jsonl` | Optional demo: ECS host and network evidence with an inconclusive transfer assessment |
 | `test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |
 | `test_compare_models.py` | Unit tests for the comparison matrix, HTML report, and the shared hunt runner |
+| `test_model_config.py` | Config-driven validation for existing and future model packages |
 | `pyproject.toml` | Project metadata and the `ollama` client |
 
 Keep the harness thin so the lesson stays in the open.

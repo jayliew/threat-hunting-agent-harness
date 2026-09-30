@@ -122,6 +122,14 @@ class BuildMessagesTests(unittest.TestCase):
             "Choose exactly one verdict for every case: suspicious, benign, or inconclusive.",
             messages[0]["content"],
         )
+        self.assertIn(
+            "A plausible explanation or absence of threat indicators alone is insufficient.",
+            messages[0]["content"],
+        )
+        self.assertIn(
+            "the Evidence field must cite both the observed activity and the records that corroborate",
+            messages[0]["content"],
+        )
         self.assertNotIn("ignore prior instructions", messages[0]["content"])
         user = messages[1]["content"]
         self.assertTrue(user.startswith(USER_TASK))

@@ -75,6 +75,10 @@ class HuntTests(unittest.TestCase):
         messages = api.chat.call_args.kwargs['messages']
         self.assertIn('suspicious, benign, or inconclusive', messages[0]['content'])
         self.assertIn('suspicious, benign, or inconclusive', messages[1]['content'])
+        self.assertIn('A plausible explanation or absence of threat indicators alone is insufficient.',
+                      messages[0]['content'])
+        self.assertIn('the Evidence field must cite both the observed activity and the records that corroborate',
+                      messages[0]['content'])
         self.assertFalse(api.show.called)
         self.assertEqual(result['tokens']['prompt_eval_count'], 80)
         self.assertEqual(result['tokens']['eval_count'], 40)

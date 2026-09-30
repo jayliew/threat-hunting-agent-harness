@@ -3,6 +3,8 @@
 Runs each selected model against each JSONL log file, then writes a timestamped
 directory under results/ with report.html, results.jsonl, and manifest.json.
 Models are never downloaded; names must already appear in `ollama list`.
+Comparisons use main.run_hunt and its shared three-verdict prompt: suspicious,
+benign, or inconclusive.
 
 Declared model profiles in profiles/*.profile are copied into that directory
 before inference. An uncommented num_ctx line is the context window sent for
@@ -48,6 +50,7 @@ DEFAULT_SCENARIO_LOGS = [
     "logs/shared-vpn-logins.jsonl",
     "logs/managed-telemetry.jsonl",
     "logs/scheduled-discovery.jsonl",
+    "logs/opaque-sync-transfers.jsonl",
 ]
 OUTPUT_ROOT = Path(__file__).parent / "results"
 DEFAULT_PROFILES_DIR = Path(__file__).parent / "profiles"

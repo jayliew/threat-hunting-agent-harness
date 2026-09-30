@@ -72,6 +72,13 @@ class HuntTests(unittest.TestCase):
         self.assertFalse(api.chat.call_args.kwargs['shift'])
         self.assertFalse(result['request']['shift'])
         self.assertEqual(len(api.chat.call_args.kwargs['messages']), 2)
+        messages = api.chat.call_args.kwargs['messages']
+        self.assertIn('suspicious, benign, or inconclusive', messages[0]['content'])
+        self.assertIn('suspicious, benign, or inconclusive', messages[1]['content'])
+        self.assertIn('A plausible explanation or absence of threat indicators alone is insufficient.',
+                      messages[0]['content'])
+        self.assertIn('the Evidence field must cite both the observed activity and the records that corroborate',
+                      messages[0]['content'])
         self.assertFalse(api.show.called)
         self.assertEqual(result['tokens']['prompt_eval_count'], 80)
         self.assertEqual(result['tokens']['eval_count'], 40)
@@ -361,7 +368,7 @@ class ResultsDirectoryNameTests(unittest.TestCase):
 
 
 class DefaultScenarioLogsTests(unittest.TestCase):
-    def test_default_scenario_logs_include_all_six_fixtures(self):
+    def test_default_scenario_logs_include_all_seven_fixtures(self):
         self.assertEqual(
             compare_models.DEFAULT_SCENARIO_LOGS,
             [
@@ -371,6 +378,7 @@ class DefaultScenarioLogsTests(unittest.TestCase):
                 "logs/shared-vpn-logins.jsonl",
                 "logs/managed-telemetry.jsonl",
                 "logs/scheduled-discovery.jsonl",
+                "logs/opaque-sync-transfers.jsonl",
             ],
         )
 

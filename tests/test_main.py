@@ -448,6 +448,11 @@ class ChatTemplateTests(unittest.TestCase):
         qwen35 = chat_template_error("qwen3.5:27b", "<|im_start|>user<|im_end|>")
         self.assertIsNotNone(qwen35)
         self.assertIn("No expected chat template is registered", qwen35)
+        for name in ("phi3:medium", "phi3.5", "phi4"):
+            with self.subTest(name=name):
+                unmatched = chat_template_error(name, "<|system|><|user|><|assistant|><|end|>")
+                self.assertIsNotNone(unmatched)
+                self.assertIn("No expected chat template is registered", unmatched)
 
     def test_each_family_requires_its_own_markers(self) -> None:
         qwen = "<|im_start|>system\n{{ .System }}<|im_end|>"
@@ -469,9 +474,17 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertIsNone(chat_template_error("mistral-small3.2:24b", mistral_small))
         self.assertIsNone(chat_template_error("mistral-nemo:12b", mistral_nemo))
         self.assertIsNone(chat_template_error("granite4.2:30b", qwen))
+        phi3 = (
+            "{{ if .System }}<|system|>\n{{ .System }}<|end|>\n"
+            "{{ end }}{{ if .Prompt }}<|user|>\n{{ .Prompt }}<|end|>\n"
+            "{{ end }}<|assistant|>\n{{ .Response }}<|end|>"
+        )
         self.assertIsNone(chat_template_error("command-r:latest", command_r))
         self.assertIsNone(chat_template_error("cyberpal2-20b:latest", cyberpal))
+        self.assertIsNone(chat_template_error("phi3:medium-128k", phi3))
+        self.assertIsNone(chat_template_error("phi-3-medium-128k", phi3))
         self.assertIsNotNone(chat_template_error("cyberpal2-20b:latest", "{{ .Prompt }}"))
+        self.assertIsNotNone(chat_template_error("phi3:medium-128k", "{{ .Prompt }}"))
         self.assertIsNotNone(chat_template_error("qwen3:32b", "{{ .Prompt }}"))
         self.assertIsNotNone(chat_template_error("qwen3:32b", mistral_small))
         self.assertIsNotNone(chat_template_error("llama3.3:70b", qwen))
@@ -558,6 +571,27 @@ class ChatTemplateTests(unittest.TestCase):
                 self.assertIn("must use only stop", installed_model_error(name, info))
         info.parameters = 'stop "unterminated'
         self.assertIn("malformed stop", installed_model_error(name, info))
+
+    def test_phi3_medium_128k_requires_exact_stops(self) -> None:
+        template = (
+            "{{ if .System }}<|system|>\n{{ .System }}<|end|>\n"
+            "{{ end }}{{ if .Prompt }}<|user|>\n{{ .Prompt }}<|end|>\n"
+            "{{ end }}<|assistant|>\n{{ .Response }}<|end|>"
+        )
+        info = SimpleNamespace(
+            template=template,
+            modelfile="",
+            parameters='stop "<|end|>"\nstop "<|user|>"\nstop "<|assistant|>"\n',
+        )
+        name = "phi3:medium-128k"
+        self.assertIsNone(installed_model_error(name, info))
+        for parameters in (
+            'stop "<|end|>"',
+            'stop "<|end|>"\nstop "<|user|>"\nstop "<|assistant|>"\nstop "<|endoftext|>"',
+        ):
+            with self.subTest(parameters=parameters):
+                info.parameters = parameters
+                self.assertIn("must use only stop", installed_model_error(name, info))
 
     def test_cyberpal_requires_harmony_stops(self) -> None:
         template = (

@@ -137,6 +137,17 @@ required_stops = ["<end>"]
         self.assertEqual(result['context']['used'], 120)
         self.assertEqual(result['context']['limit'], 'ok')
         self.assertEqual(result['warnings'], [])
+        self.assertEqual(result['unexpected'], [])
+
+    def test_unexpected_content_warns_without_failing_a_valid_answer(self):
+        api = client()
+        api.chat.return_value = response(ANSWER + '\nConfidence: high\nI hope this helps.')
+        result = harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api, capabilities=['completion'])
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(result['sections']['Evidence'], 'e1')
+        self.assertEqual(result['unknown_evidence_ids'], [])
+        self.assertEqual(result['unexpected'], ['Confidence: high\nI hope this helps.'])
+        self.assertEqual(result['warnings'], [harness.UNEXPECTED_CONTENT_WARNING])
 
     def test_non_thinking_model_omits_think(self):
         api = client()
@@ -945,7 +956,11 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('<div class="hunt-answer">', html)
         for name, value in sections.items():
             self.assertIn(f'<div class="hunt-section">{name}: {value}</div>', html)
-        self.assertNotIn(f'<pre>{ANSWER}</pre>', html)
+        self.assertIn(
+            f'<details class="raw-output"><summary>Show raw output</summary><pre>{ANSWER}</pre></details>',
+            html,
+        )
+        self.assertNotIn('<details class="raw-output" open', html)
 
         invalid_dir = self.root / 'unspaced'
         invalid_dir.mkdir()
@@ -958,8 +973,94 @@ class ComparisonTests(unittest.TestCase):
             'validation_errors': ['Invalid hunt output'],
         }])
         invalid_html = (invalid_dir / 'report.html').read_text()
+        self.assertIn('<div class="hunt-section">Verdict: benign</div>', invalid_html)
+        self.assertIn(
+            f'<details class="raw-output"><summary>Show raw output</summary><pre>{raw}</pre></details>',
+            invalid_html,
+        )
+        self.assertNotIn('<details class="raw-output" open', invalid_html)
+
+    def test_report_shows_unexpected_text_and_collapses_raw_output(self):
+        directory = self.root / 'unexpected'
+        directory.mkdir()
+        manifest = {
+            'created_at': 'now',
+            'request_settings': {'num_ctx': 32768, 'think': False},
+            'models': [{'name': 'foundation-sec-alpha:latest', 'capabilities': ['completion']}],
+            'cases': [{'name': 'one.jsonl'}],
+        }
+        raw = ANSWER + '\nConfidence: high'
+        result = {
+            'case': 'one.jsonl',
+            'model': 'foundation-sec-alpha:latest',
+            'status': 'ok',
+            'sections': {
+                'Verdict': 'benign',
+                'Threat type': 'none',
+                'Summary': 'Normal activity.',
+                'Evidence': 'e1',
+            },
+            'unexpected': ['Confidence: high'],
+            'timing': {},
+            'unknown_evidence_ids': [],
+            'validation_errors': [],
+            'error': None,
+            'warnings': [harness.UNEXPECTED_CONTENT_WARNING],
+            'thinking': '',
+            'raw_content': raw,
+            'request': {'think': False},
+            'tokens': {},
+            'context': {},
+        }
+        run_reports.write_report(directory, manifest, [result])
+        html = (directory / 'report.html').read_text()
+        self.assertIn(harness.UNEXPECTED_CONTENT_WARNING, html)
+        self.assertIn('class="warn"', html)
+        self.assertIn('<div class="hunt-unexpected">Confidence: high</div>', html)
+        self.assertLess(
+            html.index('<div class="hunt-section">Evidence: e1</div>'),
+            html.index('<div class="hunt-unexpected">Confidence: high</div>'),
+        )
+        self.assertIn(
+            f'<details class="raw-output"><summary>Show raw output</summary><pre>{raw}</pre></details>',
+            html,
+        )
+        self.assertNotIn('<details class="raw-output" open', html)
+
+        invalid_dir = self.root / 'invalid-raw'
+        invalid_dir.mkdir()
+        run_reports.write_report(invalid_dir, manifest, [{
+            **result,
+            'status': 'invalid',
+            'sections': {},
+            'unexpected': [],
+            'warnings': [],
+            'raw_content': 'bad answer',
+            'validation_errors': ['Invalid hunt output'],
+        }])
+        invalid_html = (invalid_dir / 'report.html').read_text()
         self.assertNotIn('<div class="hunt-answer">', invalid_html)
-        self.assertIn(f'<pre>{raw}</pre>', invalid_html)
+        self.assertNotIn('<pre>bad answer</pre></article>', invalid_html)
+        self.assertIn(
+            '<details class="raw-output"><summary>Show raw output</summary><pre>bad answer</pre></details>',
+            invalid_html,
+        )
+        self.assertNotIn('<details class="raw-output" open', invalid_html)
+
+        empty_dir = self.root / 'empty-answer'
+        empty_dir.mkdir()
+        run_reports.write_report(empty_dir, manifest, [{
+            **result,
+            'status': 'invalid',
+            'sections': {},
+            'unexpected': [],
+            'warnings': [],
+            'raw_content': '',
+            'validation_errors': ['Invalid hunt output'],
+        }])
+        empty_html = (empty_dir / 'report.html').read_text()
+        self.assertIn('<pre>No answer returned.</pre>', empty_html)
+        self.assertNotIn('Show raw output', empty_html)
 
     def test_cli_exits_nonzero_after_recording_invalid_runs(self):
         api = client()

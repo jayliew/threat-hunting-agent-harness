@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
@@ -442,6 +443,26 @@ class ContextUsedCellTests(unittest.TestCase):
         self.assertEqual(run_reports.context_used_cell(30000, 32768), "30000 (92%)")
         self.assertEqual(run_reports.context_used_cell(32768, 32768), "32768 (100%)")
 
+    def test_high_usage_markup_is_red_at_ninety_percent(self):
+        allocated = 32768
+        below = math.floor(allocated * harness.CONTEXT_WARN_RATIO)
+        at_ratio = math.ceil(allocated * harness.CONTEXT_WARN_RATIO)
+        self.assertFalse(run_reports.context_used_high(below, allocated))
+        self.assertTrue(run_reports.context_used_high(at_ratio, allocated))
+        self.assertTrue(run_reports.context_used_high(30000, allocated))
+        self.assertTrue(run_reports.context_used_high(allocated, allocated))
+        self.assertFalse(run_reports.context_used_high(None, allocated))
+        self.assertFalse(run_reports.context_used_high(120, 0))
+        self.assertEqual(run_reports.context_used_markup(120, allocated), "120 (0%)")
+        self.assertEqual(
+            run_reports.context_used_markup(30000, allocated),
+            '<span class="error">30000 (92%)</span>',
+        )
+        self.assertEqual(
+            run_reports.context_label_html(allocated, 30000, None),
+            'used <span class="error">30000 (92%)</span> / allocated 32768',
+        )
+
 
 class ResultsDirectoryNameTests(unittest.TestCase):
     def test_eastern_daylight_sunday_morning(self):
@@ -707,6 +728,10 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('Thinking: not supported', html)
         self.assertIn(f'used 120 (0%) / allocated {harness.NUM_CTX}', html)
         self.assertIn(run_reports.context_used_cell(120, harness.NUM_CTX), html)
+        self.assertNotIn(
+            f'<span class="error">{run_reports.context_used_cell(120, harness.NUM_CTX)}</span>',
+            html,
+        )
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
         self.assertEqual(rows[0]['tokens']['prompt_eval_count'], 80)
         self.assertEqual(rows[0]['tokens']['eval_count'], 40)
@@ -874,6 +899,11 @@ class ComparisonTests(unittest.TestCase):
         self.assertNotIn('cached-token', html)
         self.assertIn('class="warn"', html)
         self.assertIn('Context window nearly full: used 30000 / 32768 configured tokens.', html)
+        self.assertIn('<td><span class="error">30000 (92%)</span></td>', html)
+        self.assertIn(
+            'used <span class="error">30000 (92%)</span> / allocated 32768',
+            html,
+        )
         self.assertIn('<th>Thinking tokens</th>', html)
 
     def test_cli_exits_nonzero_after_recording_invalid_runs(self):

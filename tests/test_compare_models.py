@@ -952,6 +952,14 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
                 "true",
                 True,
             ),
+            "gpt-oss-20b.conf": ("gpt-oss:20b", "131072", 131072, "high", "high"),
+            "mistral-small3.2.conf": (
+                "mistral-small3.2:latest",
+                "131072",
+                131072,
+                None,
+                None,
+            ),
             "mistral-small3.2-24b.conf": (
                 "mistral-small3.2:24b",
                 "131072",
@@ -985,6 +993,8 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             "gemma4-31b.conf": ("1.0", 1.0, "0.95", 0.95, "64", 64),
             "gemma4-26b.conf": ("1.0", 1.0, "0.95", 0.95, "64", 64),
             "glm-4.7-flash-q4_K_M.conf": ("1.0", 1.0, "0.95", 0.95, "40", 40),
+            "gpt-oss-20b.conf": ("1.0", 1.0, "1.0", 1.0, "40", 40),
+            "mistral-small3.2.conf": ("0.15", 0.15, "0.90", 0.9, "40", 40),
             "mistral-small3.2-24b.conf": ("0.15", 0.15, "0.90", 0.9, "40", 40),
             "mistral-nemo-12b.conf": ("0.3", 0.3, "0.90", 0.9, "40", 40),
             "phi3-medium-128k.conf": ("0.7", 0.7, "0.90", 0.9, "40", 40),

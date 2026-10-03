@@ -531,7 +531,8 @@ class ComparisonTests(unittest.TestCase):
         html = (directory / 'report.html').read_text()
         self.assertIn('4 / 4 runs recorded', html)
         self.assertIn('<th>Eval time</th>', html)
-        self.assertIn('excludes model load and unload', html)
+        self.assertNotIn('excludes model load and unload', html)
+        self.assertNotIn('Request settings:', html)
         self.assertIn('ok · 0m 1.50s', html)
         self.assertIn('TimeoutError', html)
         self.assertIn('e999', html)
@@ -716,10 +717,10 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(manifest['request_settings']['seed'], harness.SEED)
         self.assertEqual(manifest['request_settings']['kv_cache_type'], harness.KV_CACHE_TYPE)
         self.assertFalse(manifest['request_settings']['shift'])
-        self.assertIn('seed=0', html)
-        self.assertIn('Context shift is disabled for every model.', html)
+        self.assertNotIn('seed=0', html)
+        self.assertNotIn('Context shift is disabled for every model.', html)
         self.assertIsNone(manifest['models'][0]['quantization_level'])
-        self.assertIn(f'kv_cache_type={harness.KV_CACHE_TYPE}', html)
+        self.assertNotIn(f'kv_cache_type={harness.KV_CACHE_TYPE}', html)
 
     def test_report_includes_model_settings_tokens_and_context(self):
         api = client()
@@ -792,7 +793,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('Thinking: disabled', html)
         self.assertIn('Input: —', html)
 
-    def test_report_shows_unlimited_num_predict(self):
+    def test_report_omits_introductory_disclaimer(self):
         directory = self.root / 'unlimited'
         directory.mkdir()
         manifest = {
@@ -808,12 +809,10 @@ class ComparisonTests(unittest.TestCase):
         }
         run_reports.write_report(directory, manifest, [])
         html = (directory / 'report.html').read_text()
-        self.assertIn('num_predict=-1 (no limit)', html)
-        self.assertIn(
-            'These are the harness fallbacks unless an inference config overrides them',
-            html,
-        )
-        self.assertIn('not necessarily what each model was sent', html)
+        self.assertNotIn('num_predict=-1 (no limit)', html)
+        self.assertNotIn('harness fallbacks', html)
+        self.assertNotIn('not necessarily what each model was sent', html)
+        self.assertNotIn('does not establish detection accuracy', html)
 
     def test_report_shows_thinking_tokens_and_context_warning(self):
         directory = self.root / 'think'

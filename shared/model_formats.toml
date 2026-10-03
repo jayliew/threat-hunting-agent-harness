@@ -65,3 +65,13 @@ markers = ["<|im_start|>", "<|im_end|>"]
 label = "Llama 3"
 name_pattern = "llama3"
 markers = ["<|start_header_id|>", "<|eot_id|>"]
+
+[[formats]]
+label = "Phi-3 Medium 128K"
+# Ollama library tag phi3:medium-128k, plus a phi-3-medium-128k wrapper.
+# Does not match phi3:medium, phi3.5, or phi4.
+name_pattern = "phi-?3[:.-]medium-128k"
+markers = ["<|system|>", "<|user|>", "<|assistant|>", "<|end|>"]
+required_stops = ["<|end|>", "<|user|>", "<|assistant|>"]
+allowed_stops = ["<|end|>", "<|user|>", "<|assistant|>"]
+hint = "Phi-3 Medium 128K expects <|system|>, <|user|>, <|assistant|>, and <|end|>, and stops <|end|>, <|user|>, and <|assistant|>."

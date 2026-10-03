@@ -23,14 +23,16 @@ Install Ollama (`brew install ollama`, then `ollama serve` or the Ollama app) an
 ollama list
 ```
 
-The default model is `foundation-sec-8b-instruct`. Pull the weights, then create that name from [Modelfile.foundation-sec-8b-instruct](Modelfile.foundation-sec-8b-instruct). The pull installs `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest`, whose template is bare `{{ .Prompt }}` with no `RENDERER`. Preflight refuses that import. The `ollama create` step is what sends `<|system|>`, `<|user|>`, and `<|assistant|>`:
+The default model is `foundation-sec-8b-instruct`. Pull the weights, then create that name from [modelfiles/Modelfile.foundation-sec-8b-instruct](modelfiles/Modelfile.foundation-sec-8b-instruct). The pull installs `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest`, whose template is bare `{{ .Prompt }}` with no `RENDERER`. Preflight refuses that import. The `ollama create` step is what sends `<|system|>`, `<|user|>`, and `<|assistant|>`. Re-run it after a Modelfile change to refresh an existing wrapper; it reuses the downloaded weights:
 
 ```bash
 ollama pull hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF
-ollama create foundation-sec-8b-instruct -f Modelfile.foundation-sec-8b-instruct
+ollama create foundation-sec-8b-instruct -f modelfiles/Modelfile.foundation-sec-8b-instruct
 ```
 
 Another installed name works when preflight recognizes that family's chat template. Pass it with `--model`.
+
+Foundation-Sec uses plain-text output and no Ollama `PARSER` directive. Its only configured stop must be `<|end_of_text|>`. Both CLIs check that before inference. The wrapper appends that EOS token to completed assistant turns. The harness then parses the returned text into the four answer fields. That application parser is separate from Ollama's output parser.
 
 From this repo, the default hunt is `logs/http-beaconing.jsonl` on `foundation-sec-8b-instruct`:
 
@@ -49,10 +51,10 @@ The script prints the model, the declared profile, the installed chat template, 
 
 ## What a hunt does
 
-`main.py` and `compare_models.py` share `run_hunt(model, events)`. Each call starts a fresh conversation with the same prompt and serialized events.
+`main.py` and `compare_models.py` share `run_hunt` from `shared/harness.py`. Each call starts a fresh conversation with the same prompt and serialized events. Neither CLI imports the other.
 
 1. Load a JSONL file and sort events by `@timestamp`.
-2. Send standard `role` / `content` messages. The system message holds the analyst instructions, evidence rules, verdict definitions, and output contract. The user message holds the task and a JSON array inside `<security_events>`.
+2. Send standard `role` / `content` messages. The system message holds the analyst instructions, evidence rules, verdict definitions, and output contract. The user message holds the task and a JSON array of events. Markdown headings and lists are the instruction hierarchy. XML tags (`<verdicts>`, `<output_fields>`, `<task>`, `<security_events>`) separate metadata from supporting content.
 3. Treat log text as untrusted evidence. Cite `event.id`. Leave users, IPs, timestamps, and event IDs that are absent from the file out of the answer.
 4. Print `Verdict`, `Threat type`, `Summary`, and `Evidence`. Those four fields are this harness's output contract.
 5. Machine-check the reply.
@@ -65,14 +67,14 @@ A reply fails when:
 - generation stops with `done_reason=length`, or the content is empty
 - context used (prompt tokens plus generated tokens) is at or above `num_ctx`
 
-Usage at or above 90% of `num_ctx`, while still under that window, prints a warning. Context shift is off for every model, including DeepSeek2: `SHIFT` in `main.py` is `False`, and every chat sends that value. Ollama 0.33 would otherwise slide older tokens out once `num_ctx` is full. A format-valid answer can still be the wrong diagnosis.
+Usage at or above 90% of `num_ctx`, while still under that window, prints a warning. Context shift is off for every model, including DeepSeek2: `SHIFT` in `shared/harness.py` is `False`, and every chat sends that value. Ollama 0.33 would otherwise slide older tokens out once `num_ctx` is full. A format-valid answer can still be the wrong diagnosis.
 
 `<`, `>`, and `&` in event fields are written as JSON Unicode escapes, so a value containing `</security_events>` stays inside the evidence block and keeps its decoded value. The delimiters keep the block intact. Existing completion, output-format, and evidence-ID checks still apply. Prompt structure is tested offline; judge response quality per installed model and template.
 
 The run stops before it can look like a successful hunt when:
 
 - a file in `profiles/` is empty, missing `model`, or is not `key=value` lines
-- the model is missing from `ollama list`, lacks text completion, or its installed template is the wrong framing (see [Chat templates](#chat-templates))
+- the model is missing from `ollama list`, lacks text completion, or its installed template, renderer, parser, or stops fail the format check (see [Chat templates](#chat-templates))
 - the log file is missing, unreadable, malformed, or contains no events
 - several profiles name the model and you omitted `--profile`
 
@@ -117,17 +119,17 @@ Both CLIs load the chosen profile before the first inference call, print it, and
 
 | Profile key | Request field | If the line is absent |
 | --- | --- | --- |
-| `num_ctx` | `options.num_ctx` | `32768` from `NUM_CTX` in `main.py` |
-| `thinking` | `think`: `true`, `false`, `low`, `medium`, or `high` | `THINK` in `main.py` (`False`) |
+| `num_ctx` | `options.num_ctx` | `32768` from `NUM_CTX` in `shared/harness.py` |
+| `thinking` | `think`: `true`, `false`, `low`, `medium`, or `high` | `THINK` in `shared/harness.py` (`False`) |
 | `temperature` | `options.temperature` | `0` from `TEMPERATURE` |
 | `top_p`, `top_k` | matching sampling options | omitted |
 | — | `options.seed` | always `0` (`SEED`). An omitted seed becomes `-1`, and a negative seed picks a new seed each run |
 | — | `options.num_predict` | always `-1` (no output-token limit) |
 | — | `shift` | always off (`SHIFT = False`) |
 
-The harness asks Ollama (`/api/show`) and sends `think` only when the model lists the `thinking` capability. Models without that capability reject the argument. Qwen3-class models think by default when the API omits `think`, so those models always receive an explicit value. A profile that sets `thinking` for a model without the capability stops the run before any chat call. Set `THINK` in `main.py` to `True` or `False` before a run whose profile has no `thinking` line. Thinking tokens and the final answer share `num_ctx`.
+The harness asks Ollama (`/api/show`) and sends `think` only when the model lists the `thinking` capability. Models without that capability reject the argument. Qwen3-class models think by default when the API omits `think`, so those models always receive an explicit value. A profile that sets `thinking` for a model without the capability stops the run before any chat call. Set `THINK` in `shared/harness.py` to `True` or `False` before a run whose profile has no `thinking` line. Thinking tokens and the final answer share `num_ctx`.
 
-Weight precision, KV cache, and repeat penalty stay commented out. The expected KV cache type is `f16` (`OLLAMA_KV_CACHE_TYPE` on the Ollama server). It is recorded on each hunt and is not sent as a chat option. A missing cached-token count is unknown. The saved profile is what distinguishes two runs of the same model when those settings later differ.
+Weight precision, KV cache, and repeat penalty stay commented out. The expected KV cache type is `f16` (`OLLAMA_KV_CACHE_TYPE` on the Ollama server). It is recorded on each hunt and is not sent as a chat option. The saved profile is what distinguishes two runs of the same model when those settings later differ.
 
 ## Compare models
 
@@ -145,7 +147,7 @@ Log paths are relative to the script, or absolute. `--output-dir` and `--profile
 
 Each invocation creates a unique US Eastern Time subdirectory named with the day, month, year, weekday, and time, for example `20-Sep-2026-Sun_09-28am-ET`:
 
-- `report.html` — dark summary table and full answers, grouped by case. Declared profiles sit above the table, including models with none recorded. Each model card shows quantization, thinking mode (enabled, disabled, or unsupported), context used versus allocated, and token counts (input, thinking, output, cached, uncached). A near-full context window is a warning. Thinking traces expand when present. Output, profile, and error text are HTML-escaped.
+- `report.html` — dark summary table and full answers, grouped by case. Declared profiles sit above the table, including models with none recorded. Each model card shows quantization, thinking mode (enabled, disabled, or unsupported), context used versus allocated, and token counts (input, thinking, output). Run details on each card stay collapsed until opened. A near-full context window is a warning. Thinking traces expand when present. Output, profile, and error text are HTML-escaped.
 - `declared-profiles/` — a copy of each matching profile, written before inference. The initial report already lists those profiles at `0 / N` runs recorded.
 - `results.jsonl` — one row per attempted model/case pair, saved immediately. Includes the raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages and options, prompt and input hashes, model digest, declared profile path, timings, token counts, and context allocated and used.
 - `manifest.json` — selected models (digest, capabilities, quantization, native context, and the `num_ctx` sent), declared profiles, shared request settings, and input file identities. Pending cases stay visible if the process is interrupted.
@@ -160,13 +162,14 @@ Wall time includes model load and request overhead. Eval time is prompt processi
 
 ## Chat templates
 
-`build_messages()` sends ordinary `role` / `content` text. Markdown headings and the `<security_events>` delimiters are application text. Let the installed model's [Ollama chat template](https://docs.ollama.com/modelfile#template) supply its native role and turn tokens. Leave ChatML tokens, Llama headers, Mistral `[INST]` markers, and Gemma turn markers to that template. [Templates differ even between models from the same base](https://huggingface.co/docs/transformers/chat_templating). For a model whose native format has no separate system role, confirm the installed template still carries the analyst instructions. Inspect an import with `ollama show --modelfile MODEL`.
+`build_messages()` sends ordinary `role` / `content` text. Markdown headings and the XML tags are application text. Let the installed model's [Ollama chat template](https://docs.ollama.com/modelfile#template) supply its native role and turn tokens. Leave ChatML tokens, Llama headers, Mistral `[INST]` markers, and Gemma turn markers to that template. [Templates differ even between models from the same base](https://huggingface.co/docs/transformers/chat_templating). For a model whose native format has no separate system role, confirm the installed template still carries the analyst instructions. Inspect an import with `ollama show --modelfile MODEL`.
 
-Before any chat call, both CLIs require the model to appear in `ollama list`, to support text completion when capabilities are advertised, and to pass the installed-template check. That check uses Ollama `/api/show` (the same data as `ollama show --template MODEL`) plus the Modelfile `RENDERER` line. Inference starts only when that framing matches the family below. A name with no registered family fails. A `RENDERER` line fails for every family except Gemma 4, because the renderer replaces the template.
+Before any chat call, both CLIs require the model to appear in `ollama list`, to support text completion when capabilities are advertised, and to pass the format check in [shared/model_formats.toml](shared/model_formats.toml). That check uses Ollama `/api/show` (the same data as `ollama show --template MODEL`) plus the Modelfile `RENDERER` line, parser, and stop sequences. Inference starts only when the installed package matches the family below. A name with no registered family fails. A `RENDERER` line fails for every family except Gemma 4, because the renderer replaces the template. Qwen3.5 does not match the Qwen3 rule.
 
 | Family | Required framing |
 | --- | --- |
-| Foundation-Sec | `<\|system\|>`, `<\|user\|>`, `<\|assistant\|>`. Fails on `<\|start_header_id\|>` or any `RENDERER` |
+| Foundation-Sec | `<\|system\|>`, `<\|user\|>`, `<\|assistant\|>`. Fails on `<\|start_header_id\|>` or any `RENDERER`. No `PARSER`. Stop is only `<\|end_of_text\|>` |
+| CyberPal 2.0 | `<\|start\|>system<\|message\|>`, `<\|start\|>developer<\|message\|>`, `<\|channel\|>`, `<\|end\|>`. Stops `<\|return\|>` and `<\|call\|>` |
 | Qwen3 | `<\|im_start\|>` and `<\|im_end\|>` |
 | Llama 3 | `<\|start_header_id\|>` and `<\|eot_id\|>` |
 | Mistral Small | `[SYSTEM_PROMPT]`, `[/SYSTEM_PROMPT]`, `[INST]`, `[/INST]` |
@@ -176,21 +179,45 @@ Before any chat call, both CLIs require the model to appear in `ollama list`, to
 | DeepSeek-R1 | `<｜User｜>` and `<｜Assistant｜>` (fullwidth vertical bar, U+FF5C) |
 | Command R | `<\|START_OF_TURN_TOKEN\|>`, `<\|SYSTEM_TOKEN\|>`, `<\|USER_TOKEN\|>`, `<\|CHATBOT_TOKEN\|>` |
 
-The raw `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest` import is that bare `{{ .Prompt }}` case. The GGUF has no `tokenizer.chat_template`, the Hub repo has no Ollama `template` file, and the call sends only the user text: it omits `<|system|>`, `<|user|>`, and `<|assistant|>` from [`chat_template.jinja`](https://huggingface.co/fdtn-ai/Foundation-Sec-8B-Instruct/blob/main/chat_template.jinja) and drops the harness system message. The weights are Llama 3.1–based, but this checkpoint was not trained on `<|start_header_id|>` headers, so those tokenizer tokens are the wrong framing. A `RENDERER` on a different model does not make this name usable. Run `foundation-sec-8b-instruct` from `Modelfile.foundation-sec-8b-instruct`.
+The raw `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest` import is that bare `{{ .Prompt }}` case. The GGUF has no `tokenizer.chat_template`, the Hub repo has no Ollama `template` file, and the call sends only the user text: it omits `<|system|>`, `<|user|>`, and `<|assistant|>` from [`chat_template.jinja`](https://huggingface.co/fdtn-ai/Foundation-Sec-8B-Instruct/blob/main/chat_template.jinja) and drops the harness system message. The weights are Llama 3.1–based, but this checkpoint was not trained on `<|start_header_id|>` headers, so those tokenizer tokens are the wrong framing. A `RENDERER` on a different model does not make this name usable. Run `foundation-sec-8b-instruct` from `modelfiles/Modelfile.foundation-sec-8b-instruct`.
+
+## Adding a model
+
+Format rules live in `shared/model_formats.toml` and are applied by `shared/model_config.py`. Add an ordered `[[formats]]` entry from the checkpoint's published template and generation settings. Name matching is case-insensitive, and the first matching regular expression wins. Put local wrapper names in the pattern when they differ from the upstream name. Use `markers` for an Ollama template or `renderers` for a built-in renderer.
+
+```toml
+[[formats]]
+label = "Example Instruct"
+name_pattern = "example-instruct"
+markers = ["<user>", "<assistant>"]
+parsers = []
+required_stops = ["<end>"]
+hint = "Create example-instruct using modelfiles/Modelfile.example-instruct."
+```
+
+Replace those tokens with the model's own tokens. `parsers = []` means plain text and no `PARSER` directive. A nonempty `parsers` list names the accepted parsers. Omitting `parsers` leaves the parser unconstrained. `required_stops` must be configured. Extra stops are allowed unless `allowed_stops` is set, which limits stops to that list. Foundation-Sec's EOS-only policy is its registry entry. Marker presence does not prove every rendered conversation matches the training template.
+
+If an imported GGUF lacks the right framing, add a Modelfile under `modelfiles/` and create a local wrapper, as with Foundation-Sec. The registry checks the installed package. It does not download models or rewrite installed templates. Add a `profiles/*.profile` file for that wrapper. Both CLIs then use the same configuration without code changes.
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `main.py` | Single-hunt CLI: prompt, log loading, one Ollama chat, output and evidence-ID validation |
+| `main.py` | Single-hunt CLI. Uses the shared harness, profiles, and report writer |
 | `compare_models.py` | Compare installed models across the JSONL scenarios and write `results/` |
+| `shared/harness.py` | Defaults, log loading, preflight, prompts, inference, token accounting, and output validation |
+| `shared/model_config.py` | Validation of installed templates, renderers, parsers, and stop sequences |
+| `shared/model_formats.toml` | Ordered model format requirements |
+| `shared/model_profiles.py` | Profile loading, settings validation, and run selection |
+| `shared/run_reports.py` | Run directories, profile snapshots, result files, and HTML reports |
 | `profiles/*.profile` | Per-model eval setup. Uncommented values override Ollama and Modelfile defaults for that run |
-| `Modelfile.foundation-sec-8b-instruct` | `<\|system\|>` / `<\|user\|>` / `<\|assistant\|>` template for the Foundation-Sec GGUF import |
+| `modelfiles/Modelfile.foundation-sec-8b-instruct` | `<\|system\|>` / `<\|user\|>` / `<\|assistant\|>` template for the Foundation-Sec GGUF import |
 | `logs/*.jsonl` | Seven synthetic ECS scenarios. The default hunt file is `logs/http-beaconing.jsonl` |
 | `logs/README.md` | Field notes for the lookalike evidence packages |
 | `evals/answer-keys.md` | Human grading keys for all seven cases. The harness does not load this file |
-| `test_main.py` | Tests for think-arg gating, incomplete replies, and hunt-output validation |
-| `test_compare_models.py` | Tests for the comparison matrix, HTML report, and the shared hunt runner |
+| `tests/test_main.py` | Tests for think-arg gating, incomplete replies, and hunt-output validation |
+| `tests/test_compare_models.py` | Tests for the comparison matrix, HTML report, and the shared hunt runner |
+| `tests/test_model_config.py` | Config-driven validation for model packages |
 | `pyproject.toml` | Project metadata and the `ollama` client |
 
 ```bash

@@ -242,7 +242,7 @@ required_stops = ["<end>"]
         self.assertEqual(result['status'], 'error')
         self.assertEqual(result['context']['limit'], 'error')
         self.assertIn('Context window full', result['error'])
-        self.assertIn(str(harness.NUM_CTX), result['error'])
+        self.assertIn(harness.format_token_count(harness.NUM_CTX), result['error'])
         self.assertTrue(result['validation_errors'])
         self.assertIn('e999', result['validation_errors'][0])
 
@@ -433,14 +433,30 @@ class DurationFormatTests(unittest.TestCase):
         self.assertIn("line one<br>line two", html)
 
 
+class FormatTokenCountTests(unittest.TestCase):
+    def test_formats_integers_with_commas(self):
+        self.assertEqual(harness.format_token_count(None), "—")
+        self.assertEqual(harness.format_token_count(""), "—")
+        self.assertEqual(harness.format_token_count(80), "80")
+        self.assertEqual(harness.format_token_count(1_000_000), "1,000,000")
+
+    def test_formats_token_counts_in_report_prose(self):
+        self.assertEqual(
+            harness.format_token_counts_in_report_text(
+                "Context window nearly full: used 30000 / 32768 configured tokens."
+            ),
+            "Context window nearly full: used 30,000 / 32,768 configured tokens.",
+        )
+
+
 class ContextUsedCellTests(unittest.TestCase):
     def test_includes_percent_of_allocated(self):
         self.assertEqual(run_reports.context_used_cell(None, 32768), "—")
         self.assertEqual(run_reports.context_used_cell(120, None), "120")
         self.assertEqual(run_reports.context_used_cell(120, 0), "120")
         self.assertEqual(run_reports.context_used_cell(120, 32768), "120 (0%)")
-        self.assertEqual(run_reports.context_used_cell(30000, 32768), "30000 (92%)")
-        self.assertEqual(run_reports.context_used_cell(32768, 32768), "32768 (100%)")
+        self.assertEqual(run_reports.context_used_cell(30000, 32768), "30,000 (92%)")
+        self.assertEqual(run_reports.context_used_cell(32768, 32768), "32,768 (100%)")
 
 
 class ResultsDirectoryNameTests(unittest.TestCase):
@@ -705,7 +721,8 @@ class ComparisonTests(unittest.TestCase):
         html = (directory / 'report.html').read_text()
         self.assertNotIn('Quantization:', html)
         self.assertIn('Thinking: not supported', html)
-        self.assertIn(f'used 120 (0%) / allocated {harness.NUM_CTX}', html)
+        allocated = harness.format_token_count(harness.NUM_CTX)
+        self.assertIn(f'used 120 (0%) / allocated {allocated}', html)
         self.assertIn(run_reports.context_used_cell(120, harness.NUM_CTX), html)
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
         self.assertEqual(rows[0]['tokens']['prompt_eval_count'], 80)
@@ -770,8 +787,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertNotIn('gguf', html)
         self.assertIn('Thinking: disabled', html)
         self.assertIn('Thinking: not supported', html)
-        self.assertIn(f'used 120 (0%) / allocated {harness.NUM_CTX} (model max 40960)', html)
-        self.assertIn(f'used 120 (0%) / allocated {harness.NUM_CTX} (model max 131072)', html)
+        allocated = harness.format_token_count(harness.NUM_CTX)
+        self.assertIn(f'used 120 (0%) / allocated {allocated} (model max 40,960)', html)
+        self.assertIn(f'used 120 (0%) / allocated {allocated} (model max 131,072)', html)
         self.assertNotIn('Quantization:', html)
         self.assertIn('Input: 80', html)
         self.assertIn('Output: 40', html)
@@ -798,9 +816,9 @@ class ComparisonTests(unittest.TestCase):
         run_reports.write_report(directory, manifest, [])
         html = (directory / 'report.html').read_text()
         self.assertIn('Pending', html)
-        self.assertIn('used — / allocated 32768', html)
+        self.assertIn('used — / allocated 32,768', html)
         self.assertNotIn('used — (', html)
-        self.assertIn('model max 40960', html)
+        self.assertIn('model max 40,960', html)
         self.assertNotIn('Quantization:', html)
         self.assertNotIn('Q4_K_M', html)
         self.assertNotIn('gguf', html)
@@ -873,7 +891,10 @@ class ComparisonTests(unittest.TestCase):
         self.assertNotIn('Cached tokens', html)
         self.assertNotIn('cached-token', html)
         self.assertIn('class="warn"', html)
-        self.assertIn('Context window nearly full: used 30000 / 32768 configured tokens.', html)
+        self.assertIn(
+            'Context window nearly full: used 30,000 / 32,768 configured tokens.',
+            html,
+        )
         self.assertIn('<th>Thinking tokens</th>', html)
 
     def test_cli_exits_nonzero_after_recording_invalid_runs(self):
@@ -1106,7 +1127,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         self.assertEqual(manifest["models"][0]["num_ctx"], 16384)
         self.assertEqual(manifest["request_settings"]["num_ctx"], harness.NUM_CTX)
         html = (directory / "report.html").read_text()
-        self.assertIn("used 120 (1%) / allocated 16384", html)
+        self.assertIn("used 120 (1%) / allocated 16,384", html)
 
     def test_inference_configuration_sampling_is_sent(self):
         self.write_inference_configuration(

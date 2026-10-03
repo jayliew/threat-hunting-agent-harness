@@ -226,6 +226,30 @@ def assign_token_split(tokens: dict, thinking: str, content: str) -> None:
     tokens["split"] = split
 
 
+def format_token_count(value) -> str:
+    """Display integer token counts with thousands separators; None/empty → em dash."""
+    if value is None or value == "":
+        return "—"
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return f"{value:,}"
+    if isinstance(value, float) and value.is_integer():
+        return f"{int(value):,}"
+    return str(value)
+
+
+def format_token_counts_in_report_text(text: str) -> str:
+    """Comma-format integer token counts embedded in report warning/error copy."""
+    if not text:
+        return text
+
+    def repl(match: re.Match[str]) -> str:
+        return format_token_count(int(match.group(0)))
+
+    return re.sub(r"\d+", repl, text)
+
+
 def context_limit(allocated: int, used: int | None) -> tuple[str, str | None]:
     """Compare used tokens with the configured context window.
 
@@ -236,12 +260,16 @@ def context_limit(allocated: int, used: int | None) -> tuple[str, str | None]:
     if used >= allocated:
         return (
             "error",
-            f"Context window full: used {used} tokens, configured num_ctx is {allocated}.",
+            "Context window full: used "
+            f"{format_token_count(used)} tokens, configured num_ctx is "
+            f"{format_token_count(allocated)}.",
         )
     if used >= allocated * CONTEXT_WARN_RATIO:
         return (
             "warn",
-            f"Context window nearly full: used {used} / {allocated} configured tokens.",
+            "Context window nearly full: used "
+            f"{format_token_count(used)} / {format_token_count(allocated)} "
+            "configured tokens.",
         )
     return "ok", None
 

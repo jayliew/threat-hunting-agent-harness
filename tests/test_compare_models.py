@@ -437,6 +437,26 @@ class PromptSelectionTests(unittest.TestCase):
         self.assertEqual(prompts.DEFAULT_PROMPT.system, prompts.SYSTEM_PROMPT)
         self.assertEqual(prompts.prompt_for_model('qwen3:32b:latest').name, 'default')
 
+    def test_deepseek_r1_32b_uses_its_user_turn_prompt(self):
+        for name in ('deepseek-r1:32b', 'deepseek-r1:32b:latest'):
+            with self.subTest(name=name):
+                selected = prompts.prompt_for_model(name)
+                self.assertIs(selected, prompts.DEEPSEEK_R1_32B)
+        self.assertEqual(prompts.DEEPSEEK_R1_32B.system, '')
+        self.assertNotEqual(prompts.DEEPSEEK_R1_32B.user_task, prompts.USER_TASK)
+        task = prompts.DEEPSEEK_R1_32B.user_task
+        self.assertIn('suspicious, benign, or inconclusive', task)
+        self.assertIn('Verdict:', task)
+        self.assertIn('Threat type:', task)
+        self.assertIn('Summary:', task)
+        self.assertIn('Evidence:', task)
+        self.assertIn('untrusted evidence', task)
+        messages = harness.build_messages(EVENTS, prompts.DEEPSEEK_R1_32B)
+        self.assertEqual(messages[0]['content'], '')
+        self.assertIn(task, messages[1]['content'])
+        self.assertNotIn(prompts.SYSTEM_PROMPT, messages[1]['content'])
+        self.assertIs(prompts.prompt_for_model('deepseek-r1'), prompts.DEFAULT_PROMPT)
+
     def test_registered_prompt_is_sent_only_for_that_model(self):
         custom = prompts.ModelPrompt(
             name='foundation-sec-alpha',

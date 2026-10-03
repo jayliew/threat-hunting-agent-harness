@@ -692,9 +692,9 @@ class ComparisonTests(unittest.TestCase):
     def test_missing_details_render_as_unknown(self):
         directory = self.run_quietly(client())
         html = (directory / 'report.html').read_text()
-        self.assertIn('Quantization: —', html)
+        self.assertNotIn('Quantization:', html)
         self.assertIn('Thinking: not supported', html)
-        self.assertIn(f'used 120 / allocated {harness.NUM_CTX}', html)
+        self.assertIn(f'used 120 (0%) / allocated {harness.NUM_CTX}', html)
         self.assertIn(run_reports.context_used_cell(120, harness.NUM_CTX), html)
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
         self.assertEqual(rows[0]['tokens']['prompt_eval_count'], 80)
@@ -759,8 +759,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertNotIn('gguf', html)
         self.assertIn('Thinking: disabled', html)
         self.assertIn('Thinking: not supported', html)
-        self.assertIn(f'used 120 / allocated {harness.NUM_CTX} (model max 40960)', html)
-        self.assertIn(f'used 120 / allocated {harness.NUM_CTX} (model max 131072)', html)
+        self.assertIn(f'used 120 (0%) / allocated {harness.NUM_CTX} (model max 40960)', html)
+        self.assertIn(f'used 120 (0%) / allocated {harness.NUM_CTX} (model max 131072)', html)
+        self.assertNotIn('Quantization:', html)
         self.assertIn('Input: 80', html)
         self.assertIn('Output: 40', html)
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
@@ -787,8 +788,10 @@ class ComparisonTests(unittest.TestCase):
         html = (directory / 'report.html').read_text()
         self.assertIn('Pending', html)
         self.assertIn('used — / allocated 32768', html)
+        self.assertNotIn('used — (', html)
         self.assertIn('model max 40960', html)
-        self.assertIn('Quantization: Q4_K_M · 7B', html)
+        self.assertNotIn('Quantization:', html)
+        self.assertNotIn('Q4_K_M', html)
         self.assertNotIn('gguf', html)
         self.assertIn('Thinking: disabled', html)
         self.assertIn('Input: —', html)
@@ -1079,7 +1082,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         self.assertEqual(manifest["models"][0]["num_ctx"], 16384)
         self.assertEqual(manifest["request_settings"]["num_ctx"], harness.NUM_CTX)
         html = (directory / "report.html").read_text()
-        self.assertIn("used 120 / allocated 16384", html)
+        self.assertIn("used 120 (1%) / allocated 16384", html)
 
     def test_inference_configuration_sampling_is_sent(self):
         self.write_inference_configuration(

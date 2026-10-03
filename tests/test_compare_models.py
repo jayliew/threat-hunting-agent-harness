@@ -1,6 +1,6 @@
 """Tests for the comparison runner and the shared hunt contract.
 
-Hunt-contract tests live here because both CLIs share run_hunt() from harness.py.
+Hunt-contract tests live here because compare_models.py calls run_hunt() from shared/harness.py.
 The rest of the file covers the comparison matrix and HTML report.
 """
 from __future__ import annotations
@@ -19,11 +19,10 @@ from unittest.mock import Mock, patch
 from ollama import ChatResponse, Message
 
 import compare_models
-import harness
-import main as single_hunt
-import model_config
-import model_profiles
-import run_reports
+import shared.harness as harness
+import shared.model_config as model_config
+import shared.inference_configurations as inference_configurations
+import shared.run_reports as run_reports
 
 
 ANSWER = 'Verdict: benign\nThreat type: none\nSummary: Normal activity.\nEvidence: e1'
@@ -59,7 +58,7 @@ def client():
 
 
 class HuntTests(unittest.TestCase):
-    def test_both_clis_use_a_model_added_through_configuration(self):
+    def test_cli_uses_a_model_added_through_configuration(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             config = root / "formats.toml"
@@ -74,32 +73,30 @@ required_stops = ["<end>"]
             formats = model_config.load_model_formats(config)
             log = root / "case.jsonl"
             log.write_text(json.dumps(EVENTS[0]) + '\n')
-            for cli, arguments in (
-                (single_hunt, ['main.py', str(log), '--model', 'future-instruct']),
-                (compare_models, ['compare_models.py', '--models', 'future-instruct', '--logs', str(log)]),
-            ):
-                with self.subTest(cli=cli.__name__):
-                    api = client()
-                    api.list.return_value.models = [
-                        SimpleNamespace(model='future-instruct:latest', digest='future-digest')
-                    ]
-                    api.show.return_value.template = '<system>{{ .System }}<user>{{ .Content }}<assistant>'
-                    api.show.return_value.modelfile = 'PARSER future-parser\n'
-                    api.show.return_value.parameters = 'stop "<end>"\nstop "<turn>"\n'
-                    output = root / cli.__name__
-                    argv = arguments + ['--output-dir', str(output), '--profiles-dir', str(root / 'profiles')]
-                    with patch.object(model_config, 'MODEL_FORMATS', formats), \
-                            patch.object(cli, 'Client', return_value=api), \
-                            patch.object(sys, 'argv', argv), \
-                            contextlib.redirect_stdout(io.StringIO()):
-                        cli.main()
-                    api.chat.assert_called_once()
-                    rows = list(output.glob('*/results.jsonl'))
-                    self.assertEqual(len(rows), 1)
-                    result = json.loads(rows[0].read_text())
-                    self.assertEqual(result['model'], 'future-instruct:latest')
-                    self.assertEqual(result['status'], 'ok')
-                    self.assertTrue(rows[0].with_name('report.html').is_file())
+            api = client()
+            api.list.return_value.models = [
+                SimpleNamespace(model='future-instruct:latest', digest='future-digest')
+            ]
+            api.show.return_value.template = '<system>{{ .System }}<user>{{ .Content }}<assistant>'
+            api.show.return_value.modelfile = 'PARSER future-parser\n'
+            api.show.return_value.parameters = 'stop "<end>"\nstop "<turn>"\n'
+            output = root / 'compare_models'
+            argv = [
+                'compare_models.py', '--models', 'future-instruct', '--logs', str(log),
+                '--output-dir', str(output), '--inference-config-dir', str(root / 'inference_config'),
+            ]
+            with patch.object(model_config, 'MODEL_FORMATS', formats), \
+                    patch.object(compare_models, 'Client', return_value=api), \
+                    patch.object(sys, 'argv', argv), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                compare_models.main()
+            api.chat.assert_called_once()
+            rows = list(output.glob('*/results.jsonl'))
+            self.assertEqual(len(rows), 1)
+            result = json.loads(rows[0].read_text())
+            self.assertEqual(result['model'], 'future-instruct:latest')
+            self.assertEqual(result['status'], 'ok')
+            self.assertTrue(rows[0].with_name('report.html').is_file())
 
     def test_shared_hunt_preserves_request_response_and_timing(self):
         api = client()
@@ -209,7 +206,7 @@ required_stops = ["<end>"]
         self.assertEqual(result['tokens'], harness.empty_tokens())
         self.assertIsNone(result['context']['used'])
 
-    def test_foundation_configuration_blocks_both_entry_points(self):
+    def test_foundation_configuration_blocks_preflight_and_run_hunt(self):
         for modelfile, parameters, expected in (
             ("PARSER llama3\n", 'stop "<|end_of_text|>"', "without a PARSER"),
             ("", 'stop "<|eot_id|>"', "must use only stop"),
@@ -308,24 +305,27 @@ required_stops = ["<end>"]
         self.assertIsNone(result['context']['used'])
         self.assertEqual(result['context']['allocated'], harness.NUM_CTX)
 
-    def test_single_hunt_cli_uses_shared_runner(self):
+    def test_one_model_one_log_uses_shared_runner(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'case.jsonl'
             path.write_text(json.dumps(EVENTS[0])+'\n')
             api = client()
             result = harness.run_hunt('foundation-sec-alpha', EVENTS, client=api)
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
-                    patch.object(single_hunt, 'Client', return_value=api), \
-                    patch.object(single_hunt, 'run_hunt', return_value=result) as run, \
+            argv = [
+                'compare_models.py', '--models', 'foundation-sec-alpha', '--logs', str(path),
+                '--output-dir', str(Path(tmp)/'results'),
+                '--inference-config-dir', str(Path(tmp)/'inference_config'),
+            ]
+            with patch.object(sys, 'argv', argv), \
+                    patch.object(compare_models, 'Client', return_value=api), \
+                    patch.object(compare_models, 'run_hunt', return_value=result) as run, \
                     contextlib.redirect_stdout(io.StringIO()) as out:
-                single_hunt.main()
+                compare_models.main()
             self.assertEqual(run.call_args.args[:2], ('foundation-sec-alpha:latest', EVENTS))
-            self.assertIn(ANSWER, out.getvalue())
-            self.assertIn(
-                'Tokens: input 80 · output 40 (exact) · context 120 / '
-                f'{harness.NUM_CTX}',
-                out.getvalue(),
-            )
+            saved = list((Path(tmp)/'results').glob('*/results.jsonl'))
+            self.assertEqual(len(saved), 1)
+            row = json.loads(saved[0].read_text().splitlines()[0])
+            self.assertEqual(row['raw_content'], ANSWER)
             self.assertIn(
                 f"{result['status']} · {run_reports.seconds(result['timing']['evaluation_seconds'])}",
                 out.getvalue(),
@@ -333,66 +333,77 @@ required_stops = ["<end>"]
             self.assertEqual(result['timing']['evaluation_seconds'], 1.5)
             result['status'] = 'invalid'
             result['validation_errors'] = ['Invalid output']
-            with patch.object(sys, 'argv', ['main.py', str(path), '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
-                    patch.object(single_hunt, 'Client', return_value=api), \
-                    patch.object(single_hunt, 'run_hunt', return_value=result), \
+            with patch.object(sys, 'argv', argv), \
+                    patch.object(compare_models, 'Client', return_value=api), \
+                    patch.object(compare_models, 'run_hunt', return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(io.StringIO()), \
                     self.assertRaises(SystemExit) as exit:
-                single_hunt.main()
+                compare_models.main()
             self.assertEqual(exit.exception.code, 1)
 
-    def test_single_hunt_cli_defaults_to_no_timeout_and_forwards_seconds(self):
+    def test_one_model_one_log_defaults_to_no_timeout_and_forwards_seconds(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'case.jsonl'
             path.write_text(json.dumps(EVENTS[0])+'\n')
             api = client()
             result = harness.run_hunt('foundation-sec-alpha', EVENTS, client=api)
-            base = ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]
+            base = [
+                'compare_models.py', '--models', 'foundation-sec-alpha', '--logs', str(path),
+                '--output-dir', str(Path(tmp)/'results'),
+                '--inference-config-dir', str(Path(tmp)/'inference_config'),
+            ]
             with patch.object(sys, 'argv', base), \
-                    patch.object(single_hunt, 'Client', return_value=api) as constructed, \
-                    patch.object(single_hunt, 'run_hunt', return_value=result), \
+                    patch.object(compare_models, 'Client', return_value=api) as constructed, \
+                    patch.object(compare_models, 'run_hunt', return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()):
-                single_hunt.main()
+                compare_models.main()
             constructed.assert_called_once_with(timeout=None)
             with patch.object(sys, 'argv', base + ['--timeout', '45']), \
-                    patch.object(single_hunt, 'Client', return_value=api) as constructed, \
-                    patch.object(single_hunt, 'run_hunt', return_value=result), \
+                    patch.object(compare_models, 'Client', return_value=api) as constructed, \
+                    patch.object(compare_models, 'run_hunt', return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()):
-                single_hunt.main()
+                compare_models.main()
             constructed.assert_called_once_with(timeout=45.0)
 
-    def test_single_hunt_cli_rejects_bad_template_before_inference(self):
+    def test_one_model_one_log_rejects_bad_template_before_inference(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'case.jsonl'
             path.write_text(json.dumps(EVENTS[0])+'\n')
             api = client()
             api.show.return_value.template = "{{ .Prompt }}"
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
-                    patch.object(single_hunt, 'Client', return_value=api), \
-                    patch.object(single_hunt, 'run_hunt') as run, \
+            with patch.object(sys, 'argv', [
+                'compare_models.py', '--models', 'foundation-sec-alpha', '--logs', str(path),
+                '--output-dir', str(Path(tmp)/'results'),
+                '--inference-config-dir', str(Path(tmp)/'inference_config'),
+            ]), \
+                    patch.object(compare_models, 'Client', return_value=api), \
+                    patch.object(compare_models, 'run_hunt') as run, \
                     contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(io.StringIO()) as err, \
                     self.assertRaises(SystemExit) as exit:
-                single_hunt.main()
+                compare_models.main()
             self.assertEqual(exit.exception.code, 1)
             self.assertFalse(run.called)
             self.assertFalse(api.chat.called)
             self.assertIn("{{ .Prompt }}", err.getvalue())
             self.assertIn("Preflight failed", err.getvalue())
 
-    def test_single_hunt_cli_rejects_empty_log_before_inference(self):
+    def test_one_model_one_log_rejects_empty_log_before_inference(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'empty.jsonl'
             path.write_text('')
             api = client()
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha']), \
-                    patch.object(single_hunt, 'Client', return_value=api), \
-                    patch.object(single_hunt, 'run_hunt') as run, \
+            with patch.object(sys, 'argv', [
+                'compare_models.py', '--models', 'foundation-sec-alpha', '--logs', str(path),
+                '--output-dir', str(Path(tmp)/'results'),
+            ]), \
+                    patch.object(compare_models, 'Client', return_value=api), \
+                    patch.object(compare_models, 'run_hunt') as run, \
                     contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(io.StringIO()) as err, \
                     self.assertRaises(SystemExit) as exit:
-                single_hunt.main()
+                compare_models.main()
             self.assertEqual(exit.exception.code, 1)
             self.assertFalse(run.called)
             self.assertFalse(api.chat.called)
@@ -446,6 +457,29 @@ class ResultsDirectoryNameTests(unittest.TestCase):
             run_reports.results_directory_name(when),
             "10-Jan-2026-Sat_09-05pm-ET",
         )
+
+
+class ReportTimestampTests(unittest.TestCase):
+    def test_eastern_daylight_sunday_morning(self):
+        self.assertEqual(
+            run_reports.format_report_timestamp("2026-09-20T13:28:00+00:00"),
+            "Sunday, September 20, 2026, 9:28 AM ET",
+        )
+
+    def test_eastern_standard_saturday_evening(self):
+        self.assertEqual(
+            run_reports.format_report_timestamp("2026-01-11T02:05:00Z"),
+            "Saturday, January 10, 2026, 9:05 PM ET",
+        )
+
+    def test_naive_timestamp_is_read_as_eastern(self):
+        self.assertEqual(
+            run_reports.format_report_timestamp("2026-09-20T09:28:00"),
+            "Sunday, September 20, 2026, 9:28 AM ET",
+        )
+
+    def test_unparsed_value_is_left_unchanged(self):
+        self.assertEqual(run_reports.format_report_timestamp("now"), "now")
 
 
 class DefaultScenarioLogsTests(unittest.TestCase):
@@ -508,12 +542,15 @@ class ComparisonTests(unittest.TestCase):
         html = (directory / 'report.html').read_text()
         self.assertIn('4 / 4 runs recorded', html)
         self.assertIn('<th>Eval time</th>', html)
-        self.assertIn('excludes model load and unload', html)
+        self.assertNotIn('excludes model load and unload', html)
+        self.assertNotIn('Request settings:', html)
         self.assertIn('ok · 0m 1.50s', html)
         self.assertIn('TimeoutError', html)
         self.assertIn('e999', html)
         self.assertIn('color-scheme:dark', html)
         self.assertIn('background:#0f1419', html)
+        self.assertNotIn('#3dd68c', html)
+        self.assertIn('.invalid,.error{color:#f07178}', html)
         self.assertTrue((directory / 'manifest.json').exists())
 
     def test_missing_models_reported_together_without_starting_run(self):
@@ -602,7 +639,7 @@ class ComparisonTests(unittest.TestCase):
                 ['hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest'],
                 self.logs[:1],
             )
-        self.assertIn('Modelfile.foundation-sec-8b-instruct', str(error.exception))
+        self.assertIn('modelfiles/Modelfile.foundation-sec-8b-instruct', str(error.exception))
         self.assertFalse(api.chat.called)
 
     def test_run_hunt_rechecks_template_with_renderer(self):
@@ -623,7 +660,7 @@ class ComparisonTests(unittest.TestCase):
             chat_template='{{ .Prompt }}', renderer='gemma4',
         )
         self.assertEqual(refused['status'], 'error')
-        self.assertIn('Modelfile.foundation-sec-8b-instruct', refused['error'])
+        self.assertIn('modelfiles/Modelfile.foundation-sec-8b-instruct', refused['error'])
         self.assertFalse(api.chat.called)
 
     def test_report_escapes_model_output(self):
@@ -658,13 +695,17 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(first.name, "20-Sep-2026-Sun_09-28am-ET")
         self.assertEqual(second.name, "20-Sep-2026-Sun_09-28am-ET-2")
         self.assertTrue((first / "results.jsonl").exists())
+        self.assertIn(
+            "Sunday, September 20, 2026, 9:28 AM ET",
+            (first / "report.html").read_text(),
+        )
 
     def test_missing_details_render_as_unknown(self):
         directory = self.run_quietly(client())
         html = (directory / 'report.html').read_text()
-        self.assertIn('Quantization: —', html)
+        self.assertNotIn('Quantization:', html)
         self.assertIn('Thinking: not supported', html)
-        self.assertIn(f'used 120 / allocated {harness.NUM_CTX}', html)
+        self.assertIn(f'used 120 (0%) / allocated {harness.NUM_CTX}', html)
         self.assertIn(run_reports.context_used_cell(120, harness.NUM_CTX), html)
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
         self.assertEqual(rows[0]['tokens']['prompt_eval_count'], 80)
@@ -687,10 +728,10 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(manifest['request_settings']['seed'], harness.SEED)
         self.assertEqual(manifest['request_settings']['kv_cache_type'], harness.KV_CACHE_TYPE)
         self.assertFalse(manifest['request_settings']['shift'])
-        self.assertIn('seed=0', html)
-        self.assertIn('Context shift is disabled for every model.', html)
+        self.assertNotIn('seed=0', html)
+        self.assertNotIn('Context shift is disabled for every model.', html)
         self.assertIsNone(manifest['models'][0]['quantization_level'])
-        self.assertIn(f'kv_cache_type={harness.KV_CACHE_TYPE}', html)
+        self.assertNotIn(f'kv_cache_type={harness.KV_CACHE_TYPE}', html)
 
     def test_report_includes_model_settings_tokens_and_context(self):
         api = client()
@@ -729,8 +770,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertNotIn('gguf', html)
         self.assertIn('Thinking: disabled', html)
         self.assertIn('Thinking: not supported', html)
-        self.assertIn(f'used 120 / allocated {harness.NUM_CTX} (model max 40960)', html)
-        self.assertIn(f'used 120 / allocated {harness.NUM_CTX} (model max 131072)', html)
+        self.assertIn(f'used 120 (0%) / allocated {harness.NUM_CTX} (model max 40960)', html)
+        self.assertIn(f'used 120 (0%) / allocated {harness.NUM_CTX} (model max 131072)', html)
+        self.assertNotIn('Quantization:', html)
         self.assertIn('Input: 80', html)
         self.assertIn('Output: 40', html)
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
@@ -757,13 +799,15 @@ class ComparisonTests(unittest.TestCase):
         html = (directory / 'report.html').read_text()
         self.assertIn('Pending', html)
         self.assertIn('used — / allocated 32768', html)
+        self.assertNotIn('used — (', html)
         self.assertIn('model max 40960', html)
-        self.assertIn('Quantization: Q4_K_M · 7B', html)
+        self.assertNotIn('Quantization:', html)
+        self.assertNotIn('Q4_K_M', html)
         self.assertNotIn('gguf', html)
         self.assertIn('Thinking: disabled', html)
         self.assertIn('Input: —', html)
 
-    def test_report_shows_unlimited_num_predict(self):
+    def test_report_omits_introductory_disclaimer(self):
         directory = self.root / 'unlimited'
         directory.mkdir()
         manifest = {
@@ -779,12 +823,10 @@ class ComparisonTests(unittest.TestCase):
         }
         run_reports.write_report(directory, manifest, [])
         html = (directory / 'report.html').read_text()
-        self.assertIn('num_predict=-1 (no limit)', html)
-        self.assertIn(
-            'These are the harness fallbacks unless a profile overrides them',
-            html,
-        )
-        self.assertIn('not necessarily what each model was sent', html)
+        self.assertNotIn('num_predict=-1 (no limit)', html)
+        self.assertNotIn('harness fallbacks', html)
+        self.assertNotIn('not necessarily what each model was sent', html)
+        self.assertNotIn('does not establish detection accuracy', html)
 
     def test_report_shows_thinking_tokens_and_context_warning(self):
         directory = self.root / 'think'
@@ -844,7 +886,7 @@ class ComparisonTests(unittest.TestCase):
 
     def test_compare_cli_defaults_to_no_timeout_and_forwards_seconds(self):
         api = client()
-        argv = ['compare_models.py', '--models', 'foundation-sec-alpha', '--logs', self.logs[0], '--output-dir', str(self.root/'results'), '--profiles-dir', str(self.root/'profiles')]
+        argv = ['compare_models.py', '--models', 'foundation-sec-alpha', '--logs', self.logs[0], '--output-dir', str(self.root/'results'), '--inference-config-dir', str(self.root/'inference_config')]
         with patch.object(compare_models, 'Client', return_value=api) as constructed, \
                 patch.object(sys, 'argv', argv), \
                 contextlib.redirect_stdout(io.StringIO()):
@@ -857,26 +899,26 @@ class ComparisonTests(unittest.TestCase):
         constructed.assert_called_once_with(timeout=45.0)
 
 
-class DeclaredProfileTests(unittest.TestCase):
+class DeclaredInferenceConfigurationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.profiles = self.root / "profiles"
-        self.profiles.mkdir()
+        self.configurations = self.root / "inference_config"
+        self.configurations.mkdir()
         self.log = self.root / "case.jsonl"
         self.log.write_text(json.dumps(EVENTS[0]) + "\n")
 
-    def write_profile(self, name: str, text: str) -> None:
-        (self.profiles / name).write_text(text, encoding="utf-8")
+    def write_inference_configuration(self, name: str, text: str) -> None:
+        (self.configurations / name).write_text(text, encoding="utf-8")
 
-    def test_checked_in_qwen_profile_parses(self):
-        profile = model_profiles.parse_profile_file(
-            Path(__file__).resolve().parent / "profiles" / "qwen3-32b.profile"
+    def test_checked_in_qwen_inference_configuration_parses(self):
+        configuration = inference_configurations.parse_inference_configuration_file(
+            Path(__file__).resolve().parent.parent / "inference_config" / "qwen3-32b.conf"
         )
-        self.assertEqual(profile["source"], "profiles/qwen3-32b.profile")
+        self.assertEqual(configuration["source"], "inference_config/qwen3-32b.conf")
         self.assertEqual(
-            profile["fields"],
+            configuration["fields"],
             {
                 "model": "qwen3:32b",
                 "thinking": "true",
@@ -886,55 +928,72 @@ class DeclaredProfileTests(unittest.TestCase):
                 "top_k": "20",
             },
         )
-        self.assertEqual(model_profiles.profile_num_ctx(profile), 40960)
-        self.assertIs(model_profiles.profile_think(profile), True)
+        self.assertEqual(inference_configurations.inference_configuration_num_ctx(configuration), 40960)
+        self.assertIs(inference_configurations.inference_configuration_think(configuration), True)
         self.assertEqual(
-            model_profiles.profile_sampling(profile),
+            inference_configurations.inference_configuration_sampling(configuration),
             {"temperature": 0.6, "top_p": 0.95, "top_k": 20},
         )
-        self.assertIn("# weight_precision=Developer Q8_0", profile["text"])
-        self.assertIn("# kv_cache=Q8_0", profile["text"])
-        self.assertIn("# repeat_penalty=1.0", profile["text"])
-        self.assertIn("# basis: Qwen's explicit thinking-mode recommendation", profile["text"])
+        self.assertIn("# basis: Qwen's explicit thinking-mode recommendation", configuration["text"])
 
-    def test_checked_in_profiles_match_the_planned_setups(self):
+    def test_checked_in_inference_configurations_match_the_planned_setups(self):
         expected = {
-            "qwen3-32b.profile": ("qwen3:32b", "40960", 40960, "true", True),
-            "llama3.3-70b.profile": ("llama3.3:70b", "16384", 16384, None, None),
-            "granite4.2-30b.profile": ("granite4.2:30b", "65536", 65536, "high", "high"),
-            "deepseek-r1-32b.profile": ("deepseek-r1:32b", "65536", 65536, "true", True),
-            "command-r.profile": ("command-r:latest", "131072", 131072, None, None),
-            "gemma4-31b.profile": ("gemma4:31b", "32768", 32768, "true", True),
-            "mistral-small3.2-24b.profile": (
+            "qwen3-32b.conf": ("qwen3:32b", "40960", 40960, "true", True),
+            "llama3.3-70b.conf": ("llama3.3:70b", "16384", 16384, None, None),
+            "granite4.2-30b.conf": ("granite4.2:30b", "65536", 65536, "high", "high"),
+            "deepseek-r1-32b.conf": ("deepseek-r1:32b", "65536", 65536, "true", True),
+            "command-r.conf": ("command-r:latest", "131072", 131072, None, None),
+            "gemma4-31b.conf": ("gemma4:31b", "32768", 32768, "true", True),
+            "gemma4-26b.conf": ("gemma4:26b", "32768", 32768, "true", True),
+            "glm-4.7-flash-q4_K_M.conf": (
+                "glm-4.7-flash:q4_K_M",
+                "202752",
+                202752,
+                "true",
+                True,
+            ),
+            "mistral-small3.2-24b.conf": (
                 "mistral-small3.2:24b",
                 "131072",
                 131072,
                 None,
                 None,
             ),
-            "mistral-nemo-12b.profile": ("mistral-nemo:12b", "131072", 131072, None, None),
-            "foundation-sec-8b-instruct.profile": (
+            "mistral-nemo-12b.conf": ("mistral-nemo:12b", "131072", 131072, None, None),
+            "phi3-medium-128k.conf": ("phi3:medium-128k", "131072", 131072, None, None),
+            "foundation-sec-8b-instruct.conf": (
                 "foundation-sec-8b-instruct",
                 "131072",
                 131072,
                 None,
                 None,
             ),
+            "cyberpal2-20b.conf": (
+                "cyberpal2-20b:latest",
+                "8192",
+                8192,
+                "medium",
+                "medium",
+            ),
         }
         sampling = {
-            "qwen3-32b.profile": ("0.6", 0.6, "0.95", 0.95, "20", 20),
-            "llama3.3-70b.profile": ("0.2", 0.2, "0.90", 0.9, "40", 40),
-            "granite4.2-30b.profile": ("1.0", 1.0, "0.95", 0.95, "40", 40),
-            "deepseek-r1-32b.profile": ("0.6", 0.6, "0.95", 0.95, "40", 40),
-            "command-r.profile": ("0.3", 0.3, "0.90", 0.9, "40", 40),
-            "gemma4-31b.profile": ("1.0", 1.0, "0.95", 0.95, "64", 64),
-            "mistral-small3.2-24b.profile": ("0.15", 0.15, "0.90", 0.9, "40", 40),
-            "mistral-nemo-12b.profile": ("0.3", 0.3, "0.90", 0.9, "40", 40),
-            "foundation-sec-8b-instruct.profile": ("0.2", 0.2, "0.90", 0.9, "40", 40),
+            "qwen3-32b.conf": ("0.6", 0.6, "0.95", 0.95, "20", 20),
+            "llama3.3-70b.conf": ("0.2", 0.2, "0.90", 0.9, "40", 40),
+            "granite4.2-30b.conf": ("1.0", 1.0, "0.95", 0.95, "40", 40),
+            "deepseek-r1-32b.conf": ("0.6", 0.6, "0.95", 0.95, "40", 40),
+            "command-r.conf": ("0.3", 0.3, "0.90", 0.9, "40", 40),
+            "gemma4-31b.conf": ("1.0", 1.0, "0.95", 0.95, "64", 64),
+            "gemma4-26b.conf": ("1.0", 1.0, "0.95", 0.95, "64", 64),
+            "glm-4.7-flash-q4_K_M.conf": ("1.0", 1.0, "0.95", 0.95, "40", 40),
+            "mistral-small3.2-24b.conf": ("0.15", 0.15, "0.90", 0.9, "40", 40),
+            "mistral-nemo-12b.conf": ("0.3", 0.3, "0.90", 0.9, "40", 40),
+            "phi3-medium-128k.conf": ("0.7", 0.7, "0.90", 0.9, "40", 40),
+            "foundation-sec-8b-instruct.conf": ("0.2", 0.2, "0.90", 0.9, "40", 40),
+            "cyberpal2-20b.conf": ("0.0", 0.0, "0.90", 0.9, "40", 40),
         }
-        root = Path(__file__).resolve().parent / "profiles"
+        root = Path(__file__).resolve().parent.parent / "inference_config"
         for name, (model, text, number, thinking, parsed) in expected.items():
-            profile = model_profiles.parse_profile_file(root / name)
+            configuration = inference_configurations.parse_inference_configuration_file(root / name)
             temperature, temperature_value, top_p, top_p_value, top_k, top_k_value = sampling[name]
             fields = {
                 "model": model,
@@ -945,58 +1004,67 @@ class DeclaredProfileTests(unittest.TestCase):
             }
             if thinking is not None:
                 fields["thinking"] = thinking
-            self.assertEqual(profile["fields"], fields)
+            self.assertEqual(configuration["fields"], fields)
             self.assertEqual(
-                model_profiles.profile_sampling(profile),
+                inference_configurations.inference_configuration_sampling(configuration),
                 {
                     "temperature": temperature_value,
                     "top_p": top_p_value,
                     "top_k": top_k_value,
                 },
             )
-            self.assertEqual(model_profiles.profile_num_ctx(profile), number)
-            self.assertEqual(model_profiles.profile_think(profile), parsed)
-            self.assertIn("# weight_precision=", profile["text"])
-            self.assertIn("# repeat_penalty=", profile["text"])
-            self.assertIn("# basis:", profile["text"])
-            if thinking is None:
-                self.assertIn("# thinking=", profile["text"])
-            if name == "granite4.2-30b.profile":
+            self.assertEqual(inference_configurations.inference_configuration_num_ctx(configuration), number)
+            self.assertEqual(inference_configurations.inference_configuration_think(configuration), parsed)
+            self.assertIn("# basis:", configuration["text"])
+            if name == "granite4.2-30b.conf":
                 self.assertIn(
                     "# thinking levels: false, low, medium, high",
-                    profile["text"],
+                    configuration["text"],
                 )
-        self.assertIsNone(model_profiles.quantization_note("Developer Q8_0", "Q8_0"))
-        self.assertIsNone(model_profiles.quantization_note("Developer QAT Q4_0", "Q4_0"))
+        self.assertIsNone(inference_configurations.quantization_note("Developer Q8_0", "Q8_0"))
+        self.assertIsNone(inference_configurations.quantization_note("Developer QAT Q4_0", "Q4_0"))
         self.assertIsNone(
-            model_profiles.quantization_note("Existing developer Q8_0", "Q8_0")
+            inference_configurations.quantization_note("Existing developer Q8_0", "Q8_0")
         )
-        self.assertIn("Q4_K_M", model_profiles.quantization_note("Q4_K_M", "Q8_0"))
+        self.assertIn("Q4_K_M", inference_configurations.quantization_note("Q4_K_M", "Q8_0"))
 
     def test_comments_and_blank_lines_are_ignored(self):
-        profile = model_profiles.parse_profile_text(
+        configuration = inference_configurations.parse_inference_configuration_text(
             "# intended setup\n\nmodel=qwen3:32b\n", "memory"
         )
-        self.assertEqual(profile["fields"], {"model": "qwen3:32b"})
+        self.assertEqual(configuration["fields"], {"model": "qwen3:32b"})
 
-    def test_ambiguous_profiles_stop_before_inference(self):
-        self.write_profile("think.profile", "model=foundation-sec-alpha\ntemperature=0.6\n")
-        self.write_profile("direct.profile", "model=foundation-sec-alpha:latest\ntemperature=0\n")
+    def test_inference_configuration_field_name_must_match_exactly(self):
+        rejected = (
+            "Model=alpha\n",
+            "model=alpha\nNum Ctx=40960\n",
+            "model=alpha\nnum-ctx=40960\n",
+        )
+        for text in rejected:
+            with self.assertRaises(ValueError) as error:
+                inference_configurations.parse_inference_configuration_text(text, "memory")
+            message = str(error.exception)
+            self.assertIn("unknown field", message)
+            self.assertIn("expected an exact key", message)
+
+    def test_ambiguous_inference_configurations_stop_before_inference(self):
+        self.write_inference_configuration("think.conf", "model=foundation-sec-alpha\ntemperature=0.6\n")
+        self.write_inference_configuration("direct.conf", "model=foundation-sec-alpha:latest\ntemperature=0\n")
         api = client()
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
-                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
             )
         message = str(error.exception)
-        self.assertIn("Multiple profiles", message)
-        self.assertIn("think.profile", message)
-        self.assertIn("direct.profile", message)
+        self.assertIn("Multiple inference configurations", message)
+        self.assertIn("think.conf", message)
+        self.assertIn("direct.conf", message)
         self.assertFalse(api.chat.called)
         self.assertFalse((self.root / "results").exists())
 
-    def test_explicit_profiles_keep_same_model_runs_separate(self):
-        self.write_profile("think.profile", "model=foundation-sec-alpha\ntemperature=0.6\n")
-        self.write_profile("direct.profile", "model=foundation-sec-alpha\ntemperature=0\n")
+    def test_explicit_inference_configurations_keep_same_model_runs_separate(self):
+        self.write_inference_configuration("think.conf", "model=foundation-sec-alpha\ntemperature=0.6\n")
+        self.write_inference_configuration("direct.conf", "model=foundation-sec-alpha\ntemperature=0\n")
         api = client()
         with contextlib.redirect_stdout(io.StringIO()):
             directory = compare_models.run_comparison(
@@ -1004,27 +1072,31 @@ class DeclaredProfileTests(unittest.TestCase):
                 ["foundation-sec-alpha"],
                 [str(self.log)],
                 self.root / "results",
-                self.profiles,
-                [self.profiles / "think.profile", self.profiles / "direct.profile"],
+                self.configurations,
+                [self.configurations / "think.conf", self.configurations / "direct.conf"],
             )
         rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
         self.assertEqual([row["model"] for row in rows], ["foundation-sec-alpha:latest", "foundation-sec-alpha:latest"])
         self.assertEqual(len({row["run_key"] for row in rows}), 2)
-        self.assertNotEqual(rows[0]["declared_profile"], rows[1]["declared_profile"])
+        self.assertNotEqual(rows[0]["declared_inference_configuration"], rows[1]["declared_inference_configuration"])
         html = (directory / "report.html").read_text()
-        self.assertIn("temperature=0.6", html)
-        self.assertIn("temperature=0", html)
+        self.assertIn("think.conf", html)
+        self.assertIn("direct.conf", html)
+        self.assertNotIn("Declared inference configs", html)
+        copied = directory / "declared-inference-configurations"
+        self.assertIn("temperature=0.6", (copied / "think.conf").read_text())
+        self.assertIn("temperature=0\n", (copied / "direct.conf").read_text())
         self.assertEqual(
-            sorted(path.name for path in (directory / "declared-profiles").iterdir()),
-            ["direct.profile", "think.profile"],
+            sorted(path.name for path in copied.iterdir()),
+            ["direct.conf", "think.conf"],
         )
 
-    def test_profile_num_ctx_is_sent_and_allocated(self):
-        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nnum_ctx=16384\n")
+    def test_inference_configuration_num_ctx_is_sent_and_allocated(self):
+        self.write_inference_configuration("alpha.conf", "model=foundation-sec-alpha\nnum_ctx=16384\n")
         api = client()
         with contextlib.redirect_stdout(io.StringIO()):
             directory = compare_models.run_comparison(
-                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
             )
         self.assertEqual(api.chat.call_args.kwargs["options"]["num_ctx"], 16384)
         rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
@@ -1034,11 +1106,11 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertEqual(manifest["models"][0]["num_ctx"], 16384)
         self.assertEqual(manifest["request_settings"]["num_ctx"], harness.NUM_CTX)
         html = (directory / "report.html").read_text()
-        self.assertIn("used 120 / allocated 16384", html)
+        self.assertIn("used 120 (1%) / allocated 16384", html)
 
-    def test_profile_sampling_is_sent(self):
-        self.write_profile(
-            "alpha.profile",
+    def test_inference_configuration_sampling_is_sent(self):
+        self.write_inference_configuration(
+            "alpha.conf",
             "model=foundation-sec-alpha\n"
             "temperature=0.2\n"
             "top_p=0.90\n"
@@ -1047,19 +1119,19 @@ class DeclaredProfileTests(unittest.TestCase):
         api = client()
         with contextlib.redirect_stdout(io.StringIO()):
             compare_models.run_comparison(
-                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
             )
         options = api.chat.call_args.kwargs["options"]
         self.assertEqual(options["temperature"], 0.2)
         self.assertEqual(options["top_p"], 0.9)
         self.assertEqual(options["top_k"], 40)
 
-    def test_profile_without_sampling_keeps_temperature_zero(self):
-        self.write_profile("alpha.profile", "model=foundation-sec-alpha\n")
+    def test_inference_configuration_without_sampling_keeps_temperature_zero(self):
+        self.write_inference_configuration("alpha.conf", "model=foundation-sec-alpha\n")
         api = client()
         with contextlib.redirect_stdout(io.StringIO()):
             compare_models.run_comparison(
-                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
             )
         options = api.chat.call_args.kwargs["options"]
         self.assertEqual(options["temperature"], harness.TEMPERATURE)
@@ -1067,22 +1139,22 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertNotIn("top_k", options)
 
     def test_bad_sampling_stops_before_chat(self):
-        self.write_profile("alpha.profile", "model=foundation-sec-alpha\ntop_p=1.5\n")
+        self.write_inference_configuration("alpha.conf", "model=foundation-sec-alpha\ntop_p=1.5\n")
         api = client()
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
-                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
             )
         self.assertIn("top_p must be a decimal from 0 through 1", str(error.exception))
         self.assertFalse(api.chat.called)
         self.assertFalse((self.root / "results").exists())
 
-    def test_profile_without_num_ctx_uses_fallback(self):
-        self.write_profile("alpha.profile", "model=foundation-sec-alpha\n")
+    def test_inference_configuration_without_num_ctx_uses_fallback(self):
+        self.write_inference_configuration("alpha.conf", "model=foundation-sec-alpha\n")
         api = client()
         with contextlib.redirect_stdout(io.StringIO()):
             directory = compare_models.run_comparison(
-                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
             )
         self.assertEqual(api.chat.call_args.kwargs["options"]["num_ctx"], harness.NUM_CTX)
         rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
@@ -1090,8 +1162,8 @@ class DeclaredProfileTests(unittest.TestCase):
         manifest = json.loads((directory / "manifest.json").read_text())
         self.assertEqual(manifest["models"][0]["num_ctx"], harness.NUM_CTX)
 
-    def test_profile_thinking_is_sent_before_inference(self):
-        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nthinking=true\n")
+    def test_inference_configuration_thinking_is_sent_before_inference(self):
+        self.write_inference_configuration("alpha.conf", "model=foundation-sec-alpha\nthinking=true\n")
         api = client()
         api.show.return_value.capabilities = ["completion", "thinking"]
         seen = {}
@@ -1104,7 +1176,7 @@ class DeclaredProfileTests(unittest.TestCase):
         api.chat.side_effect = generate
         with contextlib.redirect_stdout(io.StringIO()):
             directory = compare_models.run_comparison(
-                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
             )
         self.assertTrue(seen["before"])
         manifest = json.loads((directory / "manifest.json").read_text())
@@ -1112,8 +1184,8 @@ class DeclaredProfileTests(unittest.TestCase):
         html = (directory / "report.html").read_text()
         self.assertIn("Thinking: enabled", html)
 
-    def test_profile_thinking_level_is_sent_before_inference(self):
-        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nthinking=high\n")
+    def test_inference_configuration_thinking_level_is_sent_before_inference(self):
+        self.write_inference_configuration("alpha.conf", "model=foundation-sec-alpha\nthinking=high\n")
         api = client()
         api.show.return_value.capabilities = ["completion", "thinking"]
 
@@ -1124,69 +1196,82 @@ class DeclaredProfileTests(unittest.TestCase):
         api.chat.side_effect = generate
         with contextlib.redirect_stdout(io.StringIO()):
             compare_models.run_comparison(
-                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
             )
 
-    def test_profile_thinking_without_capability_stops_before_chat(self):
-        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nthinking=true\n")
+    def test_inference_configuration_thinking_without_capability_stops_before_chat(self):
+        self.write_inference_configuration("alpha.conf", "model=foundation-sec-alpha\nthinking=true\n")
         api = client()
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
-                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
             )
         self.assertIn("thinking capability", str(error.exception))
         self.assertFalse(api.chat.called)
         self.assertFalse((self.root / "results").exists())
 
     def test_bad_thinking_stops_before_chat(self):
-        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nthinking=sometimes\n")
+        self.write_inference_configuration("alpha.conf", "model=foundation-sec-alpha\nthinking=sometimes\n")
         api = client()
         api.show.return_value.capabilities = ["completion", "thinking"]
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
-                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
             )
         self.assertIn("thinking must be", str(error.exception))
         self.assertFalse(api.chat.called)
         self.assertFalse((self.root / "results").exists())
 
     def test_bad_num_ctx_stops_before_chat(self):
-        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nnum_ctx=16384\u201324576\n")
+        self.write_inference_configuration("alpha.conf", "model=foundation-sec-alpha\nnum_ctx=16384\u201324576\n")
         api = client()
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
-                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
             )
         self.assertIn("num_ctx must be a positive integer", str(error.exception))
         self.assertFalse(api.chat.called)
         self.assertFalse((self.root / "results").exists())
 
     def test_num_ctx_rejects_commas(self):
-        profile = model_profiles.parse_profile_text(
+        configuration = inference_configurations.parse_inference_configuration_text(
             "model=foundation-sec-alpha\nnum_ctx=16,384\n", "memory"
         )
         with self.assertRaises(ValueError) as error:
-            model_profiles.profile_num_ctx(profile)
+            inference_configurations.inference_configuration_num_ctx(configuration)
         self.assertIn("no commas", str(error.exception))
         self.assertIn("16,384", str(error.exception))
 
-    def test_malformed_profile_stops_before_results_and_inference(self):
-        self.write_profile("alpha.profile", "weight_quant=Q6_K\n")
+    def test_inexact_inference_configuration_field_stops_before_chat(self):
+        self.write_inference_configuration("alpha.conf", "model=foundation-sec-alpha\nnum-ctx=16384\n")
         api = client()
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
-                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
+            )
+        message = str(error.exception)
+        self.assertIn("unknown field 'num-ctx'", message)
+        self.assertIn("num_ctx", message)
+        self.assertFalse(api.chat.called)
+        self.assertFalse((self.root / "results").exists())
+
+    def test_malformed_inference_configuration_stops_before_results_and_inference(self):
+        self.write_inference_configuration("alpha.conf", "weight_quant=Q6_K\n")
+        api = client()
+        with self.assertRaises(ValueError) as error:
+            compare_models.run_comparison(
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
             )
         self.assertIn("missing Model", str(error.exception))
         self.assertFalse(api.chat.called)
         self.assertFalse((self.root / "results").exists())
 
-    def test_profile_is_saved_and_shown_before_inference(self):
-        self.write_profile(
-            "alpha.profile",
+    def test_inference_configuration_is_saved_and_shown_before_inference(self):
+        self.write_inference_configuration(
+            "alpha.conf",
             "model=foundation-sec-alpha\n"
             "weight_quant=Q6_K\n"
-            "note=<script>alert(1)</script>\n"
+            "# note=<script>alert(1)</script>\n"
             "kv_cache=f16\n",
         )
         api = client()
@@ -1202,19 +1287,16 @@ class DeclaredProfileTests(unittest.TestCase):
             saved = list((self.root / "results").glob("*/manifest.json"))
             self.assertEqual(len(saved), 1)
             manifest = json.loads(saved[0].read_text())
-            self.assertEqual(manifest["profiles"][0]["fields"]["kv_cache"], "f16")
-            self.assertIn("Q4_K_M", manifest["profiles"][0]["quantization_note"])
+            self.assertEqual(manifest["inference_configurations"][0]["fields"]["kv_cache"], "f16")
+            self.assertIn("Q4_K_M", manifest["inference_configurations"][0]["quantization_note"])
             report = saved[0].with_name("report.html").read_text()
-            self.assertIn("Declared profiles", report)
-            self.assertIn(
-                "Uncommented profile values drive the Ollama request",
-                report,
-            )
-            self.assertIn("this block is the archived source file", report)
+            self.assertNotIn("Declared inference configs", report)
+            self.assertNotIn("inference config values drive the Ollama request", report)
+            self.assertNotIn("archived source file", report)
             self.assertIn("0 / 1 runs recorded", report)
             self.assertNotIn("<script>", report)
-            self.assertIn("&lt;script&gt;", report)
-            copied = saved[0].parent / "declared-profiles" / "alpha.profile"
+            self.assertNotIn("&lt;script&gt;", report)
+            copied = saved[0].parent / "declared-inference-configurations" / "alpha.conf"
             self.assertIn("<script>", copied.read_text())
             seen["before"] = True
             return response()
@@ -1222,41 +1304,42 @@ class DeclaredProfileTests(unittest.TestCase):
         api.chat.side_effect = generate
         with contextlib.redirect_stdout(io.StringIO()) as out:
             directory = compare_models.run_comparison(
-                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
             )
         self.assertTrue(seen["before"])
         printed = out.getvalue()
-        self.assertLess(printed.index("Declared profile"), printed.index("Results:"))
+        self.assertLess(printed.index("Declared inference configuration"), printed.index("Results:"))
         self.assertIn("installed quantization is Q4_K_M", printed)
         rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
-        self.assertTrue(rows[0]["declared_profile"].endswith("alpha.profile"))
+        self.assertTrue(rows[0]["declared_inference_configuration"].endswith("alpha.conf"))
         self.assertEqual(api.chat.call_args.kwargs["options"]["temperature"], 0)
         self.assertEqual(api.chat.call_args.kwargs["options"]["seed"], harness.SEED)
 
-    def test_missing_profile_is_recorded_as_absent(self):
+    def test_missing_inference_configuration_is_recorded_as_absent(self):
         api = client()
         with contextlib.redirect_stdout(io.StringIO()) as out:
             directory = compare_models.run_comparison(
-                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.configurations
             )
-        self.assertIn("No declared profile for foundation-sec-alpha:latest", out.getvalue())
+        self.assertIn("No declared inference configuration for foundation-sec-alpha:latest", out.getvalue())
         html = (directory / "report.html").read_text()
-        self.assertIn("No declared profile", html)
+        self.assertNotIn("Declared inference configs", html)
+        self.assertNotIn("No declared inference config", html)
         manifest = json.loads((directory / "manifest.json").read_text())
-        self.assertEqual(manifest["profiles"], [])
+        self.assertEqual(manifest["inference_configurations"], [])
         rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
-        self.assertIsNone(rows[0]["declared_profile"])
-        self.assertFalse((directory / "declared-profiles").exists())
+        self.assertIsNone(rows[0]["declared_inference_configuration"])
+        self.assertFalse((directory / "declared-inference-configurations").exists())
 
-    def test_single_hunt_records_profile_before_analysis(self):
-        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nkv_cache=f16\n")
+    def test_single_hunt_records_inference_configuration_before_analysis(self):
+        self.write_inference_configuration("alpha.conf", "model=foundation-sec-alpha\nkv_cache=f16\n")
         api = client()
         result = harness.run_hunt("foundation-sec-alpha", EVENTS, client=api)
         output = self.root / "single-results"
         seen = {}
 
         def fake_run(*args, **kwargs):
-            saved = list(output.glob("*/declared-profiles/alpha.profile"))
+            saved = list(output.glob("*/declared-inference-configurations/alpha.conf"))
             self.assertEqual(len(saved), 1)
             self.assertIn("kv_cache=f16", saved[0].read_text())
             report = saved[0].parents[1] / "report.html"
@@ -1265,87 +1348,88 @@ class DeclaredProfileTests(unittest.TestCase):
             return result
 
         with patch.object(sys, "argv", [
-            "main.py", str(self.log), "--model", "foundation-sec-alpha",
-            "--profiles-dir", str(self.profiles),
+            "compare_models.py", "--models", "foundation-sec-alpha", "--logs", str(self.log),
+            "--inference-config-dir", str(self.configurations),
             "--output-dir", str(output),
-        ]), patch.object(single_hunt, "Client", return_value=api), \
-                patch.object(single_hunt, "run_hunt", side_effect=fake_run), \
+        ]), patch.object(compare_models, "Client", return_value=api), \
+                patch.object(compare_models, "run_hunt", side_effect=fake_run), \
                 contextlib.redirect_stdout(io.StringIO()) as out:
-            single_hunt.main()
+            compare_models.main()
         self.assertTrue(seen["before"])
         printed = out.getvalue()
-        self.assertLess(printed.index("kv_cache="), printed.index("--- Analysis ---"))
+        self.assertLess(printed.index("kv_cache="), printed.index("[1/1]"))
         rows = [
             json.loads(line)
             for path in output.glob("*/results.jsonl")
             for line in path.read_text().splitlines()
         ]
         self.assertEqual(len(rows), 1)
-        self.assertTrue(rows[0]["declared_profile"].endswith("alpha.profile"))
+        self.assertTrue(rows[0]["declared_inference_configuration"].endswith("alpha.conf"))
         self.assertEqual(rows[0]["status"], "ok")
 
     def test_single_hunt_requires_a_choice_when_settings_differ(self):
-        self.write_profile("think.profile", "model=foundation-sec-alpha\ntemperature=0.6\nkv_cache=f16\n")
-        self.write_profile("direct.profile", "model=foundation-sec-alpha\ntemperature=0\nkv_cache=q8_0\n")
+        self.write_inference_configuration("think.conf", "model=foundation-sec-alpha\ntemperature=0.6\nkv_cache=f16\n")
+        self.write_inference_configuration("direct.conf", "model=foundation-sec-alpha\ntemperature=0\nkv_cache=q8_0\n")
         api = client()
         output = self.root / "single-results"
         with patch.object(sys, "argv", [
-            "main.py", str(self.log), "--model", "foundation-sec-alpha",
-            "--profiles-dir", str(self.profiles),
+            "compare_models.py", "--models", "foundation-sec-alpha", "--logs", str(self.log),
+            "--inference-config-dir", str(self.configurations),
             "--output-dir", str(output),
-        ]), patch.object(single_hunt, "Client", return_value=api), \
-                patch.object(single_hunt, "run_hunt") as run, \
+        ]), patch.object(compare_models, "Client", return_value=api), \
+                patch.object(compare_models, "run_hunt") as run, \
                 contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()) as err, \
                 self.assertRaises(SystemExit) as exit:
-            single_hunt.main()
+            compare_models.main()
         self.assertEqual(exit.exception.code, 1)
         self.assertFalse(run.called)
         self.assertFalse(api.chat.called)
-        self.assertIn("think.profile", err.getvalue())
-        self.assertIn("direct.profile", err.getvalue())
+        self.assertIn("think.conf", err.getvalue())
+        self.assertIn("direct.conf", err.getvalue())
         self.assertFalse(output.exists())
 
         result = harness.run_hunt("foundation-sec-alpha", EVENTS, client=api)
 
-        def run_with(profile_name):
+        def run_with(configuration_name):
             with patch.object(sys, "argv", [
-                "main.py", str(self.log), "--model", "foundation-sec-alpha",
-                "--profile", str(self.profiles / profile_name),
-                "--profiles-dir", str(self.profiles),
+                "compare_models.py", "--models", "foundation-sec-alpha", "--logs", str(self.log),
+                "--inference-configuration", str(self.configurations / configuration_name),
+                "--inference-config-dir", str(self.configurations),
                 "--output-dir", str(output),
-            ]), patch.object(single_hunt, "Client", return_value=api), \
-                    patch.object(single_hunt, "run_hunt", return_value=result), \
+            ]), patch.object(compare_models, "Client", return_value=api), \
+                    patch.object(compare_models, "run_hunt", return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()):
-                single_hunt.main()
+                compare_models.main()
 
-        run_with("think.profile")
-        run_with("direct.profile")
+        run_with("think.conf")
+        run_with("direct.conf")
         recorded = []
         for path in sorted(output.glob("*/results.jsonl")):
             rows = [json.loads(line) for line in path.read_text().splitlines()]
             self.assertEqual(len(rows), 1)
-            recorded.append(rows[0]["declared_profile"])
-            copied = list(path.parent.glob("declared-profiles/*.profile"))
+            recorded.append(rows[0]["declared_inference_configuration"])
+            copied = list(path.parent.glob("declared-inference-configurations/*.conf"))
             self.assertEqual(len(copied), 1)
-            self.assertTrue(rows[0]["declared_profile"].endswith(copied[0].name))
+            self.assertTrue(rows[0]["declared_inference_configuration"].endswith(copied[0].name))
         self.assertEqual(len(recorded), 2)
         self.assertNotEqual(recorded[0], recorded[1])
-        self.assertTrue(any(path.endswith("think.profile") for path in recorded))
-        self.assertTrue(any(path.endswith("direct.profile") for path in recorded))
+        self.assertTrue(any(path.endswith("think.conf") for path in recorded))
+        self.assertTrue(any(path.endswith("direct.conf") for path in recorded))
 
-    def test_single_hunt_rejects_bad_profile_before_inference(self):
-        self.write_profile("alpha.profile", "not a profile\n")
+    def test_single_hunt_rejects_bad_inference_configuration_before_inference(self):
+        self.write_inference_configuration("alpha.conf", "not an inference configuration\n")
         api = client()
         with patch.object(sys, "argv", [
-            "main.py", str(self.log), "--model", "foundation-sec-alpha",
-            "--profiles-dir", str(self.profiles),
-        ]), patch.object(single_hunt, "Client", return_value=api), \
-                patch.object(single_hunt, "run_hunt") as run, \
+            "compare_models.py", "--models", "foundation-sec-alpha", "--logs", str(self.log),
+            "--inference-config-dir", str(self.configurations),
+            "--output-dir", str(self.root / "rejected"),
+        ]), patch.object(compare_models, "Client", return_value=api), \
+                patch.object(compare_models, "run_hunt") as run, \
                 contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()) as err, \
                 self.assertRaises(SystemExit) as exit:
-            single_hunt.main()
+            compare_models.main()
         self.assertEqual(exit.exception.code, 1)
         self.assertFalse(run.called)
         self.assertFalse(api.chat.called)

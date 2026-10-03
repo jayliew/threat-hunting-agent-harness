@@ -448,6 +448,29 @@ class ResultsDirectoryNameTests(unittest.TestCase):
         )
 
 
+class ReportTimestampTests(unittest.TestCase):
+    def test_eastern_daylight_sunday_morning(self):
+        self.assertEqual(
+            run_reports.format_report_timestamp("2026-09-20T13:28:00+00:00"),
+            "Sunday, September 20, 2026, 9:28 AM ET",
+        )
+
+    def test_eastern_standard_saturday_evening(self):
+        self.assertEqual(
+            run_reports.format_report_timestamp("2026-01-11T02:05:00Z"),
+            "Saturday, January 10, 2026, 9:05 PM ET",
+        )
+
+    def test_naive_timestamp_is_read_as_eastern(self):
+        self.assertEqual(
+            run_reports.format_report_timestamp("2026-09-20T09:28:00"),
+            "Sunday, September 20, 2026, 9:28 AM ET",
+        )
+
+    def test_unparsed_value_is_left_unchanged(self):
+        self.assertEqual(run_reports.format_report_timestamp("now"), "now")
+
+
 class DefaultScenarioLogsTests(unittest.TestCase):
     def test_default_scenario_logs_include_all_seven_fixtures(self):
         self.assertEqual(
@@ -658,6 +681,10 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(first.name, "20-Sep-2026-Sun_09-28am-ET")
         self.assertEqual(second.name, "20-Sep-2026-Sun_09-28am-ET-2")
         self.assertTrue((first / "results.jsonl").exists())
+        self.assertIn(
+            "Sunday, September 20, 2026, 9:28 AM ET",
+            (first / "report.html").read_text(),
+        )
 
     def test_missing_details_render_as_unknown(self):
         directory = self.run_quietly(client())
@@ -781,7 +808,7 @@ class ComparisonTests(unittest.TestCase):
         html = (directory / 'report.html').read_text()
         self.assertIn('num_predict=-1 (no limit)', html)
         self.assertIn(
-            'These are the harness fallbacks unless an inference configuration overrides them',
+            'These are the harness fallbacks unless an inference config overrides them',
             html,
         )
         self.assertIn('not necessarily what each model was sent', html)
@@ -1231,9 +1258,9 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             self.assertEqual(manifest["inference_configurations"][0]["fields"]["kv_cache"], "f16")
             self.assertIn("Q4_K_M", manifest["inference_configurations"][0]["quantization_note"])
             report = saved[0].with_name("report.html").read_text()
-            self.assertIn("Declared inference configurations", report)
+            self.assertIn("Declared inference configs", report)
             self.assertIn(
-                "Uncommented inference configuration values drive the Ollama request",
+                "Uncommented inference config values drive the Ollama request",
                 report,
             )
             self.assertIn("this block is the archived source file", report)
@@ -1267,7 +1294,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             )
         self.assertIn("No declared inference configuration for foundation-sec-alpha:latest", out.getvalue())
         html = (directory / "report.html").read_text()
-        self.assertIn("No declared inference configuration", html)
+        self.assertIn("No declared inference config", html)
         manifest = json.loads((directory / "manifest.json").read_text())
         self.assertEqual(manifest["inference_configurations"], [])
         rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]

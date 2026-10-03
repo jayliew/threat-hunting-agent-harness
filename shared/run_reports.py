@@ -264,20 +264,33 @@ def collapsible_run_details(inner_html: str) -> str:
     )
 
 
+def raw_output_html(raw_content: str) -> str:
+    """Collapsed raw answer. An empty answer stays visible."""
+    if not raw_content.strip():
+        return "<pre>No answer returned.</pre>"
+    return (
+        '<details class="raw-output">'
+        "<summary>Show raw output</summary>"
+        f"<pre>{escape(raw_content)}</pre>"
+        "</details>"
+    )
+
+
 def hunt_answer_html(result: dict) -> str:
-    """Spaced labeled sections for a valid answer; raw text otherwise."""
-    raw = escape(result.get("raw_content") or "No answer returned.")
-    fallback = f"<pre>{raw}</pre>"
-    if result.get("status") != "ok":
-        return fallback
+    """Spaced required sections, then any text that fell outside them."""
     sections = result.get("sections") or {}
-    if any(not str(sections.get(name) or "").strip() for name in REQUIRED_SECTIONS):
-        return fallback
     blocks = [
         f'<div class="hunt-section">{escape(name)}: {escape(sections[name])}</div>'
         for name in REQUIRED_SECTIONS
+        if str(sections.get(name) or "").strip()
     ]
-    return f'<div class="hunt-answer">{"".join(blocks)}</div>'
+    blocks.extend(
+        f'<div class="hunt-unexpected">{escape(chunk)}</div>'
+        for chunk in result.get("unexpected") or []
+        if str(chunk).strip()
+    )
+    answer = f'<div class="hunt-answer">{"".join(blocks)}</div>' if blocks else ""
+    return answer + raw_output_html(result.get("raw_content") or "")
 
 
 def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
@@ -362,7 +375,9 @@ th,td{text-align:left;padding:10px 14px;border-bottom:1px solid #2e3a48}th{backg
 article{padding:20px;border:1px solid #2e3a48;border-radius:10px;background:#1a222c;min-width:0}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,monospace}
 .hunt-answer{display:flex;flex-direction:column;gap:1.35rem}
-.hunt-section{white-space:pre-wrap;overflow-wrap:anywhere}
+.hunt-section,.hunt-unexpected{white-space:pre-wrap;overflow-wrap:anywhere}
+.raw-output{margin:12px 0 0}.raw-output summary{display:inline-block;padding:6px 12px;border:1px solid #2e3a48;border-radius:6px;background:#222c38;color:#e7edf3;font-size:14px;list-style:none}
+.raw-output summary::-webkit-details-marker{display:none}
 .invalid,.error{color:#f07178}.warn{color:#e6b450}.pending{color:#8b9aab}summary{cursor:pointer}
 .run-details{margin:8px 0 12px}.run-details summary{display:inline-block;padding:6px 12px;border:1px solid #2e3a48;border-radius:6px;background:#222c38;color:#e7edf3;font-size:14px;list-style:none}
 .run-details summary::-webkit-details-marker{display:none}.run-details-body{margin-top:8px;color:#9aa8b5;line-height:1.6}

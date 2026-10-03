@@ -443,23 +443,84 @@ def incomplete_response_message(
 
 REQUIRED_SECTIONS = ("Verdict", "Threat type", "Summary", "Evidence")
 ALLOWED_VERDICTS = frozenset({"suspicious", "benign", "inconclusive"})
-_SECTION_ALIASES = {name.lower(): name for name in REQUIRED_SECTIONS}
-_SECTION_HEADER_RE = re.compile(
-    r"^(Verdict|Threat type|Summary|Evidence)[ \t]*:[ \t]*(.*)$",
-    re.IGNORECASE | re.MULTILINE,
+UNEXPECTED_CONTENT_WARNING = (
+    "Response includes content outside Verdict, Threat type, Summary, and Evidence."
 )
+_SECTION_ALIASES = {name.lower(): name for name in REQUIRED_SECTIONS}
+_KNOWN_HEADER_RE = re.compile(
+    r"^(Verdict|Threat type|Summary|Evidence)[ \t]*:[ \t]*(.*)$",
+    re.IGNORECASE,
+)
+_UNKNOWN_HEADER_RE = re.compile(
+    r"^([A-Za-z][A-Za-z0-9 _-]{0,60})[ \t]*:[ \t]*(.*)$"
+)
+_EVIDENCE_LINE_RE = re.compile(
+    r"^(?:none|(?:[A-Za-z0-9_.:-]+)(?:[ \t]*,[ \t]*[A-Za-z0-9_.:-]+)*)[ \t]*,?[ \t]*$",
+    re.IGNORECASE,
+)
+_CONTINUATION_SECTIONS = frozenset({"Summary", "Evidence"})
+
+
+def parse_hunt_output(content: str) -> tuple[dict[str, str], list[str]]:
+    """Return required section values and text that does not belong to them.
+
+    The first occurrence of each required label wins. Summary keeps following
+    prose. Evidence also keeps continuation lines that are only IDs or none.
+    Preamble, unknown labels, duplicate labels, and other stray lines are
+    returned as ordered chunks.
+    """
+    sections: dict[str, str] = {}
+    unexpected: list[str] = []
+    bucket: tuple[str, str | int] | None = None
+
+    def start_unexpected(text: str) -> None:
+        nonlocal bucket
+        unexpected.append(text)
+        bucket = ("unexpected", len(unexpected) - 1)
+
+    def append_current(text: str) -> None:
+        if bucket is None:
+            start_unexpected(text)
+            return
+        kind, key = bucket
+        if kind == "section":
+            name = str(key)
+            sections[name] = text if not sections[name] else sections[name] + "\n" + text
+            return
+        unexpected[int(key)] = unexpected[int(key)] + "\n" + text
+
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        known = _KNOWN_HEADER_RE.match(line)
+        if known:
+            name = _SECTION_ALIASES[known.group(1).lower()]
+            if name not in sections:
+                sections[name] = known.group(2).strip()
+                bucket = ("section", name) if name in _CONTINUATION_SECTIONS else None
+            else:
+                start_unexpected(line)
+            continue
+        if _UNKNOWN_HEADER_RE.match(line):
+            start_unexpected(line)
+            continue
+        if bucket == ("section", "Evidence") and not _EVIDENCE_LINE_RE.match(line):
+            start_unexpected(line)
+            continue
+        if bucket == ("section", "Evidence") or bucket == ("section", "Summary"):
+            append_current(line)
+            continue
+        if bucket is not None and bucket[0] == "unexpected":
+            append_current(line)
+            continue
+        start_unexpected(line)
+    return sections, unexpected
 
 
 def parse_hunt_sections(content: str) -> dict[str, str]:
     """Map canonical section names to their values (may omit missing ones)."""
-    matches = list(_SECTION_HEADER_RE.finditer(content))
-    sections: dict[str, str] = {}
-    for index, match in enumerate(matches):
-        name = _SECTION_ALIASES[match.group(1).lower()]
-        first_line = match.group(2)
-        rest_start = match.end()
-        rest_end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
-        sections[name] = (first_line + content[rest_start:rest_end]).strip()
+    sections, _unexpected = parse_hunt_output(content)
     return sections
 
 
@@ -599,6 +660,7 @@ def run_hunt(
         "raw_content": "",
         "thinking": "",
         "sections": {},
+        "unexpected": [],
         "unknown_evidence_ids": [],
         "validation_errors": [],
         "error": None,
@@ -658,7 +720,11 @@ def run_hunt(
         result["tokens"] = usage_tokens(response)
         assign_token_split(result["tokens"], result["thinking"], content)
         result["context"] = context_usage(allocated, result["tokens"], model_max)
-        result["sections"] = parse_hunt_sections(content)
+        sections, unexpected = parse_hunt_output(content)
+        result["sections"] = sections
+        result["unexpected"] = unexpected
+        if unexpected:
+            result["warnings"].append(UNEXPECTED_CONTENT_WARNING)
         allowed = allowed_evidence_ids(events)
         result["unknown_evidence_ids"] = sorted(set(
             parse_evidence_ids(result["sections"].get("Evidence", ""))

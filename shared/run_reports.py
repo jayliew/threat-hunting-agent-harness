@@ -10,7 +10,16 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from . import REPO_ROOT
-from .harness import KV_CACHE_TYPE, NUM_CTX, NUM_PREDICT, SEED, SHIFT, THINK
+from .harness import (
+    KV_CACHE_TYPE,
+    NUM_CTX,
+    NUM_PREDICT,
+    SEED,
+    SHIFT,
+    THINK,
+    format_token_count,
+    format_token_counts_in_report_text,
+)
 from .inference_configurations import display_source
 
 OUTPUT_ROOT = REPO_ROOT / "results"
@@ -154,7 +163,7 @@ def duration_seconds_one_decimal(value: float | None) -> str:
 
 
 def display(value) -> str:
-    return "—" if value is None or value == "" else str(value)
+    return format_token_count(value)
 
 
 def framing_note(model: dict) -> str:
@@ -203,7 +212,7 @@ def context_label(allocated, used, model_max) -> str:
         used_text = context_used_cell(used, allocated)
     text = f"used {used_text} / allocated {display(allocated)}"
     if model_max is not None:
-        text += f" (model max {model_max})"
+        text += f" (model max {format_token_count(model_max)})"
     return text
 
 
@@ -212,9 +221,9 @@ def context_used_cell(used, allocated) -> str:
     if used is None or used == "":
         return "—"
     if allocated is None or allocated == "" or allocated == 0:
-        return str(used)
+        return format_token_count(used)
     percent = round(100 * float(used) / float(allocated))
-    return f"{used} ({percent}%)"
+    return f"{format_token_count(used)} ({percent}%)"
 
 
 def tokens_label(tokens: dict | None, *, include_thinking: bool = True) -> str:
@@ -287,9 +296,13 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
                 f'<td>{e(display(tokens.get("output_tokens")))}</td></tr>'
             )
             errors = result["validation_errors"] + ([result["error"]] if result["error"] else [])
-            error_html = ''.join(f'<p class="error">{e(error)}</p>' for error in errors)
+            error_html = ''.join(
+                f'<p class="error">{e(format_token_counts_in_report_text(error))}</p>'
+                for error in errors
+            )
             warning_html = ''.join(
-                f'<p class="warn">{e(warning)}</p>' for warning in result.get("warnings") or []
+                f'<p class="warn">{e(format_token_counts_in_report_text(warning))}</p>'
+                for warning in result.get("warnings") or []
             )
             thinking = (f'<details><summary>Thinking trace</summary><pre>{e(result["thinking"])}</pre></details>'
                         if result["thinking"] else '')

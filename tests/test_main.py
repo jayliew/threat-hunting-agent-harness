@@ -30,6 +30,7 @@ from shared.harness import (
     chat_think_kwargs,
     context_limit,
     context_usage,
+    format_token_count,
     empty_tokens,
     incomplete_response_message,
     invalid_hunt_output_message,
@@ -753,7 +754,7 @@ class UsageAndContextTests(unittest.TestCase):
         self.assertEqual(context_limit(NUM_CTX, NUM_CTX - 1)[0], "warn")
         limit, message = context_limit(NUM_CTX, NUM_CTX)
         self.assertEqual(limit, "error")
-        self.assertIn(str(NUM_CTX), message)
+        self.assertIn(format_token_count(NUM_CTX), message)
         self.assertEqual(context_limit(NUM_CTX, NUM_CTX + 1)[0], "error")
 
     def test_native_context_length_reads_model_info(self) -> None:

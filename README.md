@@ -109,7 +109,7 @@ top_p=0.95
 top_k=20
 ```
 
-Other recorded setups: `llama3.3:70b` (`num_ctx` 16384), `granite4.2:30b` (65536, `thinking=high`), `deepseek-r1:32b` (65536, `thinking=true`), `command-r:latest` (131072), `gemma4:31b` (32768, `thinking=true`), `gemma4:26b` (32768, `thinking=true`), `glm-4.7-flash:q4_K_M` (202752, `thinking=true`), `mistral-small3.2:24b` (131072), `mistral-nemo:12b` (131072), and `foundation-sec-8b-instruct` (131072). Models that do not support thinking omit that line. Granite 4.2 accepts `false`, `low`, `medium`, and `high`. Qwen3, DeepSeek-R1, Gemma 4, and GLM-4.7-Flash are on or off (`thinking=true` or `false`).
+Other recorded setups: `llama3.3:70b` (`num_ctx` 16384), `granite4.2:30b` (65536, `thinking=high`), `deepseek-r1:32b` (65536, `thinking=true`), `command-r:latest` (131072), `gemma4:31b` (32768, `thinking=true`), `gemma4:26b` (32768, `thinking=true`), `glm-4.7-flash:q4_K_M` (202752, `thinking=true`), `mistral-small3.2:24b` (131072), `mistral-nemo:12b` (131072), `phi3:medium-128k` (131072), and `foundation-sec-8b-instruct` (131072). Models that do not support thinking omit that line. Granite 4.2 accepts `false`, `low`, `medium`, and `high`. Qwen3, DeepSeek-R1, Gemma 4, and GLM-4.7-Flash are on or off (`thinking=true` or `false`).
 
 `compare_models.py` loads the chosen inference configuration before the first inference call, prints it, and copies it into the results directory. A model with no file is reported as having no declared inference configuration. If an uncommented weight quant differs from the installed Ollama quantization, the recorded snapshot keeps both and the run prints the difference. A malformed inference configuration stops the run before any results directory is created. `num_ctx` must be one positive integer written as digits only (commas are rejected). `temperature` is a non-negative decimal, `top_p` is a decimal from 0 through 1, and `top_k` is a positive integer.
 
@@ -174,6 +174,7 @@ Before any chat call, `compare_models.py` requires the model to appear in `ollam
 | Granite 4 | `<\|im_start\|>` and `<\|im_end\|>` |
 | DeepSeek-R1 | `<｜User｜>` and `<｜Assistant｜>` (fullwidth vertical bar, U+FF5C) |
 | Command R | `<\|START_OF_TURN_TOKEN\|>`, `<\|SYSTEM_TOKEN\|>`, `<\|USER_TOKEN\|>`, `<\|CHATBOT_TOKEN\|>` |
+| Phi-3 Medium 128K | `<\|system\|>`, `<\|user\|>`, `<\|assistant\|>`, `<\|end\|>`. Stops are exactly `<\|end\|>`, `<\|user\|>`, and `<\|assistant\|>` |
 
 The raw `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest` import is that bare `{{ .Prompt }}` case. The GGUF has no `tokenizer.chat_template`, the Hub repo has no Ollama `template` file, and the call sends only the user text: it omits `<|system|>`, `<|user|>`, and `<|assistant|>` from [`chat_template.jinja`](https://huggingface.co/fdtn-ai/Foundation-Sec-8B-Instruct/blob/main/chat_template.jinja) and drops the harness system message. The weights are Llama 3.1–based, but this checkpoint was not trained on `<|start_header_id|>` headers, so those tokenizer tokens are the wrong framing. A `RENDERER` on a different model does not make this name usable. Run `foundation-sec-8b-instruct` from `modelfiles/Modelfile.foundation-sec-8b-instruct`.
 

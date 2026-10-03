@@ -537,6 +537,8 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('e999', html)
         self.assertIn('color-scheme:dark', html)
         self.assertIn('background:#0f1419', html)
+        self.assertNotIn('#3dd68c', html)
+        self.assertIn('.invalid,.error{color:#f07178}', html)
         self.assertTrue((directory / 'manifest.json').exists())
 
     def test_missing_models_reported_together_without_starting_run(self):

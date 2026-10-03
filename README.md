@@ -50,7 +50,7 @@ The runner copies the inference configuration into a results directory before in
 
 ## What a hunt does
 
-`compare_models.py` calls `run_hunt` from `shared/harness.py`. Each call starts a fresh conversation with the same prompt and serialized events.
+`compare_models.py` calls `run_hunt` from `shared/harness.py`. Each call starts a fresh conversation with the shared prompt and serialized events. A model uses a different prompt only when its canonical name is registered in `MODEL_PROMPTS` in `shared/prompts.py`. A custom prompt may replace the system text and the user-task sentence. It still has to ask for the same three verdicts and four output fields, because validation does not change per model. The same model uses one prompt across inference configurations.
 
 1. Load a JSONL file and sort events by `@timestamp`.
 2. Send standard `role` / `content` messages. The system message holds the analyst instructions, evidence rules, verdict definitions, and output contract. The user message holds the task and a JSON array of events. Markdown headings and lists are the instruction hierarchy. XML tags (`<verdicts>`, `<output_fields>`, `<task>`, `<security_events>`) separate metadata from supporting content.
@@ -202,7 +202,8 @@ If an imported GGUF lacks the right framing, add a Modelfile under `modelfiles/`
 | Path | Role |
 | --- | --- |
 | `compare_models.py` | Run one or more installed models on one or more JSONL files and write `results/`. One model and one file is `--models NAME --logs PATH` |
-| `shared/harness.py` | Defaults, log loading, preflight, prompts, inference, token accounting, and output validation |
+| `shared/harness.py` | Defaults, log loading, preflight, inference, token accounting, and output validation |
+| `shared/prompts.py` | Shared hunt prompt, and `MODEL_PROMPTS` for a model-specific prompt |
 | `shared/model_config.py` | Validation of installed templates, renderers, parsers, and stop sequences |
 | `shared/model_formats.toml` | Ordered model format requirements |
 | `shared/inference_configurations.py` | Inference configuration loading, settings validation, and run selection |

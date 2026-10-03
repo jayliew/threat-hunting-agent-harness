@@ -23,6 +23,7 @@ import compare_models
 import shared.harness as harness
 import shared.model_config as model_config
 import shared.inference_configurations as inference_configurations
+import shared.prompts as prompts
 import shared.run_reports as run_reports
 
 
@@ -412,6 +413,63 @@ required_stops = ["<end>"]
             self.assertIn("log contains no events", err.getvalue())
 
 
+class PromptSelectionTests(unittest.TestCase):
+    def test_unregistered_names_use_the_default_prompt(self):
+        for name in (
+            'foundation-sec-alpha',
+            'foundation-sec-alpha:latest',
+            'qwen3:32b',
+        ):
+            with self.subTest(name=name):
+                self.assertIs(prompts.prompt_for_model(name), prompts.DEFAULT_PROMPT)
+        self.assertEqual(prompts.DEFAULT_PROMPT.name, 'default')
+        self.assertEqual(prompts.DEFAULT_PROMPT.system, prompts.SYSTEM_PROMPT)
+        self.assertEqual(prompts.prompt_for_model('qwen3:32b:latest').name, 'default')
+
+    def test_registered_prompt_is_sent_only_for_that_model(self):
+        custom = prompts.ModelPrompt(
+            name='foundation-sec-alpha',
+            system='Custom analyst instructions for this model only.',
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            logs = []
+            for name in ('one', 'two'):
+                path = root / (name + '.jsonl')
+                path.write_text(json.dumps(EVENTS[0]) + '\n')
+                logs.append(str(path))
+            api = client()
+            registered = {'foundation-sec-alpha': custom}
+            with patch.dict(prompts.MODEL_PROMPTS, registered, clear=True), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                directory = compare_models.run_comparison(
+                    api,
+                    ['foundation-sec-alpha', 'foundation-sec-8b-beta:1'],
+                    logs,
+                    root / 'results',
+                )
+            requests = [call.kwargs for call in api.chat.call_args_list]
+            self.assertEqual(requests[0]['messages'][0]['content'], custom.system)
+            self.assertEqual(requests[1]['messages'][0]['content'], custom.system)
+            self.assertEqual(requests[2]['messages'][0]['content'], prompts.SYSTEM_PROMPT)
+            self.assertEqual(requests[3]['messages'][0]['content'], prompts.SYSTEM_PROMPT)
+            self.assertIn(prompts.USER_TASK, requests[0]['messages'][1]['content'])
+            rows = [json.loads(line) for line in (directory / 'results.jsonl').read_text().splitlines()]
+            self.assertEqual(
+                [row['system_prompt'] for row in rows],
+                ['foundation-sec-alpha', 'foundation-sec-alpha', 'default', 'default'],
+            )
+            self.assertNotEqual(rows[0]['prompt_sha256'], rows[2]['prompt_sha256'])
+            html = (directory / 'report.html').read_text()
+            self.assertIn('Prompt: foundation-sec-alpha', html)
+            self.assertIn('Prompt: default', html)
+            manifest = json.loads((directory / 'manifest.json').read_text())
+            self.assertEqual(
+                [model['system_prompt'] for model in manifest['models']],
+                ['foundation-sec-alpha', 'default'],
+            )
+
+
 class DurationFormatTests(unittest.TestCase):
     def test_displays_minutes_and_seconds(self):
         self.assertEqual(run_reports.seconds(None), "—")
@@ -560,7 +618,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertTrue(all(len(r['messages']) == 2 for r in requests))
         self.assertEqual(requests[0]['messages'], requests[2]['messages'])
         self.assertEqual(rows[0]['prompt_sha256'], rows[2]['prompt_sha256'])
+        self.assertEqual(rows[0]['system_prompt'], 'default')
         html = (directory / 'report.html').read_text()
+        self.assertIn('Prompt: default', html)
         self.assertIn('4 / 4 runs recorded', html)
         self.assertIn('<th>Eval time</th>', html)
         self.assertNotIn('excludes model load and unload', html)

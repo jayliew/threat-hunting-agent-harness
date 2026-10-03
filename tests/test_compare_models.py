@@ -944,6 +944,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             "deepseek-r1-32b.conf": ("deepseek-r1:32b", "65536", 65536, "true", True),
             "command-r.conf": ("command-r:latest", "131072", 131072, None, None),
             "gemma4-31b.conf": ("gemma4:31b", "32768", 32768, "true", True),
+            "gemma4-26b.conf": ("gemma4:26b", "32768", 32768, "true", True),
             "glm-4.7-flash-q4_K_M.conf": (
                 "glm-4.7-flash:q4_K_M",
                 "202752",
@@ -974,6 +975,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             "deepseek-r1-32b.conf": ("0.6", 0.6, "0.95", 0.95, "40", 40),
             "command-r.conf": ("0.3", 0.3, "0.90", 0.9, "40", 40),
             "gemma4-31b.conf": ("1.0", 1.0, "0.95", 0.95, "64", 64),
+            "gemma4-26b.conf": ("1.0", 1.0, "0.95", 0.95, "64", 64),
             "glm-4.7-flash-q4_K_M.conf": ("1.0", 1.0, "0.95", 0.95, "40", 40),
             "mistral-small3.2-24b.conf": ("0.15", 0.15, "0.90", 0.9, "40", 40),
             "mistral-nemo-12b.conf": ("0.3", 0.3, "0.90", 0.9, "40", 40),

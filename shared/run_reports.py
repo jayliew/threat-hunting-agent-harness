@@ -10,7 +10,15 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from . import REPO_ROOT
-from .harness import KV_CACHE_TYPE, NUM_CTX, NUM_PREDICT, SEED, SHIFT, THINK
+from .harness import (
+    CONTEXT_WARN_RATIO,
+    KV_CACHE_TYPE,
+    NUM_CTX,
+    NUM_PREDICT,
+    SEED,
+    SHIFT,
+    THINK,
+)
 from .inference_configurations import display_source
 
 OUTPUT_ROOT = REPO_ROOT / "results"
@@ -195,18 +203,6 @@ def thinking_label(result: dict | None, model: dict, settings: dict) -> str:
     return think_label(chosen)
 
 
-def context_label(allocated, used, model_max) -> str:
-    """Card line: used tokens with percent of allocated context, then the model max."""
-    if used is None or used == "":
-        used_text = "—"
-    else:
-        used_text = context_used_cell(used, allocated)
-    text = f"used {used_text} / allocated {display(allocated)}"
-    if model_max is not None:
-        text += f" (model max {model_max})"
-    return text
-
-
 def context_used_cell(used, allocated) -> str:
     """Summary-table cell: used tokens and percent of allocated context."""
     if used is None or used == "":
@@ -215,6 +211,36 @@ def context_used_cell(used, allocated) -> str:
         return str(used)
     percent = round(100 * float(used) / float(allocated))
     return f"{used} ({percent}%)"
+
+
+def context_used_high(used, allocated) -> bool:
+    """True when used tokens fill at least CONTEXT_WARN_RATIO of the allocated window."""
+    if used is None or used == "" or allocated is None or allocated == "" or allocated == 0:
+        return False
+    try:
+        used_value = float(used)
+        allocated_value = float(allocated)
+    except (TypeError, ValueError):
+        return False
+    if allocated_value == 0:
+        return False
+    return used_value >= allocated_value * CONTEXT_WARN_RATIO
+
+
+def context_used_markup(used, allocated) -> str:
+    """Escaped used-token figure, red when it fills at least 90% of allocated context."""
+    text = escape(context_used_cell(used, allocated))
+    if context_used_high(used, allocated):
+        return f'<span class="error">{text}</span>'
+    return text
+
+
+def context_label_html(allocated, used, model_max) -> str:
+    """Card line HTML. Only the used figure is red when context is nearly full."""
+    text = f"used {context_used_markup(used, allocated)} / allocated {escape(display(allocated))}"
+    if model_max is not None:
+        text += f" (model max {escape(str(model_max))})"
+    return text
 
 
 def tokens_label(tokens: dict | None, *, include_thinking: bool = True) -> str:
@@ -252,7 +278,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             show_thinking_tokens = think != "not supported"
             if result is None:
                 pending_details = (
-                    f'{e(context_label(model.get("num_ctx", settings.get("num_ctx")), None, model.get("context_length")))}<br>'
+                    f'{context_label_html(model.get("num_ctx", settings.get("num_ctx")), None, model.get("context_length"))}<br>'
                     f'{framing_note(model)}'
                     f'Thinking: {e(think)}<br>'
                     f'{e(tokens_label(None, include_thinking=show_thinking_tokens))}'
@@ -281,7 +307,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
                 f'<td>{e(verdict)}</td><td class="{e(status)}">{e(status)}</td>'
                 f'<td>{len(result["unknown_evidence_ids"])}</td><td>{evaluated}</td>'
                 f'<td>{e(think)}</td>'
-                f'<td>{e(context_used_cell(used, allocated))}</td><td>{e(display(allocated))}</td>'
+                f'<td>{context_used_markup(used, allocated)}</td><td>{e(display(allocated))}</td>'
                 f'<td>{e(display(tokens.get("input_tokens")))}</td>'
                 f'<td>{e(thinking_tokens_cell)}</td>'
                 f'<td>{e(display(tokens.get("output_tokens")))}</td></tr>'
@@ -294,7 +320,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             thinking = (f'<details><summary>Thinking trace</summary><pre>{e(result["thinking"])}</pre></details>'
                         if result["thinking"] else '')
             run_details = (
-                f'{e(context_label(allocated, used, model_max))}<br>'
+                f'{context_label_html(allocated, used, model_max)}<br>'
                 f'{framing_note(model)}'
                 f'Thinking: {e(think)}<br>'
                 f'{e(tokens_label(tokens, include_thinking=show_thinking_tokens))}<br>'

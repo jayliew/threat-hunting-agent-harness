@@ -458,12 +458,20 @@ class ChatTemplateTests(unittest.TestCase):
             "<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{{ .System }}"
             "<|USER_TOKEN|>{{ .Content }}<|CHATBOT_TOKEN|>"
         )
+        cyberpal = (
+            "<|start|>system<|message|>You are ChatGPT.<|end|>"
+            "<|start|>developer<|message|>{{ .System }}<|end|>"
+            "<|start|>user<|message|>{{ .Content }}<|end|>"
+            "<|start|>assistant<|channel|>final<|message|>"
+        )
         self.assertIsNone(chat_template_error("qwen3:32b", qwen))
         self.assertIsNone(chat_template_error("llama3.3:70b", llama))
         self.assertIsNone(chat_template_error("mistral-small3.2:24b", mistral_small))
         self.assertIsNone(chat_template_error("mistral-nemo:12b", mistral_nemo))
         self.assertIsNone(chat_template_error("granite4.2:30b", qwen))
         self.assertIsNone(chat_template_error("command-r:latest", command_r))
+        self.assertIsNone(chat_template_error("cyberpal2-20b:latest", cyberpal))
+        self.assertIsNotNone(chat_template_error("cyberpal2-20b:latest", "{{ .Prompt }}"))
         self.assertIsNotNone(chat_template_error("qwen3:32b", "{{ .Prompt }}"))
         self.assertIsNotNone(chat_template_error("qwen3:32b", mistral_small))
         self.assertIsNotNone(chat_template_error("llama3.3:70b", qwen))
@@ -550,6 +558,27 @@ class ChatTemplateTests(unittest.TestCase):
                 self.assertIn("must use only stop", installed_model_error(name, info))
         info.parameters = 'stop "unterminated'
         self.assertIn("malformed stop", installed_model_error(name, info))
+
+    def test_cyberpal_requires_harmony_stops(self) -> None:
+        template = (
+            "<|start|>system<|message|>You are ChatGPT.<|end|>"
+            "<|start|>developer<|message|>{{ .System }}<|end|>"
+            "<|channel|>final"
+        )
+        info = SimpleNamespace(
+            template=template,
+            modelfile="",
+            parameters='stop "<|return|>"\nstop "<|call|>"\n',
+        )
+        name = "cyberpal2-20b:latest"
+        self.assertIsNone(installed_model_error(name, info))
+        for parameters in (
+            'stop "<|return|>"',
+            'stop "<|return|>"\nstop "<|call|>"\nstop "<|end|>"',
+        ):
+            with self.subTest(parameters=parameters):
+                info.parameters = parameters
+                self.assertIn("must use only stop", installed_model_error(name, info))
 
     def test_inspect_installed_model_blocks_before_chat(self) -> None:
         api = Mock()

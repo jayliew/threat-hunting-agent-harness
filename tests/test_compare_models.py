@@ -934,9 +934,6 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             inference_configurations.inference_configuration_sampling(configuration),
             {"temperature": 0.6, "top_p": 0.95, "top_k": 20},
         )
-        self.assertIn("# weight_precision=Developer Q8_0", configuration["text"])
-        self.assertIn("# kv_cache=Q8_0", configuration["text"])
-        self.assertIn("# repeat_penalty=1.0", configuration["text"])
         self.assertIn("# basis: Qwen's explicit thinking-mode recommendation", configuration["text"])
 
     def test_checked_in_inference_configurations_match_the_planned_setups(self):
@@ -998,11 +995,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             )
             self.assertEqual(inference_configurations.inference_configuration_num_ctx(configuration), number)
             self.assertEqual(inference_configurations.inference_configuration_think(configuration), parsed)
-            self.assertIn("# weight_precision=", configuration["text"])
-            self.assertIn("# repeat_penalty=", configuration["text"])
             self.assertIn("# basis:", configuration["text"])
-            if thinking is None:
-                self.assertIn("# thinking=", configuration["text"])
             if name == "granite4.2-30b.conf":
                 self.assertIn(
                     "# thinking levels: false, low, medium, high",

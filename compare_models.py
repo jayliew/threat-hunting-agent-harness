@@ -20,11 +20,11 @@ import sys
 
 from ollama import Client
 
-from harness import parse_timeout, preflight_models_and_logs, run_hunt
-from model_profiles import (
+from shared.harness import parse_timeout, preflight_models_and_logs, run_hunt
+from shared.model_profiles import (
     DEFAULT_PROFILES_DIR, assign_run_slots, canonical_model_name, load_profile_paths, load_profiles,
 )
-from run_reports import (
+from shared.run_reports import (
     OUTPUT_ROOT, annotate_result, open_recorded_run, save_result, seconds, slot_label,
 )
 

@@ -9,11 +9,11 @@ from unittest.mock import Mock
 
 from ollama import ChatResponse, Message
 
-from model_config import (
+from shared.model_config import (
     chat_template_error, installed_renderer, installed_model_error, is_bare_prompt_template, inspect_installed_model,
 )
 
-from harness import (
+from shared.harness import (
     CONTEXT_WARN_RATIO,
     EVIDENCE_END,
     EVIDENCE_START,

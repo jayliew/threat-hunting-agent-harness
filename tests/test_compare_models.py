@@ -945,6 +945,13 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             "command-r.conf": ("command-r:latest", "131072", 131072, None, None),
             "gemma4-31b.conf": ("gemma4:31b", "32768", 32768, "true", True),
             "gemma4-26b.conf": ("gemma4:26b", "32768", 32768, "true", True),
+            "glm-4.7-flash-q4_K_M.conf": (
+                "glm-4.7-flash:q4_K_M",
+                "202752",
+                202752,
+                "true",
+                True,
+            ),
             "mistral-small3.2-24b.conf": (
                 "mistral-small3.2:24b",
                 "131072",
@@ -953,12 +960,20 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
                 None,
             ),
             "mistral-nemo-12b.conf": ("mistral-nemo:12b", "131072", 131072, None, None),
+            "phi3-medium-128k.conf": ("phi3:medium-128k", "131072", 131072, None, None),
             "foundation-sec-8b-instruct.conf": (
                 "foundation-sec-8b-instruct",
                 "131072",
                 131072,
                 None,
                 None,
+            ),
+            "cyberpal2-20b.conf": (
+                "cyberpal2-20b:latest",
+                "8192",
+                8192,
+                "medium",
+                "medium",
             ),
         }
         sampling = {
@@ -969,9 +984,12 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             "command-r.conf": ("0.3", 0.3, "0.90", 0.9, "40", 40),
             "gemma4-31b.conf": ("1.0", 1.0, "0.95", 0.95, "64", 64),
             "gemma4-26b.conf": ("1.0", 1.0, "0.95", 0.95, "64", 64),
+            "glm-4.7-flash-q4_K_M.conf": ("1.0", 1.0, "0.95", 0.95, "40", 40),
             "mistral-small3.2-24b.conf": ("0.15", 0.15, "0.90", 0.9, "40", 40),
             "mistral-nemo-12b.conf": ("0.3", 0.3, "0.90", 0.9, "40", 40),
+            "phi3-medium-128k.conf": ("0.7", 0.7, "0.90", 0.9, "40", 40),
             "foundation-sec-8b-instruct.conf": ("0.2", 0.2, "0.90", 0.9, "40", 40),
+            "cyberpal2-20b.conf": ("0.0", 0.0, "0.90", 0.9, "40", 40),
         }
         root = Path(__file__).resolve().parent.parent / "inference_config"
         for name, (model, text, number, thinking, parsed) in expected.items():

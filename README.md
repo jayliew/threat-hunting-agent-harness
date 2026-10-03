@@ -17,7 +17,17 @@ launchctl setenv OLLAMA_NUM_PARALLEL 1
 launchctl setenv OLLAMA_MAX_LOADED_MODELS 1
 ```
 
-Install Ollama (`brew install ollama`, then `ollama serve` or the Ollama app) and see what is already installed:
+On Linux, set the same Ollama server environment before you start the server, or restart it afterward so the running process inherits them. If you run `ollama serve` in a terminal, export the variables in that shell first. If you installed Ollama with the [Linux install script](https://ollama.com/download/linux), put `Environment=` lines (or an `EnvironmentFile=`) in a systemd drop-in under `/etc/systemd/system/ollama.service.d/`, then run `sudo systemctl daemon-reload` and `sudo systemctl restart ollama`:
+
+```bash
+export OLLAMA_FLASH_ATTENTION=1
+export OLLAMA_KV_CACHE_TYPE=f16
+export OLLAMA_NUM_PARALLEL=1
+export OLLAMA_MAX_LOADED_MODELS=1
+ollama serve
+```
+
+On macOS, install Ollama with `brew install ollama`, then run `ollama serve` or open the Ollama app. On Linux, install with `curl -fsSL https://ollama.com/install.sh | sh`, then confirm the service is running (`systemctl status ollama`) or start `ollama serve` manually. See what is already installed:
 
 ```bash
 ollama list

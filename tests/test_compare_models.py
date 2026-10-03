@@ -1054,10 +1054,14 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         self.assertEqual(len({row["run_key"] for row in rows}), 2)
         self.assertNotEqual(rows[0]["declared_inference_configuration"], rows[1]["declared_inference_configuration"])
         html = (directory / "report.html").read_text()
-        self.assertIn("temperature=0.6", html)
-        self.assertIn("temperature=0", html)
+        self.assertIn("think.conf", html)
+        self.assertIn("direct.conf", html)
+        self.assertNotIn("Declared inference configs", html)
+        copied = directory / "declared-inference-configurations"
+        self.assertIn("temperature=0.6", (copied / "think.conf").read_text())
+        self.assertIn("temperature=0\n", (copied / "direct.conf").read_text())
         self.assertEqual(
-            sorted(path.name for path in (directory / "declared-inference-configurations").iterdir()),
+            sorted(path.name for path in copied.iterdir()),
             ["direct.conf", "think.conf"],
         )
 
@@ -1260,15 +1264,12 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             self.assertEqual(manifest["inference_configurations"][0]["fields"]["kv_cache"], "f16")
             self.assertIn("Q4_K_M", manifest["inference_configurations"][0]["quantization_note"])
             report = saved[0].with_name("report.html").read_text()
-            self.assertIn("Declared inference configs", report)
-            self.assertIn(
-                "Uncommented inference config values drive the Ollama request",
-                report,
-            )
-            self.assertIn("this block is the archived source file", report)
+            self.assertNotIn("Declared inference configs", report)
+            self.assertNotIn("inference config values drive the Ollama request", report)
+            self.assertNotIn("archived source file", report)
             self.assertIn("0 / 1 runs recorded", report)
             self.assertNotIn("<script>", report)
-            self.assertIn("&lt;script&gt;", report)
+            self.assertNotIn("&lt;script&gt;", report)
             copied = saved[0].parent / "declared-inference-configurations" / "alpha.conf"
             self.assertIn("<script>", copied.read_text())
             seen["before"] = True
@@ -1296,7 +1297,8 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             )
         self.assertIn("No declared inference configuration for foundation-sec-alpha:latest", out.getvalue())
         html = (directory / "report.html").read_text()
-        self.assertIn("No declared inference config", html)
+        self.assertNotIn("Declared inference configs", html)
+        self.assertNotIn("No declared inference config", html)
         manifest = json.loads((directory / "manifest.json").read_text())
         self.assertEqual(manifest["inference_configurations"], [])
         rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]

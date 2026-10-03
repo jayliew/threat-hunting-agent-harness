@@ -961,6 +961,13 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
                 None,
                 None,
             ),
+            "cyberpal2-20b.conf": (
+                "cyberpal2-20b:latest",
+                "8192",
+                8192,
+                "medium",
+                "medium",
+            ),
         }
         sampling = {
             "qwen3-32b.conf": ("0.6", 0.6, "0.95", 0.95, "20", 20),
@@ -974,6 +981,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             "mistral-nemo-12b.conf": ("0.3", 0.3, "0.90", 0.9, "40", 40),
             "phi3-medium-128k.conf": ("0.7", 0.7, "0.90", 0.9, "40", 40),
             "foundation-sec-8b-instruct.conf": ("0.2", 0.2, "0.90", 0.9, "40", 40),
+            "cyberpal2-20b.conf": ("0.0", 0.0, "0.90", 0.9, "40", 40),
         }
         root = Path(__file__).resolve().parent.parent / "inference_config"
         for name, (model, text, number, thinking, parsed) in expected.items():

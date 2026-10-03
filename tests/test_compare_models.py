@@ -906,6 +906,61 @@ class ComparisonTests(unittest.TestCase):
         )
         self.assertIn('<th>Thinking tokens</th>', html)
 
+    def test_report_spaces_valid_hunt_sections(self):
+        manifest = {
+            'created_at': 'now',
+            'request_settings': {'num_ctx': 32768, 'think': False},
+            'models': [{'name': 'foundation-sec-alpha:latest', 'capabilities': ['completion']}],
+            'cases': [{'name': 'one.jsonl'}],
+        }
+        sections = {
+            'Verdict': 'benign',
+            'Threat type': 'none',
+            'Summary': 'Normal activity.\nSecond line.',
+            'Evidence': 'e1',
+        }
+        base = {
+            'case': 'one.jsonl',
+            'model': 'foundation-sec-alpha:latest',
+            'timing': {},
+            'unknown_evidence_ids': [],
+            'validation_errors': [],
+            'error': None,
+            'warnings': [],
+            'thinking': '',
+            'raw_content': ANSWER,
+            'request': {'think': False},
+            'tokens': {},
+            'context': {},
+        }
+        ok_dir = self.root / 'spaced'
+        ok_dir.mkdir()
+        run_reports.write_report(ok_dir, manifest, [{
+            **base,
+            'status': 'ok',
+            'sections': sections,
+        }])
+        html = (ok_dir / 'report.html').read_text()
+        self.assertIn('.hunt-answer{display:flex;flex-direction:column;gap:1.35rem}', html)
+        self.assertIn('<div class="hunt-answer">', html)
+        for name, value in sections.items():
+            self.assertIn(f'<div class="hunt-section">{name}: {value}</div>', html)
+        self.assertNotIn(f'<pre>{ANSWER}</pre>', html)
+
+        invalid_dir = self.root / 'unspaced'
+        invalid_dir.mkdir()
+        raw = 'Verdict: benign\nnot a valid answer'
+        run_reports.write_report(invalid_dir, manifest, [{
+            **base,
+            'status': 'invalid',
+            'sections': {'Verdict': 'benign'},
+            'raw_content': raw,
+            'validation_errors': ['Invalid hunt output'],
+        }])
+        invalid_html = (invalid_dir / 'report.html').read_text()
+        self.assertNotIn('<div class="hunt-answer">', invalid_html)
+        self.assertIn(f'<pre>{raw}</pre>', invalid_html)
+
     def test_cli_exits_nonzero_after_recording_invalid_runs(self):
         api = client()
         api.chat.return_value = response('bad answer')

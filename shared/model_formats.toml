@@ -12,7 +12,7 @@ forbidden = ["<|start_header_id|>"]
 parsers = []
 required_stops = ["<|end_of_text|>"]
 allowed_stops = ["<|end_of_text|>"]
-hint = "Foundation-Sec-8B-Instruct expects <|system|>, <|user|>, and <|assistant|>. Create a local model from Modelfile.foundation-sec-8b-instruct before running."
+hint = "Foundation-Sec-8B-Instruct expects <|system|>, <|user|>, and <|assistant|>. Create a local model from modelfiles/Modelfile.foundation-sec-8b-instruct before running."
 
 [[formats]]
 label = "CyberPal 2.0"
@@ -40,6 +40,14 @@ renderers = ["gemma4", "gemma4-large"]
 hint = "Gemma 4 must use RENDERER gemma4 or gemma4-large."
 
 [[formats]]
+label = "GLM-4.7"
+# GLM-4.6 and earlier use a different renderer and must not match this rule.
+name_pattern = 'glm-4\.7(?!\d)'
+renderers = ["glm-4.7"]
+parsers = ["glm-4.7"]
+hint = "GLM-4.7 must use RENDERER glm-4.7 and PARSER glm-4.7. That renderer writes [gMASK]<sop>, <|system|>, <|user|>, and <|assistant|>; {{ .Prompt }} is valid only with this renderer."
+
+[[formats]]
 label = "Granite 4"
 name_pattern = "granite4"
 markers = ["<|im_start|>", "<|im_end|>"]
@@ -65,3 +73,13 @@ markers = ["<|im_start|>", "<|im_end|>"]
 label = "Llama 3"
 name_pattern = "llama3"
 markers = ["<|start_header_id|>", "<|eot_id|>"]
+
+[[formats]]
+label = "Phi-3 Medium 128K"
+# Ollama library tag phi3:medium-128k, plus a phi-3-medium-128k wrapper.
+# Does not match phi3:medium, phi3.5, or phi4.
+name_pattern = "phi-?3[:.-]medium-128k"
+markers = ["<|system|>", "<|user|>", "<|assistant|>", "<|end|>"]
+required_stops = ["<|end|>", "<|user|>", "<|assistant|>"]
+allowed_stops = ["<|end|>", "<|user|>", "<|assistant|>"]
+hint = "Phi-3 Medium 128K expects <|system|>, <|user|>, <|assistant|>, and <|end|>, and stops <|end|>, <|user|>, and <|assistant|>."

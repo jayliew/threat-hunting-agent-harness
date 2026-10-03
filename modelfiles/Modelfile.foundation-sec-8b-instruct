@@ -13,7 +13,7 @@
 # system message is supplied. This Modelfile does not bake that in; the
 # harness always sends its own system message, which overrides it.
 #
-#   ollama create foundation-sec-8b-instruct -f Modelfile.foundation-sec-8b-instruct
+#   ollama create foundation-sec-8b-instruct -f modelfiles/Modelfile.foundation-sec-8b-instruct
 
 FROM hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest
 

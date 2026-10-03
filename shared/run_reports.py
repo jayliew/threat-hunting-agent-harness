@@ -1,4 +1,4 @@
-"""Shared run records, profile snapshots, and HTML reports."""
+"""Shared run records, inference configuration snapshots, and HTML reports."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -9,10 +9,11 @@ import os
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from harness import KV_CACHE_TYPE, NUM_CTX, NUM_PREDICT, SEED, SHIFT, THINK
-from model_profiles import display_source
+from . import REPO_ROOT
+from .harness import KV_CACHE_TYPE, NUM_CTX, NUM_PREDICT, SEED, SHIFT, THINK
+from .inference_configurations import display_source
 
-OUTPUT_ROOT = Path(__file__).parent / "results"
+OUTPUT_ROOT = REPO_ROOT / "results"
 EASTERN = ZoneInfo("America/New_York")
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 MONTHS = (
@@ -47,6 +48,46 @@ def eastern_now() -> datetime:
     return datetime.now(EASTERN)
 
 
+def format_report_timestamp(value: str) -> str:
+    """Human-readable US Eastern time for the report header, labeled ET."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=EASTERN)
+    eastern = parsed.astimezone(EASTERN)
+    hour12 = eastern.hour % 12 or 12
+    meridiem = "AM" if eastern.hour < 12 else "PM"
+    weekday = (
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    )[eastern.weekday()]
+    month = (
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    )[eastern.month - 1]
+    return (
+        f"{weekday}, {month} {eastern.day}, {eastern.year}, "
+        f"{hour12}:{eastern.minute:02d} {meridiem} ET"
+    )
+
+
 def allocate_results_directory(output_root: Path, when: datetime) -> Path:
     base = results_directory_name(when)
     directory = output_root / base
@@ -58,26 +99,26 @@ def allocate_results_directory(output_root: Path, when: datetime) -> Path:
     return directory
 
 
-def write_declared_profiles(directory: Path, profiles: list[dict]) -> None:
+def write_declared_inference_configurations(directory: Path, configurations: list[dict]) -> None:
     """Copy the text recorded before the run into the results directory."""
-    if not profiles:
+    if not configurations:
         return
-    dest = directory / "declared-profiles"
+    dest = directory / "declared-inference-configurations"
     dest.mkdir()
     used: set[str] = set()
-    for profile in profiles:
-        base = Path(profile["source"]).name
-        if not base.endswith(".profile"):
-            base += ".profile"
-        stem = base[: -len(".profile")]
+    for configuration in configurations:
+        base = Path(configuration["source"]).name
+        if not base.endswith(".conf"):
+            base += ".conf"
+        stem = base[: -len(".conf")]
         name = base
         suffix = 2
         while name in used:
-            name = f"{stem}-{suffix}.profile"
+            name = f"{stem}-{suffix}.conf"
             suffix += 1
         used.add(name)
-        profile["copy_name"] = name
-        text = profile["text"]
+        configuration["copy_name"] = name
+        text = configuration["text"]
         if not text.endswith("\n"):
             text += "\n"
         (dest / name).write_text(text, encoding="utf-8")
@@ -85,40 +126,10 @@ def write_declared_profiles(directory: Path, profiles: list[dict]) -> None:
 
 def slot_label(model: dict) -> str:
     """Distinguish two setups of the same installed model."""
-    source = model.get("profile_source")
+    source = model.get("inference_configuration_source")
     if source:
         return f"{model['name']} ({source})"
     return model["name"]
-
-
-def declared_profiles_html(manifest: dict) -> str:
-    """Show the archived profile source file that drove each model's request."""
-    blocks = []
-    for model in manifest.get("models") or []:
-        name = escape(slot_label(model))
-        profile = model.get("declared_profile")
-        if not profile:
-            blocks.append(
-                f'<article><h3>{name}</h3>'
-                f'<p class="pending">No declared profile</p></article>'
-            )
-            continue
-        note = profile.get("quantization_note")
-        note_html = f"<p>{escape(note)}</p>" if note else ""
-        blocks.append(
-            f"<article><h3>{name}</h3>"
-            f"<p>Recorded from {escape(profile['source'])}</p>"
-            f"{note_html}<pre>{escape(profile['text'].rstrip())}</pre></article>"
-        )
-    if not blocks:
-        return ""
-    return (
-        "<h2>Declared profiles</h2>"
-        "<p>Recorded before inference. Uncommented profile values drive the Ollama "
-        "request; this block is the archived source file, including comments and "
-        "fields that are not chat options.</p>"
-        f'<div class="answers">{"".join(blocks)}</div>'
-    )
 
 
 def seconds(value: float | None) -> str:
@@ -185,7 +196,12 @@ def thinking_label(result: dict | None, model: dict, settings: dict) -> str:
 
 
 def context_label(allocated, used, model_max) -> str:
-    text = f"used {display(used)} / allocated {display(allocated)}"
+    """Card line: used tokens with percent of allocated context, then the model max."""
+    if used is None or used == "":
+        used_text = "—"
+    else:
+        used_text = context_used_cell(used, allocated)
+    text = f"used {used_text} / allocated {display(allocated)}"
     if model_max is not None:
         text += f" (model max {model_max})"
     return text
@@ -221,13 +237,6 @@ def collapsible_run_details(inner_html: str) -> str:
     )
 
 
-def format_num_predict(value: object) -> str:
-    """Label the sent num_predict. Ollama treats -1 as unlimited generation."""
-    if value == -1:
-        return "-1 (no limit)"
-    return str(value)
-
-
 def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
     """Static, escaped HTML: model responses are displayed only as text."""
     e = lambda value: escape(str(value))
@@ -240,13 +249,12 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             result = by_pair.get((case["name"], model.get("run_key", model["name"])))
             name = e(slot_label(model))
             think = thinking_label(result, model, settings)
-            quant = quantization_label(model)
             show_thinking_tokens = think != "not supported"
             if result is None:
                 pending_details = (
                     f'{e(context_label(model.get("num_ctx", settings.get("num_ctx")), None, model.get("context_length")))}<br>'
                     f'{framing_note(model)}'
-                    f'Quantization: {e(quant)}<br>Thinking: {e(think)}<br>'
+                    f'Thinking: {e(think)}<br>'
                     f'{e(tokens_label(None, include_thinking=show_thinking_tokens))}'
                 )
                 cards.append(
@@ -266,6 +274,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             thinking_tokens_cell = (
                 display(tokens.get("thinking_tokens")) if show_thinking_tokens else "—"
             )
+            quant = quantization_label(model)
             rows.append(
                 f'<tr><td>{e(case["name"])}</td><td>{name}</td>'
                 f'<td>{e(quant)}</td>'
@@ -287,7 +296,6 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             run_details = (
                 f'{e(context_label(allocated, used, model_max))}<br>'
                 f'{framing_note(model)}'
-                f'Quantization: {e(quant)}<br>'
                 f'Thinking: {e(think)}<br>'
                 f'{e(tokens_label(tokens, include_thinking=show_thinking_tokens))}<br>'
                 f'Prompt processing: {duration_seconds_one_decimal(timing.get("prompt_eval_duration_seconds"))} · '
@@ -310,32 +318,13 @@ th,td{text-align:left;padding:10px 14px;border-bottom:1px solid #2e3a48}th{backg
 .scroll{overflow:auto}.answers{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(300px,1fr);gap:16px;overflow-x:auto;padding-bottom:12px}
 article{padding:20px;border:1px solid #2e3a48;border-radius:10px;background:#1a222c;min-width:0}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,monospace}
-.ok{color:#3dd68c}.invalid,.error{color:#f07178}.warn{color:#e6b450}.pending{color:#8b9aab}summary{cursor:pointer}
+.invalid,.error{color:#f07178}.warn{color:#e6b450}.pending{color:#8b9aab}summary{cursor:pointer}
 .run-details{margin:8px 0 12px}.run-details summary{display:inline-block;padding:6px 12px;border:1px solid #2e3a48;border-radius:6px;background:#222c38;color:#e7edf3;font-size:14px;list-style:none}
 .run-details summary::-webkit-details-marker{display:none}.run-details-body{margin-top:8px;color:#9aa8b5;line-height:1.6}
 @media(max-width:600px){body{padding:16px}.answers{grid-auto-flow:row;grid-template-columns:1fr}}
 </style></head><body><main>'''
-    html += (f'<h1>Threat hunt model comparison</h1><p>{e(manifest["created_at"])} · '
+    html += (f'<h1>Threat hunt model comparison</h1><p>{e(format_report_timestamp(str(manifest["created_at"])))} · '
              f'{len(results)} / {total} runs recorded</p>'
-             f'<p>Request settings: num_ctx={e(settings.get("num_ctx"))}, '
-             f'num_predict={e(format_num_predict(settings.get("num_predict")))}, '
-             f'seed={e(settings.get("seed"))}, '
-             f'think={e(settings.get("think"))}, '
-             f'kv_cache_type={e(settings.get("kv_cache_type"))} '
-             '(server env <code>OLLAMA_KV_CACHE_TYPE</code>; not a chat API option). '
-             'These are the harness fallbacks unless a profile overrides them; '
-             'they are not necessarily what each model was sent. '
-             'Each model card shows the context window and thinking value actually used.</p>'
-             '<p>Output validity checks format and cited IDs; '
-             'it does not establish detection accuracy. Eval time is prompt processing plus generation for that log and excludes model load and unload. '
-             'Wall time includes model loading. '
-             'Runs are sequential, with a fresh conversation for every case. '
-             'Context used is prompt tokens plus generated tokens, compared with the configured num_ctx. '
-             'Thinking and output tokens split that generated count: exact when only one of those texts is present, '
-             'estimated by character length when both are present. '
-             'A run warns at 90% of num_ctx and is an error at or above num_ctx. '
-             'Context shift is disabled for every model.</p>'
-             f'{declared_profiles_html(manifest)}'
              '<div class="scroll"><table><thead><tr><th>Case</th><th>Model</th><th>Quantization</th>'
              '<th>Verdict</th><th>Output status</th><th>Unknown IDs</th><th>Eval time</th><th>Thinking</th>'
              '<th>Context used</th><th>Context allocated</th>'
@@ -348,24 +337,28 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
 
 def open_recorded_run(
     output_root: Path,
-    profiles_directory: Path,
+    configurations_directory: Path,
     slots: list[dict],
     cases: list[dict],
 ) -> tuple[Path, dict]:
-    """Create the results directory and write profiles before any inference."""
+    """Create the results directory and write inference configurations before any inference."""
     now = eastern_now()
     directory = allocate_results_directory(output_root, now)
-    attached = [slot["declared_profile"] for slot in slots if slot.get("declared_profile")]
-    write_declared_profiles(directory, attached)
+    attached = [
+        slot["declared_inference_configuration"]
+        for slot in slots
+        if slot.get("declared_inference_configuration")
+    ]
+    write_declared_inference_configurations(directory, attached)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 3,
         "created_at": now.isoformat(),
-        "profiles_dir": (
-            display_source(profiles_directory)
-            if profiles_directory.exists()
-            else str(profiles_directory)
+        "inference_config_dir": (
+            display_source(configurations_directory)
+            if configurations_directory.exists()
+            else str(configurations_directory)
         ),
-        "profiles": attached,
+        "inference_configurations": attached,
         "request_settings": {
             "num_ctx": NUM_CTX,
             "num_predict": NUM_PREDICT,
@@ -385,19 +378,19 @@ def open_recorded_run(
 
 def annotate_result(result: dict, slot: dict, case: dict) -> dict:
     result.update({
-        "schema_version": 1,
+        "schema_version": 3,
         "case": case["name"],
         "log_path": case["path"],
         "events_sha256": case["events_sha256"],
         "model_digest": slot["digest"],
         "run_key": slot["run_key"],
-        "declared_profile": slot.get("profile_source"),
+        "declared_inference_configuration": slot.get("inference_configuration_source"),
     })
     return result
 
 
 def save_result(directory: Path, manifest: dict, results: list[dict], result: dict) -> None:
-    """Append one hunt and refresh the report. The profile is already on disk."""
+    """Append one hunt and refresh the report. The inference configuration is already on disk."""
     with (directory / "results.jsonl").open("a", encoding="utf-8") as output:
         output.write(json.dumps(result) + "\n")
         output.flush()

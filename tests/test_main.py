@@ -9,11 +9,11 @@ from unittest.mock import Mock
 
 from ollama import ChatResponse, Message
 
-from model_config import (
+from shared.model_config import (
     chat_template_error, installed_renderer, installed_model_error, is_bare_prompt_template, inspect_installed_model,
 )
 
-from harness import (
+from shared.harness import (
     CONTEXT_WARN_RATIO,
     EVIDENCE_END,
     EVIDENCE_START,
@@ -42,7 +42,7 @@ from harness import (
 
 
 NUM_PREDICT = 1024
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 PASSWORD_SPRAY = REPO_ROOT / "logs" / "password-spray.jsonl"
 HTTP_BEACONING = REPO_ROOT / "logs" / "http-beaconing.jsonl"
 INTERNAL_NETWORK_SCAN = REPO_ROOT / "logs" / "internal-network-scan.jsonl"
@@ -429,7 +429,7 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertIsNotNone(error)
         self.assertIn("{{ .Prompt }}", error)
         self.assertIn("<|system|>", error)
-        self.assertIn("Modelfile.foundation-sec-8b-instruct", error)
+        self.assertIn("modelfiles/Modelfile.foundation-sec-8b-instruct", error)
         llama_headers = chat_template_error(
             "foundation-sec-8b-instruct",
             "{{ range .Messages }}<|start_header_id|>{{ .Role }}<|end_header_id|>\n{{ .Content }}{{ end }}",
@@ -448,6 +448,11 @@ class ChatTemplateTests(unittest.TestCase):
         qwen35 = chat_template_error("qwen3.5:27b", "<|im_start|>user<|im_end|>")
         self.assertIsNotNone(qwen35)
         self.assertIn("No expected chat template is registered", qwen35)
+        for name in ("phi3:medium", "phi3.5", "phi4"):
+            with self.subTest(name=name):
+                unmatched = chat_template_error(name, "<|system|><|user|><|assistant|><|end|>")
+                self.assertIsNotNone(unmatched)
+                self.assertIn("No expected chat template is registered", unmatched)
 
     def test_each_family_requires_its_own_markers(self) -> None:
         qwen = "<|im_start|>system\n{{ .System }}<|im_end|>"
@@ -469,9 +474,17 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertIsNone(chat_template_error("mistral-small3.2:24b", mistral_small))
         self.assertIsNone(chat_template_error("mistral-nemo:12b", mistral_nemo))
         self.assertIsNone(chat_template_error("granite4.2:30b", qwen))
+        phi3 = (
+            "{{ if .System }}<|system|>\n{{ .System }}<|end|>\n"
+            "{{ end }}{{ if .Prompt }}<|user|>\n{{ .Prompt }}<|end|>\n"
+            "{{ end }}<|assistant|>\n{{ .Response }}<|end|>"
+        )
         self.assertIsNone(chat_template_error("command-r:latest", command_r))
         self.assertIsNone(chat_template_error("cyberpal2-20b:latest", cyberpal))
+        self.assertIsNone(chat_template_error("phi3:medium-128k", phi3))
+        self.assertIsNone(chat_template_error("phi-3-medium-128k", phi3))
         self.assertIsNotNone(chat_template_error("cyberpal2-20b:latest", "{{ .Prompt }}"))
+        self.assertIsNotNone(chat_template_error("phi3:medium-128k", "{{ .Prompt }}"))
         self.assertIsNotNone(chat_template_error("qwen3:32b", "{{ .Prompt }}"))
         self.assertIsNotNone(chat_template_error("qwen3:32b", mistral_small))
         self.assertIsNotNone(chat_template_error("llama3.3:70b", qwen))
@@ -501,6 +514,27 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertIsNotNone(wrong_gemma)
         self.assertIn("gemma4-large", wrong_gemma)
 
+    def test_glm47_renderer_allows_placeholder_template(self) -> None:
+        self.assertIsNone(chat_template_error("glm-4.7-flash:q4_K_M", "{{ .Prompt }}", "glm-4.7"))
+        self.assertIsNone(chat_template_error("GLM-4.7-Flash:latest", "{{ .Prompt }}", "glm-4.7"))
+        missing = chat_template_error("glm-4.7-flash:q4_K_M", "{{ .Prompt }}")
+        self.assertIsNotNone(missing)
+        self.assertIn("RENDERER glm-4.7", missing)
+        wrong = chat_template_error("glm-4.7-flash:q4_K_M", "{{ .Prompt }}", "gemma4")
+        self.assertIsNotNone(wrong)
+        self.assertIn("PARSER glm-4.7", wrong)
+        earlier = chat_template_error("glm-4.6:latest", "{{ .Prompt }}", "glm-4.7")
+        self.assertIsNotNone(earlier)
+        self.assertIn("No expected chat template is registered", earlier)
+        info = SimpleNamespace(
+            template="{{ .Prompt }}",
+            modelfile="TEMPLATE {{ .Prompt }}\nRENDERER glm-4.7\nPARSER glm-4.7\n",
+            parameters="temperature 1\ntop_p 0.95\n",
+        )
+        self.assertIsNone(installed_model_error("glm-4.7-flash:q4_K_M", info))
+        info.modelfile = "TEMPLATE {{ .Prompt }}\nRENDERER glm-4.7\n"
+        self.assertIn("expects PARSER glm-4.7", installed_model_error("glm-4.7-flash:q4_K_M", info))
+
     def test_gemma_renderer_allows_placeholder_template(self) -> None:
         self.assertIsNone(chat_template_error("gemma4:26b", "{{ .Prompt }}", "gemma4"))
         self.assertIsNone(chat_template_error("gemma4:31b", "{{ .Prompt }}", "gemma4-large"))
@@ -511,7 +545,7 @@ class ChatTemplateTests(unittest.TestCase):
             "gemma4",
         )
         self.assertIsNotNone(blocked)
-        self.assertIn("Modelfile.foundation-sec-8b-instruct", blocked)
+        self.assertIn("modelfiles/Modelfile.foundation-sec-8b-instruct", blocked)
 
     def test_deepseek_fullwidth_markers_pass(self) -> None:
         template = "<\uff5cUser\uff5c>{{ .Content }}<\uff5cAssistant\uff5c>"
@@ -527,7 +561,7 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertIsNone(installed_renderer(""))
 
     def test_modelfile_passes_preflight(self) -> None:
-        text = (REPO_ROOT / "Modelfile.foundation-sec-8b-instruct").read_text()
+        text = (REPO_ROOT / "modelfiles" / "Modelfile.foundation-sec-8b-instruct").read_text()
         template = text.split("TEMPLATE", 1)[1].split("PARAMETER", 1)[0]
         self.assertIsNone(chat_template_error("foundation-sec-8b-instruct", template))
         self.assertIn("FROM hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest", text)
@@ -558,6 +592,27 @@ class ChatTemplateTests(unittest.TestCase):
                 self.assertIn("must use only stop", installed_model_error(name, info))
         info.parameters = 'stop "unterminated'
         self.assertIn("malformed stop", installed_model_error(name, info))
+
+    def test_phi3_medium_128k_requires_exact_stops(self) -> None:
+        template = (
+            "{{ if .System }}<|system|>\n{{ .System }}<|end|>\n"
+            "{{ end }}{{ if .Prompt }}<|user|>\n{{ .Prompt }}<|end|>\n"
+            "{{ end }}<|assistant|>\n{{ .Response }}<|end|>"
+        )
+        info = SimpleNamespace(
+            template=template,
+            modelfile="",
+            parameters='stop "<|end|>"\nstop "<|user|>"\nstop "<|assistant|>"\n',
+        )
+        name = "phi3:medium-128k"
+        self.assertIsNone(installed_model_error(name, info))
+        for parameters in (
+            'stop "<|end|>"',
+            'stop "<|end|>"\nstop "<|user|>"\nstop "<|assistant|>"\nstop "<|endoftext|>"',
+        ):
+            with self.subTest(parameters=parameters):
+                info.parameters = parameters
+                self.assertIn("must use only stop", installed_model_error(name, info))
 
     def test_cyberpal_requires_harmony_stops(self) -> None:
         template = (

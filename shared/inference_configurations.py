@@ -7,7 +7,7 @@ from pathlib import Path
 from . import REPO_ROOT
 from .harness import NUM_CTX
 
-DEFAULT_INFERENCE_CONFIGURATIONS_DIR = REPO_ROOT / "inference-configurations"
+DEFAULT_INFERENCE_CONFIG_DIR = REPO_ROOT / "inference_config"
 
 
 def canonical_model_name(name: str) -> str:

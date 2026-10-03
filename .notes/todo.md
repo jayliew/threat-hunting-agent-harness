@@ -2,7 +2,6 @@ The following information is to be ignored by all coding AI agents. Only humans 
 
 ## Todo
 
-- [ ] Prompt engineering. Factor out prompts.
 - [ ] Implement tool calling.
 - [ ] Fine tuning.
 - [ ] Text embeddings and vector search.

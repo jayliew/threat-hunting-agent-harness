@@ -160,7 +160,7 @@ Wall time includes model load and request overhead. Eval time is prompt processi
 
 `build_messages()` sends ordinary `role` / `content` text. Markdown headings and the XML tags are application text. Let the installed model's [Ollama chat template](https://docs.ollama.com/modelfile#template) supply its native role and turn tokens. Leave ChatML tokens, Llama headers, Mistral `[INST]` markers, and Gemma turn markers to that template. [Templates differ even between models from the same base](https://huggingface.co/docs/transformers/chat_templating). For a model whose native format has no separate system role, confirm the installed template still carries the analyst instructions. Inspect an import with `ollama show --modelfile MODEL`.
 
-Before any chat call, `compare_models.py` requires the model to appear in `ollama list`, to support text completion when capabilities are advertised, and to pass the format check in [shared/model_formats.toml](shared/model_formats.toml). That check uses Ollama `/api/show` (the same data as `ollama show --template MODEL`) plus the Modelfile `RENDERER` line, parser, and stop sequences. Inference starts only when the installed package matches the family below. A name with no registered family fails. A `RENDERER` line fails for every family except Gemma 4, because the renderer replaces the template. Qwen3.5 does not match the Qwen3 rule.
+Before any chat call, `compare_models.py` requires the model to appear in `ollama list`, to support text completion when capabilities are advertised, and to pass the format check in [shared/model_formats.toml](shared/model_formats.toml). That check uses Ollama `/api/show` (the same data as `ollama show --template MODEL`) plus the Modelfile `RENDERER` line, parser, and stop sequences. Inference starts only when the installed package matches the family below. A name with no registered family fails. A `RENDERER` line fails for every family except Gemma 4 and GLM-4.7, because the renderer replaces the template. Qwen3.5 does not match the Qwen3 rule.
 
 | Family | Required framing |
 | --- | --- |
@@ -171,6 +171,7 @@ Before any chat call, `compare_models.py` requires the model to appear in `ollam
 | Mistral Small | `[SYSTEM_PROMPT]`, `[/SYSTEM_PROMPT]`, `[INST]`, `[/INST]` |
 | Mistral Nemo | `[INST]`, `[/INST]`, and `.System` |
 | Gemma 4 | `RENDERER gemma4` or `RENDERER gemma4-large`. `{{ .Prompt }}` is fine only with that renderer |
+| GLM-4.7 | `RENDERER glm-4.7` and `PARSER glm-4.7`. `{{ .Prompt }}` is fine only with that renderer |
 | Granite 4 | `<\|im_start\|>` and `<\|im_end\|>` |
 | DeepSeek-R1 | `<｜User｜>` and `<｜Assistant｜>` (fullwidth vertical bar, U+FF5C) |
 | Command R | `<\|START_OF_TURN_TOKEN\|>`, `<\|SYSTEM_TOKEN\|>`, `<\|USER_TOKEN\|>`, `<\|CHATBOT_TOKEN\|>` |

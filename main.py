@@ -43,12 +43,12 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--inference-configurations-dir",
+        "--inference-config-dir",
         type=Path,
         default=None,
         help=(
             "Directory of declared *.conf files "
-            "(default: inference-configurations/ next to this script)"
+            "(default: inference_config/ next to this script)"
         ),
     )
     parser.add_argument(
@@ -68,9 +68,9 @@ def main() -> None:
     )
     args = parser.parse_args()
     configurations_directory = (
-        inference_configurations.DEFAULT_INFERENCE_CONFIGURATIONS_DIR
-        if args.inference_configurations_dir is None
-        else args.inference_configurations_dir
+        inference_configurations.DEFAULT_INFERENCE_CONFIG_DIR
+        if args.inference_config_dir is None
+        else args.inference_config_dir
     )
     output_root = run_reports.OUTPUT_ROOT if args.output_dir is None else args.output_dir
     try:

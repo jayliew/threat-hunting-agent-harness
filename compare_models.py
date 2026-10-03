@@ -6,7 +6,7 @@ Models are never downloaded; names must already appear in `ollama list`.
 Comparisons use harness.run_hunt and its shared three-verdict prompt: suspicious,
 benign, or inconclusive.
 
-Declared inference configurations in inference-configurations/*.conf are copied
+Declared inference configurations in inference_config/*.conf are copied
 into that directory before inference. An uncommented num_ctx line is the context
 window sent for that model. Uncommented temperature, top_p, and top_k lines are
 the sampling options sent for that model. A line that starts with # is kept and
@@ -23,7 +23,7 @@ from ollama import Client
 
 from shared.harness import parse_timeout, preflight_models_and_logs, run_hunt
 from shared.inference_configurations import (
-    DEFAULT_INFERENCE_CONFIGURATIONS_DIR, assign_run_slots, canonical_model_name,
+    DEFAULT_INFERENCE_CONFIG_DIR, assign_run_slots, canonical_model_name,
     load_inference_configuration_paths, load_inference_configurations,
 )
 from shared.run_reports import (
@@ -62,7 +62,7 @@ def run_comparison(
 ) -> Path:
     selected, cases = prepare_comparison(client, models, logs)
     configurations_directory = (
-        DEFAULT_INFERENCE_CONFIGURATIONS_DIR
+        DEFAULT_INFERENCE_CONFIG_DIR
         if configurations_dir is None
         else configurations_dir
     )
@@ -107,7 +107,7 @@ def main() -> None:
     parser.add_argument("--models", nargs="+", default=MODELS, help="Installed Ollama names (default: MODELS in compare_models.py)")
     parser.add_argument("--logs", nargs="+", default=DEFAULT_SCENARIO_LOGS, help="JSONL paths relative to the script, or absolute paths")
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_ROOT, help="Parent for a new US Eastern Time named results directory")
-    parser.add_argument("--inference-configurations-dir", type=Path, default=DEFAULT_INFERENCE_CONFIGURATIONS_DIR, help="Directory of declared *.conf files (default: inference-configurations/ next to this script)")
+    parser.add_argument("--inference-config-dir", type=Path, default=DEFAULT_INFERENCE_CONFIG_DIR, help="Directory of declared *.conf files (default: inference_config/ next to this script)")
     parser.add_argument("--inference-configuration", nargs="+", type=Path, default=None, help="Inference configuration file for this run. Repeat to test one model with different settings.")
     parser.add_argument(
         "--timeout",
@@ -125,7 +125,7 @@ def main() -> None:
             args.models,
             args.logs,
             args.output_dir,
-            args.inference_configurations_dir,
+            args.inference_config_dir,
             args.inference_configuration,
         )
     except (Exception, KeyboardInterrupt) as error:

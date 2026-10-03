@@ -10,7 +10,16 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from . import REPO_ROOT
-from .harness import KV_CACHE_TYPE, NUM_CTX, NUM_PREDICT, SEED, SHIFT, THINK
+from .harness import (
+    CONTEXT_WARN_RATIO,
+    KV_CACHE_TYPE,
+    NUM_CTX,
+    NUM_PREDICT,
+    REQUIRED_SECTIONS,
+    SEED,
+    SHIFT,
+    THINK,
+)
 from .inference_configurations import display_source
 
 OUTPUT_ROOT = REPO_ROOT / "results"
@@ -195,18 +204,6 @@ def thinking_label(result: dict | None, model: dict, settings: dict) -> str:
     return think_label(chosen)
 
 
-def context_label(allocated, used, model_max) -> str:
-    """Card line: used tokens with percent of allocated context, then the model max."""
-    if used is None or used == "":
-        used_text = "—"
-    else:
-        used_text = context_used_cell(used, allocated)
-    text = f"used {used_text} / allocated {display(allocated)}"
-    if model_max is not None:
-        text += f" (model max {model_max})"
-    return text
-
-
 def context_used_cell(used, allocated) -> str:
     """Summary-table cell: used tokens and percent of allocated context."""
     if used is None or used == "":
@@ -215,6 +212,36 @@ def context_used_cell(used, allocated) -> str:
         return str(used)
     percent = round(100 * float(used) / float(allocated))
     return f"{used} ({percent}%)"
+
+
+def context_used_high(used, allocated) -> bool:
+    """True when used tokens fill at least CONTEXT_WARN_RATIO of the allocated window."""
+    if used is None or used == "" or allocated is None or allocated == "" or allocated == 0:
+        return False
+    try:
+        used_value = float(used)
+        allocated_value = float(allocated)
+    except (TypeError, ValueError):
+        return False
+    if allocated_value == 0:
+        return False
+    return used_value >= allocated_value * CONTEXT_WARN_RATIO
+
+
+def context_used_markup(used, allocated) -> str:
+    """Escaped used-token figure, red when it fills at least 90% of allocated context."""
+    text = escape(context_used_cell(used, allocated))
+    if context_used_high(used, allocated):
+        return f'<span class="error">{text}</span>'
+    return text
+
+
+def context_label_html(allocated, used, model_max) -> str:
+    """Card line HTML. Only the used figure is red when context is nearly full."""
+    text = f"used {context_used_markup(used, allocated)} / allocated {escape(display(allocated))}"
+    if model_max is not None:
+        text += f" (model max {escape(str(model_max))})"
+    return text
 
 
 def tokens_label(tokens: dict | None, *, include_thinking: bool = True) -> str:
@@ -237,6 +264,35 @@ def collapsible_run_details(inner_html: str) -> str:
     )
 
 
+def raw_output_html(raw_content: str) -> str:
+    """Collapsed raw answer. An empty answer stays visible."""
+    if not raw_content.strip():
+        return "<pre>No answer returned.</pre>"
+    return (
+        '<details class="raw-output">'
+        "<summary>Show raw output</summary>"
+        f"<pre>{escape(raw_content)}</pre>"
+        "</details>"
+    )
+
+
+def hunt_answer_html(result: dict) -> str:
+    """Spaced required sections, then any text that fell outside them."""
+    sections = result.get("sections") or {}
+    blocks = [
+        f'<div class="hunt-section">{escape(name)}: {escape(sections[name])}</div>'
+        for name in REQUIRED_SECTIONS
+        if str(sections.get(name) or "").strip()
+    ]
+    blocks.extend(
+        f'<div class="hunt-unexpected">{escape(chunk)}</div>'
+        for chunk in result.get("unexpected") or []
+        if str(chunk).strip()
+    )
+    answer = f'<div class="hunt-answer">{"".join(blocks)}</div>' if blocks else ""
+    return answer + raw_output_html(result.get("raw_content") or "")
+
+
 def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
     """Static, escaped HTML: model responses are displayed only as text."""
     e = lambda value: escape(str(value))
@@ -252,8 +308,9 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             show_thinking_tokens = think != "not supported"
             if result is None:
                 pending_details = (
-                    f'{e(context_label(model.get("num_ctx", settings.get("num_ctx")), None, model.get("context_length")))}<br>'
+                    f'{context_label_html(model.get("num_ctx", settings.get("num_ctx")), None, model.get("context_length"))}<br>'
                     f'{framing_note(model)}'
+                    f'Prompt: {e(model.get("system_prompt") or "default")}<br>'
                     f'Thinking: {e(think)}<br>'
                     f'{e(tokens_label(None, include_thinking=show_thinking_tokens))}'
                 )
@@ -281,7 +338,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
                 f'<td>{e(verdict)}</td><td class="{e(status)}">{e(status)}</td>'
                 f'<td>{len(result["unknown_evidence_ids"])}</td><td>{evaluated}</td>'
                 f'<td>{e(think)}</td>'
-                f'<td>{e(context_used_cell(used, allocated))}</td><td>{e(display(allocated))}</td>'
+                f'<td>{context_used_markup(used, allocated)}</td><td>{e(display(allocated))}</td>'
                 f'<td>{e(display(tokens.get("input_tokens")))}</td>'
                 f'<td>{e(thinking_tokens_cell)}</td>'
                 f'<td>{e(display(tokens.get("output_tokens")))}</td></tr>'
@@ -293,9 +350,11 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             )
             thinking = (f'<details><summary>Thinking trace</summary><pre>{e(result["thinking"])}</pre></details>'
                         if result["thinking"] else '')
+            prompt_name = result.get("system_prompt") or model.get("system_prompt") or "default"
             run_details = (
-                f'{e(context_label(allocated, used, model_max))}<br>'
+                f'{context_label_html(allocated, used, model_max)}<br>'
                 f'{framing_note(model)}'
+                f'Prompt: {e(prompt_name)}<br>'
                 f'Thinking: {e(think)}<br>'
                 f'{e(tokens_label(tokens, include_thinking=show_thinking_tokens))}<br>'
                 f'Prompt processing: {duration_seconds_one_decimal(timing.get("prompt_eval_duration_seconds"))} · '
@@ -304,7 +363,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             cards.append(
                 f'<article><h3>{name}</h3><p class="{e(status)}">{e(status)} · {evaluated}</p>'
                 f'{collapsible_run_details(run_details)}'
-                f'{warning_html}{error_html}<pre>{e(result["raw_content"]) or "No answer returned."}</pre>{thinking}</article>'
+                f'{warning_html}{error_html}{hunt_answer_html(result)}{thinking}</article>'
             )
         sections.append(f'<section><h2>{e(case["name"])}</h2><div class="answers">{"".join(cards)}</div></section>')
     total = len(manifest["models"]) * len(manifest["cases"])
@@ -318,6 +377,10 @@ th,td{text-align:left;padding:10px 14px;border-bottom:1px solid #2e3a48}th{backg
 .scroll{overflow:auto}.answers{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(300px,1fr);gap:16px;overflow-x:auto;padding-bottom:12px}
 article{padding:20px;border:1px solid #2e3a48;border-radius:10px;background:#1a222c;min-width:0}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,monospace}
+.hunt-answer{display:flex;flex-direction:column;gap:1.35rem}
+.hunt-section,.hunt-unexpected{white-space:pre-wrap;overflow-wrap:anywhere}
+.raw-output{margin:12px 0 0}.raw-output summary{display:inline-block;padding:6px 12px;border:1px solid #2e3a48;border-radius:6px;background:#222c38;color:#e7edf3;font-size:14px;list-style:none}
+.raw-output summary::-webkit-details-marker{display:none}
 .invalid,.error{color:#f07178}.warn{color:#e6b450}.pending{color:#8b9aab}summary{cursor:pointer}
 .run-details{margin:8px 0 12px}.run-details summary{display:inline-block;padding:6px 12px;border:1px solid #2e3a48;border-radius:6px;background:#222c38;color:#e7edf3;font-size:14px;list-style:none}
 .run-details summary::-webkit-details-marker{display:none}.run-details-body{margin-top:8px;color:#9aa8b5;line-height:1.6}
@@ -385,6 +448,7 @@ def annotate_result(result: dict, slot: dict, case: dict) -> dict:
         "model_digest": slot["digest"],
         "run_key": slot["run_key"],
         "declared_inference_configuration": slot.get("inference_configuration_source"),
+        "system_prompt": slot.get("system_prompt") or "default",
     })
     return result
 

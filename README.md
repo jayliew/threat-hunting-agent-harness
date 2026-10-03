@@ -50,7 +50,7 @@ The runner copies the inference configuration into a results directory before in
 
 ## What a hunt does
 
-`compare_models.py` calls `run_hunt` from `shared/harness.py`. Each call starts a fresh conversation with the same prompt and serialized events.
+`compare_models.py` calls `run_hunt` from `shared/harness.py`. Each call starts a fresh conversation with the shared prompt and serialized events. A model uses a different prompt only when its canonical name is registered in `MODEL_PROMPTS` in `shared/prompts.py`. `deepseek-r1:32b` is registered: its instructions sit in the user message and its system text is empty, because that series reads the user turn and a system prompt makes it skip its thinking pattern. `phi3:medium-128k` is registered the same way, because Microsoft's Phi-3 family does not support a system message. `command-r` uses Cohere's preamble headings, `## Task and Context` then `## Style Guide`. `cyberpal2-20b` keeps the shared system text and adds "think step-by-step" to the user task, as its model card asks for harder questions. A custom prompt may replace the system text and the user-task sentence. It still has to ask for the same three verdicts and four output fields, because validation does not change per model. The same model uses one prompt across inference configurations.
 
 1. Load a JSONL file and sort events by `@timestamp`.
 2. Send standard `role` / `content` messages. The system message holds the analyst instructions, evidence rules, verdict definitions, and output contract. The user message holds the task and a JSON array of events. Markdown headings and lists are the instruction hierarchy. XML tags (`<verdicts>`, `<output_fields>`, `<task>`, `<security_events>`) separate metadata from supporting content.
@@ -174,8 +174,14 @@ Before any chat call, `compare_models.py` requires the model to appear in `ollam
 | GLM-4.7 | `RENDERER glm-4.7` and `PARSER glm-4.7`. `{{ .Prompt }}` is fine only with that renderer |
 | Granite 4 | `<\|im_start\|>` and `<\|im_end\|>` |
 | DeepSeek-R1 | `<｜User｜>` and `<｜Assistant｜>` (fullwidth vertical bar, U+FF5C) |
-| Command R | `<\|START_OF_TURN_TOKEN\|>`, `<\|SYSTEM_TOKEN\|>`, `<\|USER_TOKEN\|>`, `<\|CHATBOT_TOKEN\|>` |
+| Command R | `<\|START_OF_TURN_TOKEN\|>`, `<\|SYSTEM_TOKEN\|>`, `<\|USER_TOKEN\|>`, `<\|CHATBOT_TOKEN\|>`. Fails when `<\|END_OF_TURN_TOKEN\|>` is written immediately before the chatbot turn |
 | Phi-3 Medium 128K | `<\|system\|>`, `<\|user\|>`, `<\|assistant\|>`, `<\|end\|>`. Stops are exactly `<\|end\|>`, `<\|user\|>`, and `<\|assistant\|>` |
+
+The Ollama library template for `command-r` closes the user turn with `<|END_OF_TURN_TOKEN|>`, then writes that token again before `<|CHATBOT_TOKEN|>`. Cohere's published template has one end token there. Recreate the installed name from [modelfiles/Modelfile.command-r](modelfiles/Modelfile.command-r):
+
+```bash
+ollama create command-r -f modelfiles/Modelfile.command-r
+```
 
 The raw `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest` import is that bare `{{ .Prompt }}` case. The GGUF has no `tokenizer.chat_template`, the Hub repo has no Ollama `template` file, and the call sends only the user text: it omits `<|system|>`, `<|user|>`, and `<|assistant|>` from [`chat_template.jinja`](https://huggingface.co/fdtn-ai/Foundation-Sec-8B-Instruct/blob/main/chat_template.jinja) and drops the harness system message. The weights are Llama 3.1–based, but this checkpoint was not trained on `<|start_header_id|>` headers, so those tokenizer tokens are the wrong framing. A `RENDERER` on a different model does not make this name usable. Run `foundation-sec-8b-instruct` from `modelfiles/Modelfile.foundation-sec-8b-instruct`.
 
@@ -202,13 +208,15 @@ If an imported GGUF lacks the right framing, add a Modelfile under `modelfiles/`
 | Path | Role |
 | --- | --- |
 | `compare_models.py` | Run one or more installed models on one or more JSONL files and write `results/`. One model and one file is `--models NAME --logs PATH` |
-| `shared/harness.py` | Defaults, log loading, preflight, prompts, inference, token accounting, and output validation |
+| `shared/harness.py` | Defaults, log loading, preflight, inference, token accounting, and output validation |
+| `shared/prompts.py` | Shared hunt prompt, and `MODEL_PROMPTS` for a model-specific prompt |
 | `shared/model_config.py` | Validation of installed templates, renderers, parsers, and stop sequences |
 | `shared/model_formats.toml` | Ordered model format requirements |
 | `shared/inference_configurations.py` | Inference configuration loading, settings validation, and run selection |
 | `shared/run_reports.py` | Run directories, inference configuration snapshots, result files, and HTML reports |
 | `inference_config/*.conf` | Per-model eval setup. Uncommented values override Ollama and Modelfile defaults for that run |
 | `modelfiles/Modelfile.foundation-sec-8b-instruct` | `<\|system\|>` / `<\|user\|>` / `<\|assistant\|>` template for the Foundation-Sec GGUF import |
+| `modelfiles/Modelfile.command-r` | Command R template with one `<\|END_OF_TURN_TOKEN\|>` before the chatbot turn |
 | `logs/*.jsonl` | Seven synthetic ECS scenarios. A single-file run passes one of these to `--logs` |
 | `logs/README.md` | Field notes for the lookalike evidence packages |
 | `evals/answer-keys.md` | Human grading keys for all seven cases. The harness does not load this file |

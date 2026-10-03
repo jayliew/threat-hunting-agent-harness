@@ -37,7 +37,7 @@ The single-hunt command and comparison runner share `run_hunt(model, events)`. E
 
 Let the installed model's [Ollama chat template](https://docs.ollama.com/modelfile#template) supply its native role/turn tokens. Do not manually add ChatML tokens, Llama headers, Mistral `[INST]` markers, or Gemma turn markers to these prompts. [Chat templates differ even between models derived from the same base](https://huggingface.co/docs/transformers/chat_templating). For models whose native format lacks a separate system role, verify that the installed template incorporates those instructions appropriately; a portable message API does not imply identical role support. Inspect imported GGUF models with `ollama show --modelfile MODEL`. A bare `{{ .Prompt }}` template does not provide native chat framing when that Modelfile has no `RENDERER` line. Gemma 4 keeps that placeholder and is framed by `RENDERER gemma4`, which writes `<|turn>system`, `<|turn>user`, and `<|turn>model`. DeepSeek-R1 is framed by its installed template's `<｜User｜>` and `<｜Assistant｜>` markers (a fullwidth vertical bar, not ASCII `|`).
 
-The Hugging Face GGUF `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest` is a real bare-prompt import: `TEMPLATE {{ .Prompt }}` and no `RENDERER`. The GGUF has no `tokenizer.chat_template`, the Hub repo has no Ollama `template` file, and that path sends only the user text. It omits `<|system|>`, `<|user|>`, and `<|assistant|>` from [`chat_template.jinja`](https://huggingface.co/fdtn-ai/Foundation-Sec-8B-Instruct/blob/main/chat_template.jinja), and it does not interpolate the harness system message. The weights are Llama 3.1–based, but this instruct checkpoint was not trained on Llama `<|start_header_id|>` headers; those tokens are still in the tokenizer and are the wrong framing. A `RENDERER` on some other model does not make this name usable. Run `foundation-sec-8b-instruct`, created from `Modelfile.foundation-sec-8b-instruct`.
+The Hugging Face GGUF `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest` is a real bare-prompt import: `TEMPLATE {{ .Prompt }}` and no `RENDERER`. The GGUF has no `tokenizer.chat_template`, the Hub repo has no Ollama `template` file, and that path sends only the user text. It omits `<|system|>`, `<|user|>`, and `<|assistant|>` from [`chat_template.jinja`](https://huggingface.co/fdtn-ai/Foundation-Sec-8B-Instruct/blob/main/chat_template.jinja), and it does not interpolate the harness system message. The weights are Llama 3.1–based, but this instruct checkpoint was not trained on Llama `<|start_header_id|>` headers; those tokens are still in the tokenizer and are the wrong framing. A `RENDERER` on some other model does not make this name usable. Run `foundation-sec-8b-instruct`, created from `modelfiles/Modelfile.foundation-sec-8b-instruct`.
 
 Before any chat call, both CLIs share the same preflight: the model must appear in `ollama list`, support text completion when capabilities are advertised, and pass the installed-template check via Ollama `/api/show` (the same data as `ollama show --template MODEL`) plus the Modelfile `RENDERER` line. Log files must exist, parse as JSONL, and contain at least one event. Inference does not start unless that selected template is the native framing for the model family. Foundation-Sec names need `<|system|>`, `<|user|>`, and `<|assistant|>`, and fail on `<|start_header_id|>` or any `RENDERER` line. Qwen3 needs `<|im_start|>` and `<|im_end|>`. Llama 3 needs `<|start_header_id|>` and `<|eot_id|>`. Mistral Small needs `[SYSTEM_PROMPT]`, `[/SYSTEM_PROMPT]`, `[INST]`, and `[/INST]`. Mistral Nemo needs `[INST]`, `[/INST]`, and `.System`. Gemma 4 needs `RENDERER gemma4` or `RENDERER gemma4-large` (its `{{ .Prompt }}` placeholder is fine only with that renderer). Granite 4 needs `<|im_start|>` and `<|im_end|>`. DeepSeek-R1 needs `<｜User｜>` and `<｜Assistant｜>`. Command R needs `<|START_OF_TURN_TOKEN|>`, `<|SYSTEM_TOKEN|>`, `<|USER_TOKEN|>`, and `<|CHATBOT_TOKEN|>`. CyberPal needs `<|start|>system<|message|>`, `<|start|>developer<|message|>`, `<|channel|>`, and `<|end|>`, and stops `<|return|>` and `<|call|>`. A `RENDERER` line fails for every family except Gemma 4, because the renderer replaces the template. A name with no registered family fails closed. Passing the raw `hf.co/...` Foundation-Sec import exits with that error instead of hunting.
 
@@ -102,7 +102,7 @@ ollama list
 
 ```bash
 ollama pull hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF
-ollama create foundation-sec-8b-instruct -f Modelfile.foundation-sec-8b-instruct
+ollama create foundation-sec-8b-instruct -f modelfiles/Modelfile.foundation-sec-8b-instruct
 ```
 
 The pull installs `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest`. That name has no native chat template (`{{ .Prompt }}`). The `ollama create` step is required so the script default `foundation-sec-8b-instruct` sends `<|system|>`, `<|user|>`, and `<|assistant|>`. Re-run that create command after updating the Modelfile to refresh an existing wrapper; it reuses the downloaded weights. Another installed name is usable when preflight recognizes that family's chat template; pass it with `--model`.
@@ -236,12 +236,12 @@ name_pattern = "example-instruct"
 markers = ["<user>", "<assistant>"]
 parsers = []
 required_stops = ["<end>"]
-hint = "Create example-instruct using Modelfile.example-instruct."
+hint = "Create example-instruct using modelfiles/Modelfile.example-instruct."
 ```
 
 Replace these example tokens with the model's actual tokens. `parsers = []` requires no Ollama `PARSER` directive; a nonempty array lists accepted parsers. Omitting `parsers` leaves the parser unconstrained. `required_stops` lists sequences that must be configured. Additional stops are accepted unless `allowed_stops` is present, which restricts them to that list. Foundation-Sec currently declares an exact EOS-only policy; that policy belongs to its registry entry rather than Python conditionals. These are package checks: template marker presence alone does not prove that every rendered conversation matches the training template.
 
-If an imported GGUF lacks correct framing, add a model-specific `Modelfile` and create a local wrapper, as with Foundation-Sec. The registry validates the installed package; it does not download models or rewrite installed templates. Add a `profiles/*.profile` file for that wrapper's evaluation settings. Both CLIs then use the same configuration and validation without changes to their code.
+If an imported GGUF lacks correct framing, add a model-specific Modelfile under `modelfiles/` and create a local wrapper, as with Foundation-Sec. The registry validates the installed package; it does not download models or rewrite installed templates. Add a `profiles/*.profile` file for that wrapper's evaluation settings. Both CLIs then use the same configuration and validation without changes to their code.
 
 ## Layout
 
@@ -255,7 +255,7 @@ If an imported GGUF lacks correct framing, add a model-specific `Modelfile` and 
 | `model_profiles.py` | Shared profile loading, settings validation, and run selection |
 | `run_reports.py` | Shared run directories, profile snapshots, result persistence, and HTML reports |
 | `profiles/*.profile` | Per-model eval setup. Uncommented values may override Ollama and Modelfile defaults for that run |
-| `Modelfile.foundation-sec-8b-instruct` | Native `<|system|>/<|user|>/<|assistant|>` template for the Foundation-Sec GGUF import |
+| `modelfiles/Modelfile.foundation-sec-8b-instruct` | Native `<|system|>/<|user|>/<|assistant|>` template for the Foundation-Sec GGUF import |
 | `logs/password-spray.jsonl` | Optional demo: ECS login / password-spray events |
 | `logs/http-beaconing.jsonl` | Default demo: ECS HTTP beaconing among legitimate traffic |
 | `logs/internal-network-scan.jsonl` | Optional demo: ECS internal scanning among legitimate traffic |

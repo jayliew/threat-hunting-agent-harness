@@ -1,6 +1,6 @@
 """Tests for the comparison runner and the shared hunt contract.
 
-Hunt-contract tests live here because both CLIs share run_hunt() from harness.py.
+Hunt-contract tests live here because both CLIs share run_hunt() from shared/harness.py.
 The rest of the file covers the comparison matrix and HTML report.
 """
 from __future__ import annotations
@@ -19,11 +19,11 @@ from unittest.mock import Mock, patch
 from ollama import ChatResponse, Message
 
 import compare_models
-import harness
 import main as single_hunt
-import model_config
-import model_profiles
-import run_reports
+import shared.harness as harness
+import shared.model_config as model_config
+import shared.model_profiles as model_profiles
+import shared.run_reports as run_reports
 
 
 ANSWER = 'Verdict: benign\nThreat type: none\nSummary: Normal activity.\nEvidence: e1'

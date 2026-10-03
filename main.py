@@ -8,9 +8,9 @@ import sys
 
 from ollama import Client
 
-import model_profiles
-import run_reports
-from harness import (
+import shared.model_profiles as model_profiles
+import shared.run_reports as run_reports
+from shared.harness import (
     DEFAULT_LOG_FILE, DEFAULT_MODEL, KV_CACHE_TYPE, SEED,
     format_token_report, parse_timeout, preflight_models_and_logs, resolve_log_path, run_hunt,
 )

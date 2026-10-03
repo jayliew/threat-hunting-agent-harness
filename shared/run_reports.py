@@ -132,36 +132,6 @@ def slot_label(model: dict) -> str:
     return model["name"]
 
 
-def declared_inference_configurations_html(manifest: dict) -> str:
-    """Show the archived inference configuration that drove each model's request."""
-    blocks = []
-    for model in manifest.get("models") or []:
-        name = escape(slot_label(model))
-        configuration = model.get("declared_inference_configuration")
-        if not configuration:
-            blocks.append(
-                f'<article><h3>{name}</h3>'
-                f'<p class="pending">No declared inference config</p></article>'
-            )
-            continue
-        note = configuration.get("quantization_note")
-        note_html = f"<p>{escape(note)}</p>" if note else ""
-        blocks.append(
-            f"<article><h3>{name}</h3>"
-            f"<p>Recorded from {escape(configuration['source'])}</p>"
-            f"{note_html}<pre>{escape(configuration['text'].rstrip())}</pre></article>"
-        )
-    if not blocks:
-        return ""
-    return (
-        "<h2>Declared inference configs</h2>"
-        "<p>Recorded before inference. Uncommented inference config values drive the Ollama "
-        "request; this block is the archived source file, including comments and "
-        "fields that are not chat options.</p>"
-        f'<div class="answers">{"".join(blocks)}</div>'
-    )
-
-
 def seconds(value: float | None) -> str:
     """Format a duration stored in seconds as minutes and seconds."""
     if value is None:
@@ -376,7 +346,6 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
              'estimated by character length when both are present. '
              'A run warns at 90% of num_ctx and is an error at or above num_ctx. '
              'Context shift is disabled for every model.</p>'
-             f'{declared_inference_configurations_html(manifest)}'
              '<div class="scroll"><table><thead><tr><th>Case</th><th>Model</th><th>Quantization</th>'
              '<th>Verdict</th><th>Output status</th><th>Unknown IDs</th><th>Eval time</th><th>Thinking</th>'
              '<th>Context used</th><th>Context allocated</th>'

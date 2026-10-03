@@ -18,18 +18,6 @@ from . import REPO_ROOT
 from .model_config import chat_template_error, installed_model_error, installed_renderer
 
 
-# Default Ollama model. Must already be installed locally (`ollama list`).
-# Pass --model to use a different installed name.
-# Apply modelfiles/Modelfile.foundation-sec-8b-instruct to the Hugging Face GGUF import
-# so Ollama sends <|system|> / <|user|> / <|assistant|> instead of {{ .Prompt }}.
-DEFAULT_MODEL = "foundation-sec-8b-instruct"
-# DEFAULT_MODEL = "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest"
-# DEFAULT_MODEL = "qwen3:32b"
-# DEFAULT_MODEL = "mistral-small3.2:24b"
-# Change this to point at a different JSONL event file (or pass the path as argv).
-# DEFAULT_LOG_FILE = "logs/password-spray.jsonl"
-DEFAULT_LOG_FILE = "logs/http-beaconing.jsonl"
-
 # Fallback context window when the matched inference configuration has no num_ctx line.
 NUM_CTX = 32768
 # Generation budget sent on every chat as options.num_predict.

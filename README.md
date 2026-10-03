@@ -23,35 +23,34 @@ Install Ollama (`brew install ollama`, then `ollama serve` or the Ollama app) an
 ollama list
 ```
 
-The default model is `foundation-sec-8b-instruct`. Pull the weights, then create that name from [modelfiles/Modelfile.foundation-sec-8b-instruct](modelfiles/Modelfile.foundation-sec-8b-instruct). The pull installs `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest`, whose template is bare `{{ .Prompt }}` with no `RENDERER`. Preflight refuses that import. The `ollama create` step is what sends `<|system|>`, `<|user|>`, and `<|assistant|>`. Re-run it after a Modelfile change to refresh an existing wrapper; it reuses the downloaded weights:
+A single-file run below uses `foundation-sec-8b-instruct`. Pull the weights, then create that name from [modelfiles/Modelfile.foundation-sec-8b-instruct](modelfiles/Modelfile.foundation-sec-8b-instruct). The pull installs `hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest`, whose template is bare `{{ .Prompt }}` with no `RENDERER`. Preflight refuses that import. The `ollama create` step is what sends `<|system|>`, `<|user|>`, and `<|assistant|>`. Re-run it after a Modelfile change to refresh an existing wrapper; it reuses the downloaded weights:
 
 ```bash
 ollama pull hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF
 ollama create foundation-sec-8b-instruct -f modelfiles/Modelfile.foundation-sec-8b-instruct
 ```
 
-Another installed name works when preflight recognizes that family's chat template. Pass it with `--model`.
+Another installed name works when preflight recognizes that family's chat template. Pass it with `--models`.
 
-Foundation-Sec uses plain-text output and no Ollama `PARSER` directive. Its only configured stop must be `<|end_of_text|>`. Both CLIs check that before inference. The wrapper appends that EOS token to completed assistant turns. The harness then parses the returned text into the four answer fields. That application parser is separate from Ollama's output parser.
+Foundation-Sec uses plain-text output and no Ollama `PARSER` directive. Its only configured stop must be `<|end_of_text|>`. `compare_models.py` checks that before inference. The wrapper appends that EOS token to completed assistant turns. The harness then parses the returned text into the four answer fields. That application parser is separate from Ollama's output parser.
 
-From this repo, the default hunt is `logs/http-beaconing.jsonl` on `foundation-sec-8b-instruct`:
+From this repo, install dependencies and run hunts with `compare_models.py`. For a single model and a single log file, pass one `--models` name and one `--logs` path. This example is `logs/http-beaconing.jsonl` on `foundation-sec-8b-instruct`:
 
 ```bash
 uv sync
-uv run python main.py
-uv run python main.py --model qwen3:32b
-uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
-uv run python main.py --inference-configuration inference_config/qwen3-32b.conf
-uv run python main.py --timeout 600
+uv run python compare_models.py --models foundation-sec-8b-instruct --logs logs/http-beaconing.jsonl
+uv run python compare_models.py --models qwen3:32b --logs logs/http-beaconing.jsonl
+uv run python compare_models.py --models qwen3:32b --logs logs/http-beaconing.jsonl --inference-configuration inference_config/qwen3-32b.conf
+uv run python compare_models.py --models qwen3:32b --logs logs/http-beaconing.jsonl --timeout 600
 ```
 
 `--timeout` is a positive number of seconds for one Ollama HTTP request. `--timeout none` is the same unlimited wait as the default. The limit applies to a single request.
 
-The script prints the model, the declared inference configuration, the installed chat template, the log file, the events, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It also prints input, thinking, and output tokens, how those generated tokens were split, and context used versus `num_ctx`. It writes a results directory the same way a comparison does: the inference configuration is copied in before inference, then the hunt result is appended.
+The runner copies the inference configuration into a results directory before inference, then appends the hunt result. Open `report.html` in that directory for the verdict, threat type, summary, and evidence.
 
 ## What a hunt does
 
-`main.py` and `compare_models.py` share `run_hunt` from `shared/harness.py`. Each call starts a fresh conversation with the same prompt and serialized events. Neither CLI imports the other.
+`compare_models.py` calls `run_hunt` from `shared/harness.py`. Each call starts a fresh conversation with the same prompt and serialized events.
 
 1. Load a JSONL file and sort events by `@timestamp`.
 2. Send standard `role` / `content` messages. The system message holds the analyst instructions, evidence rules, verdict definitions, and output contract. The user message holds the task and a JSON array of events. Markdown headings and lists are the instruction hierarchy. XML tags (`<verdicts>`, `<output_fields>`, `<task>`, `<security_events>`) separate metadata from supporting content.
@@ -84,7 +83,7 @@ Grade every case with the [answer keys](evals/answer-keys.md). Keep those keys o
 
 | Log | Contents |
 | --- | --- |
-| `logs/http-beaconing.jsonl` | Default single-hunt file. Periodic HTTP check-ins among ordinary traffic |
+| `logs/http-beaconing.jsonl` | Periodic HTTP check-ins among ordinary traffic. The single-file example in [Run a hunt](#run-a-hunt) |
 | `logs/password-spray.jsonl` | Authentication events with a many-account failure sequence |
 | `logs/internal-network-scan.jsonl` | Internal port probes among ordinary traffic |
 | `logs/shared-vpn-logins.jsonl` | Shared-VPN logins that resemble spraying |
@@ -115,7 +114,7 @@ top_k=20
 
 Other recorded setups: `llama3.3:70b` (`num_ctx` 16384), `granite4.2:30b` (65536, `thinking=high`), `deepseek-r1:32b` (65536, `thinking=true`), `command-r:latest` (131072), `gemma4:31b` (32768, `thinking=true`), `mistral-small3.2:24b` (131072), `mistral-nemo:12b` (131072), and `foundation-sec-8b-instruct` (131072). `thinking` stays commented on models that do not support it. Granite 4.2 accepts `false`, `low`, `medium`, and `high`. Qwen3, DeepSeek-R1, and Gemma 4 are on or off (`thinking=true` or `false`).
 
-Both CLIs load the chosen inference configuration before the first inference call, print it, and copy it into the results directory. A model with no file is reported as having no declared inference configuration. If an uncommented weight quant differs from the installed Ollama quantization, the report keeps both and notes the difference. A malformed inference configuration stops the run before any results directory is created. `num_ctx` must be one positive integer written as digits only (commas are rejected). `temperature` is a non-negative decimal, `top_p` is a decimal from 0 through 1, and `top_k` is a positive integer.
+`compare_models.py` loads the chosen inference configuration before the first inference call, prints it, and copies it into the results directory. A model with no file is reported as having no declared inference configuration. If an uncommented weight quant differs from the installed Ollama quantization, the report keeps both and notes the difference. A malformed inference configuration stops the run before any results directory is created. `num_ctx` must be one positive integer written as digits only (commas are rejected). `temperature` is a non-negative decimal, `top_p` is a decimal from 0 through 1, and `top_k` is a positive integer.
 
 | Inference configuration key | Request field | If the line is absent |
 | --- | --- | --- |
@@ -133,7 +132,7 @@ Weight precision, KV cache, and repeat penalty stay commented out. The expected 
 
 ## Compare models
 
-Edit `MODELS` and `DEFAULT_SCENARIO_LOGS` at the top of `compare_models.py`, or override them on the command line. The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all seven scenarios: 21 runs. Use names from `ollama list`. A name without a tag resolves to `:latest` when that installed name exists. Models are checked before inference and are never downloaded. Missing models, unrecognized names, and wrong templates are reported together.
+`compare_models.py` is also the command for one model and one log file: pass a single `--models` name and a single `--logs` path, as in [Run a hunt](#run-a-hunt). Edit `MODELS` and `DEFAULT_SCENARIO_LOGS` at the top of `compare_models.py`, or override them on the command line. The defaults compare Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all seven scenarios: 21 runs. Use names from `ollama list`. A name without a tag resolves to `:latest` when that installed name exists. Models are checked before inference and are never downloaded. Missing models, unrecognized names, and wrong templates are reported together.
 
 ```bash
 uv run python compare_models.py
@@ -164,7 +163,7 @@ Wall time includes model load and request overhead. Eval time is prompt processi
 
 `build_messages()` sends ordinary `role` / `content` text. Markdown headings and the XML tags are application text. Let the installed model's [Ollama chat template](https://docs.ollama.com/modelfile#template) supply its native role and turn tokens. Leave ChatML tokens, Llama headers, Mistral `[INST]` markers, and Gemma turn markers to that template. [Templates differ even between models from the same base](https://huggingface.co/docs/transformers/chat_templating). For a model whose native format has no separate system role, confirm the installed template still carries the analyst instructions. Inspect an import with `ollama show --modelfile MODEL`.
 
-Before any chat call, both CLIs require the model to appear in `ollama list`, to support text completion when capabilities are advertised, and to pass the format check in [shared/model_formats.toml](shared/model_formats.toml). That check uses Ollama `/api/show` (the same data as `ollama show --template MODEL`) plus the Modelfile `RENDERER` line, parser, and stop sequences. Inference starts only when the installed package matches the family below. A name with no registered family fails. A `RENDERER` line fails for every family except Gemma 4, because the renderer replaces the template. Qwen3.5 does not match the Qwen3 rule.
+Before any chat call, `compare_models.py` requires the model to appear in `ollama list`, to support text completion when capabilities are advertised, and to pass the format check in [shared/model_formats.toml](shared/model_formats.toml). That check uses Ollama `/api/show` (the same data as `ollama show --template MODEL`) plus the Modelfile `RENDERER` line, parser, and stop sequences. Inference starts only when the installed package matches the family below. A name with no registered family fails. A `RENDERER` line fails for every family except Gemma 4, because the renderer replaces the template. Qwen3.5 does not match the Qwen3 rule.
 
 | Family | Required framing |
 | --- | --- |
@@ -197,14 +196,13 @@ hint = "Create example-instruct using modelfiles/Modelfile.example-instruct."
 
 Replace those tokens with the model's own tokens. `parsers = []` means plain text and no `PARSER` directive. A nonempty `parsers` list names the accepted parsers. Omitting `parsers` leaves the parser unconstrained. `required_stops` must be configured. Extra stops are allowed unless `allowed_stops` is set, which limits stops to that list. Foundation-Sec's EOS-only policy is its registry entry. Marker presence does not prove every rendered conversation matches the training template.
 
-If an imported GGUF lacks the right framing, add a Modelfile under `modelfiles/` and create a local wrapper, as with Foundation-Sec. The registry checks the installed package. It does not download models or rewrite installed templates. Add an `inference_config/*.conf` file for that wrapper. Both CLIs then use the same configuration without code changes.
+If an imported GGUF lacks the right framing, add a Modelfile under `modelfiles/` and create a local wrapper, as with Foundation-Sec. The registry checks the installed package. It does not download models or rewrite installed templates. Add an `inference_config/*.conf` file for that wrapper. `compare_models.py` then uses that configuration without code changes.
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `main.py` | Single-hunt CLI. Uses the shared harness, inference configurations, and report writer |
-| `compare_models.py` | Compare installed models across the JSONL scenarios and write `results/` |
+| `compare_models.py` | Run one or more installed models on one or more JSONL files and write `results/`. One model and one file is `--models NAME --logs PATH` |
 | `shared/harness.py` | Defaults, log loading, preflight, prompts, inference, token accounting, and output validation |
 | `shared/model_config.py` | Validation of installed templates, renderers, parsers, and stop sequences |
 | `shared/model_formats.toml` | Ordered model format requirements |
@@ -212,7 +210,7 @@ If an imported GGUF lacks the right framing, add a Modelfile under `modelfiles/`
 | `shared/run_reports.py` | Run directories, inference configuration snapshots, result files, and HTML reports |
 | `inference_config/*.conf` | Per-model eval setup. Uncommented values override Ollama and Modelfile defaults for that run |
 | `modelfiles/Modelfile.foundation-sec-8b-instruct` | `<\|system\|>` / `<\|user\|>` / `<\|assistant\|>` template for the Foundation-Sec GGUF import |
-| `logs/*.jsonl` | Seven synthetic ECS scenarios. The default hunt file is `logs/http-beaconing.jsonl` |
+| `logs/*.jsonl` | Seven synthetic ECS scenarios. A single-file run passes one of these to `--logs` |
 | `logs/README.md` | Field notes for the lookalike evidence packages |
 | `evals/answer-keys.md` | Human grading keys for all seven cases. The harness does not load this file |
 | `tests/test_main.py` | Tests for think-arg gating, incomplete replies, and hunt-output validation |

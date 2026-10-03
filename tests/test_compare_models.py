@@ -1,6 +1,6 @@
 """Tests for the comparison runner and the shared hunt contract.
 
-Hunt-contract tests live here because both CLIs share run_hunt() from shared/harness.py.
+Hunt-contract tests live here because compare_models.py calls run_hunt() from shared/harness.py.
 The rest of the file covers the comparison matrix and HTML report.
 """
 from __future__ import annotations
@@ -19,7 +19,6 @@ from unittest.mock import Mock, patch
 from ollama import ChatResponse, Message
 
 import compare_models
-import main as single_hunt
 import shared.harness as harness
 import shared.model_config as model_config
 import shared.inference_configurations as inference_configurations
@@ -59,7 +58,7 @@ def client():
 
 
 class HuntTests(unittest.TestCase):
-    def test_both_clis_use_a_model_added_through_configuration(self):
+    def test_cli_uses_a_model_added_through_configuration(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             config = root / "formats.toml"
@@ -74,32 +73,30 @@ required_stops = ["<end>"]
             formats = model_config.load_model_formats(config)
             log = root / "case.jsonl"
             log.write_text(json.dumps(EVENTS[0]) + '\n')
-            for cli, arguments in (
-                (single_hunt, ['main.py', str(log), '--model', 'future-instruct']),
-                (compare_models, ['compare_models.py', '--models', 'future-instruct', '--logs', str(log)]),
-            ):
-                with self.subTest(cli=cli.__name__):
-                    api = client()
-                    api.list.return_value.models = [
-                        SimpleNamespace(model='future-instruct:latest', digest='future-digest')
-                    ]
-                    api.show.return_value.template = '<system>{{ .System }}<user>{{ .Content }}<assistant>'
-                    api.show.return_value.modelfile = 'PARSER future-parser\n'
-                    api.show.return_value.parameters = 'stop "<end>"\nstop "<turn>"\n'
-                    output = root / cli.__name__
-                    argv = arguments + ['--output-dir', str(output), '--inference-config-dir', str(root / 'inference_config')]
-                    with patch.object(model_config, 'MODEL_FORMATS', formats), \
-                            patch.object(cli, 'Client', return_value=api), \
-                            patch.object(sys, 'argv', argv), \
-                            contextlib.redirect_stdout(io.StringIO()):
-                        cli.main()
-                    api.chat.assert_called_once()
-                    rows = list(output.glob('*/results.jsonl'))
-                    self.assertEqual(len(rows), 1)
-                    result = json.loads(rows[0].read_text())
-                    self.assertEqual(result['model'], 'future-instruct:latest')
-                    self.assertEqual(result['status'], 'ok')
-                    self.assertTrue(rows[0].with_name('report.html').is_file())
+            api = client()
+            api.list.return_value.models = [
+                SimpleNamespace(model='future-instruct:latest', digest='future-digest')
+            ]
+            api.show.return_value.template = '<system>{{ .System }}<user>{{ .Content }}<assistant>'
+            api.show.return_value.modelfile = 'PARSER future-parser\n'
+            api.show.return_value.parameters = 'stop "<end>"\nstop "<turn>"\n'
+            output = root / 'compare_models'
+            argv = [
+                'compare_models.py', '--models', 'future-instruct', '--logs', str(log),
+                '--output-dir', str(output), '--inference-config-dir', str(root / 'inference_config'),
+            ]
+            with patch.object(model_config, 'MODEL_FORMATS', formats), \
+                    patch.object(compare_models, 'Client', return_value=api), \
+                    patch.object(sys, 'argv', argv), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                compare_models.main()
+            api.chat.assert_called_once()
+            rows = list(output.glob('*/results.jsonl'))
+            self.assertEqual(len(rows), 1)
+            result = json.loads(rows[0].read_text())
+            self.assertEqual(result['model'], 'future-instruct:latest')
+            self.assertEqual(result['status'], 'ok')
+            self.assertTrue(rows[0].with_name('report.html').is_file())
 
     def test_shared_hunt_preserves_request_response_and_timing(self):
         api = client()
@@ -209,7 +206,7 @@ required_stops = ["<end>"]
         self.assertEqual(result['tokens'], harness.empty_tokens())
         self.assertIsNone(result['context']['used'])
 
-    def test_foundation_configuration_blocks_both_entry_points(self):
+    def test_foundation_configuration_blocks_preflight_and_run_hunt(self):
         for modelfile, parameters, expected in (
             ("PARSER llama3\n", 'stop "<|end_of_text|>"', "without a PARSER"),
             ("", 'stop "<|eot_id|>"', "must use only stop"),
@@ -308,24 +305,27 @@ required_stops = ["<end>"]
         self.assertIsNone(result['context']['used'])
         self.assertEqual(result['context']['allocated'], harness.NUM_CTX)
 
-    def test_single_hunt_cli_uses_shared_runner(self):
+    def test_one_model_one_log_uses_shared_runner(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'case.jsonl'
             path.write_text(json.dumps(EVENTS[0])+'\n')
             api = client()
             result = harness.run_hunt('foundation-sec-alpha', EVENTS, client=api)
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--inference-config-dir', str(Path(tmp)/'inference_config')]), \
-                    patch.object(single_hunt, 'Client', return_value=api), \
-                    patch.object(single_hunt, 'run_hunt', return_value=result) as run, \
+            argv = [
+                'compare_models.py', '--models', 'foundation-sec-alpha', '--logs', str(path),
+                '--output-dir', str(Path(tmp)/'results'),
+                '--inference-config-dir', str(Path(tmp)/'inference_config'),
+            ]
+            with patch.object(sys, 'argv', argv), \
+                    patch.object(compare_models, 'Client', return_value=api), \
+                    patch.object(compare_models, 'run_hunt', return_value=result) as run, \
                     contextlib.redirect_stdout(io.StringIO()) as out:
-                single_hunt.main()
+                compare_models.main()
             self.assertEqual(run.call_args.args[:2], ('foundation-sec-alpha:latest', EVENTS))
-            self.assertIn(ANSWER, out.getvalue())
-            self.assertIn(
-                'Tokens: input 80 · output 40 (exact) · context 120 / '
-                f'{harness.NUM_CTX}',
-                out.getvalue(),
-            )
+            saved = list((Path(tmp)/'results').glob('*/results.jsonl'))
+            self.assertEqual(len(saved), 1)
+            row = json.loads(saved[0].read_text().splitlines()[0])
+            self.assertEqual(row['raw_content'], ANSWER)
             self.assertIn(
                 f"{result['status']} · {run_reports.seconds(result['timing']['evaluation_seconds'])}",
                 out.getvalue(),
@@ -333,66 +333,77 @@ required_stops = ["<end>"]
             self.assertEqual(result['timing']['evaluation_seconds'], 1.5)
             result['status'] = 'invalid'
             result['validation_errors'] = ['Invalid output']
-            with patch.object(sys, 'argv', ['main.py', str(path), '--output-dir', str(Path(tmp)/'results'), '--inference-config-dir', str(Path(tmp)/'inference_config')]), \
-                    patch.object(single_hunt, 'Client', return_value=api), \
-                    patch.object(single_hunt, 'run_hunt', return_value=result), \
+            with patch.object(sys, 'argv', argv), \
+                    patch.object(compare_models, 'Client', return_value=api), \
+                    patch.object(compare_models, 'run_hunt', return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(io.StringIO()), \
                     self.assertRaises(SystemExit) as exit:
-                single_hunt.main()
+                compare_models.main()
             self.assertEqual(exit.exception.code, 1)
 
-    def test_single_hunt_cli_defaults_to_no_timeout_and_forwards_seconds(self):
+    def test_one_model_one_log_defaults_to_no_timeout_and_forwards_seconds(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'case.jsonl'
             path.write_text(json.dumps(EVENTS[0])+'\n')
             api = client()
             result = harness.run_hunt('foundation-sec-alpha', EVENTS, client=api)
-            base = ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--inference-config-dir', str(Path(tmp)/'inference_config')]
+            base = [
+                'compare_models.py', '--models', 'foundation-sec-alpha', '--logs', str(path),
+                '--output-dir', str(Path(tmp)/'results'),
+                '--inference-config-dir', str(Path(tmp)/'inference_config'),
+            ]
             with patch.object(sys, 'argv', base), \
-                    patch.object(single_hunt, 'Client', return_value=api) as constructed, \
-                    patch.object(single_hunt, 'run_hunt', return_value=result), \
+                    patch.object(compare_models, 'Client', return_value=api) as constructed, \
+                    patch.object(compare_models, 'run_hunt', return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()):
-                single_hunt.main()
+                compare_models.main()
             constructed.assert_called_once_with(timeout=None)
             with patch.object(sys, 'argv', base + ['--timeout', '45']), \
-                    patch.object(single_hunt, 'Client', return_value=api) as constructed, \
-                    patch.object(single_hunt, 'run_hunt', return_value=result), \
+                    patch.object(compare_models, 'Client', return_value=api) as constructed, \
+                    patch.object(compare_models, 'run_hunt', return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()):
-                single_hunt.main()
+                compare_models.main()
             constructed.assert_called_once_with(timeout=45.0)
 
-    def test_single_hunt_cli_rejects_bad_template_before_inference(self):
+    def test_one_model_one_log_rejects_bad_template_before_inference(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'case.jsonl'
             path.write_text(json.dumps(EVENTS[0])+'\n')
             api = client()
             api.show.return_value.template = "{{ .Prompt }}"
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--inference-config-dir', str(Path(tmp)/'inference_config')]), \
-                    patch.object(single_hunt, 'Client', return_value=api), \
-                    patch.object(single_hunt, 'run_hunt') as run, \
+            with patch.object(sys, 'argv', [
+                'compare_models.py', '--models', 'foundation-sec-alpha', '--logs', str(path),
+                '--output-dir', str(Path(tmp)/'results'),
+                '--inference-config-dir', str(Path(tmp)/'inference_config'),
+            ]), \
+                    patch.object(compare_models, 'Client', return_value=api), \
+                    patch.object(compare_models, 'run_hunt') as run, \
                     contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(io.StringIO()) as err, \
                     self.assertRaises(SystemExit) as exit:
-                single_hunt.main()
+                compare_models.main()
             self.assertEqual(exit.exception.code, 1)
             self.assertFalse(run.called)
             self.assertFalse(api.chat.called)
             self.assertIn("{{ .Prompt }}", err.getvalue())
             self.assertIn("Preflight failed", err.getvalue())
 
-    def test_single_hunt_cli_rejects_empty_log_before_inference(self):
+    def test_one_model_one_log_rejects_empty_log_before_inference(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'empty.jsonl'
             path.write_text('')
             api = client()
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha']), \
-                    patch.object(single_hunt, 'Client', return_value=api), \
-                    patch.object(single_hunt, 'run_hunt') as run, \
+            with patch.object(sys, 'argv', [
+                'compare_models.py', '--models', 'foundation-sec-alpha', '--logs', str(path),
+                '--output-dir', str(Path(tmp)/'results'),
+            ]), \
+                    patch.object(compare_models, 'Client', return_value=api), \
+                    patch.object(compare_models, 'run_hunt') as run, \
                     contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(io.StringIO()) as err, \
                     self.assertRaises(SystemExit) as exit:
-                single_hunt.main()
+                compare_models.main()
             self.assertEqual(exit.exception.code, 1)
             self.assertFalse(run.called)
             self.assertFalse(api.chat.called)
@@ -1291,16 +1302,16 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             return result
 
         with patch.object(sys, "argv", [
-            "main.py", str(self.log), "--model", "foundation-sec-alpha",
+            "compare_models.py", "--models", "foundation-sec-alpha", "--logs", str(self.log),
             "--inference-config-dir", str(self.configurations),
             "--output-dir", str(output),
-        ]), patch.object(single_hunt, "Client", return_value=api), \
-                patch.object(single_hunt, "run_hunt", side_effect=fake_run), \
+        ]), patch.object(compare_models, "Client", return_value=api), \
+                patch.object(compare_models, "run_hunt", side_effect=fake_run), \
                 contextlib.redirect_stdout(io.StringIO()) as out:
-            single_hunt.main()
+            compare_models.main()
         self.assertTrue(seen["before"])
         printed = out.getvalue()
-        self.assertLess(printed.index("kv_cache="), printed.index("--- Analysis ---"))
+        self.assertLess(printed.index("kv_cache="), printed.index("[1/1]"))
         rows = [
             json.loads(line)
             for path in output.glob("*/results.jsonl")
@@ -1316,15 +1327,15 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         api = client()
         output = self.root / "single-results"
         with patch.object(sys, "argv", [
-            "main.py", str(self.log), "--model", "foundation-sec-alpha",
+            "compare_models.py", "--models", "foundation-sec-alpha", "--logs", str(self.log),
             "--inference-config-dir", str(self.configurations),
             "--output-dir", str(output),
-        ]), patch.object(single_hunt, "Client", return_value=api), \
-                patch.object(single_hunt, "run_hunt") as run, \
+        ]), patch.object(compare_models, "Client", return_value=api), \
+                patch.object(compare_models, "run_hunt") as run, \
                 contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()) as err, \
                 self.assertRaises(SystemExit) as exit:
-            single_hunt.main()
+            compare_models.main()
         self.assertEqual(exit.exception.code, 1)
         self.assertFalse(run.called)
         self.assertFalse(api.chat.called)
@@ -1336,14 +1347,14 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
 
         def run_with(configuration_name):
             with patch.object(sys, "argv", [
-                "main.py", str(self.log), "--model", "foundation-sec-alpha",
+                "compare_models.py", "--models", "foundation-sec-alpha", "--logs", str(self.log),
                 "--inference-configuration", str(self.configurations / configuration_name),
                 "--inference-config-dir", str(self.configurations),
                 "--output-dir", str(output),
-            ]), patch.object(single_hunt, "Client", return_value=api), \
-                    patch.object(single_hunt, "run_hunt", return_value=result), \
+            ]), patch.object(compare_models, "Client", return_value=api), \
+                    patch.object(compare_models, "run_hunt", return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()):
-                single_hunt.main()
+                compare_models.main()
 
         run_with("think.conf")
         run_with("direct.conf")
@@ -1364,14 +1375,15 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         self.write_inference_configuration("alpha.conf", "not an inference configuration\n")
         api = client()
         with patch.object(sys, "argv", [
-            "main.py", str(self.log), "--model", "foundation-sec-alpha",
+            "compare_models.py", "--models", "foundation-sec-alpha", "--logs", str(self.log),
             "--inference-config-dir", str(self.configurations),
-        ]), patch.object(single_hunt, "Client", return_value=api), \
-                patch.object(single_hunt, "run_hunt") as run, \
+            "--output-dir", str(self.root / "rejected"),
+        ]), patch.object(compare_models, "Client", return_value=api), \
+                patch.object(compare_models, "run_hunt") as run, \
                 contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()) as err, \
                 self.assertRaises(SystemExit) as exit:
-            single_hunt.main()
+            compare_models.main()
         self.assertEqual(exit.exception.code, 1)
         self.assertFalse(run.called)
         self.assertFalse(api.chat.called)

@@ -232,13 +232,6 @@ def collapsible_run_details(inner_html: str) -> str:
     )
 
 
-def format_num_predict(value: object) -> str:
-    """Label the sent num_predict. Ollama treats -1 as unlimited generation."""
-    if value == -1:
-        return "-1 (no limit)"
-    return str(value)
-
-
 def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
     """Static, escaped HTML: model responses are displayed only as text."""
     e = lambda value: escape(str(value))
@@ -328,24 +321,6 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
 </style></head><body><main>'''
     html += (f'<h1>Threat hunt model comparison</h1><p>{e(format_report_timestamp(str(manifest["created_at"])))} · '
              f'{len(results)} / {total} runs recorded</p>'
-             f'<p>Request settings: num_ctx={e(settings.get("num_ctx"))}, '
-             f'num_predict={e(format_num_predict(settings.get("num_predict")))}, '
-             f'seed={e(settings.get("seed"))}, '
-             f'think={e(settings.get("think"))}, '
-             f'kv_cache_type={e(settings.get("kv_cache_type"))} '
-             '(server env <code>OLLAMA_KV_CACHE_TYPE</code>; not a chat API option). '
-             'These are the harness fallbacks unless an inference config overrides them; '
-             'they are not necessarily what each model was sent. '
-             'Each model card shows the context window and thinking value actually used.</p>'
-             '<p>Output validity checks format and cited IDs; '
-             'it does not establish detection accuracy. Eval time is prompt processing plus generation for that log and excludes model load and unload. '
-             'Wall time includes model loading. '
-             'Runs are sequential, with a fresh conversation for every case. '
-             'Context used is prompt tokens plus generated tokens, compared with the configured num_ctx. '
-             'Thinking and output tokens split that generated count: exact when only one of those texts is present, '
-             'estimated by character length when both are present. '
-             'A run warns at 90% of num_ctx and is an error at or above num_ctx. '
-             'Context shift is disabled for every model.</p>'
              '<div class="scroll"><table><thead><tr><th>Case</th><th>Model</th><th>Quantization</th>'
              '<th>Verdict</th><th>Output status</th><th>Unknown IDs</th><th>Eval time</th><th>Thinking</th>'
              '<th>Context used</th><th>Context allocated</th>'

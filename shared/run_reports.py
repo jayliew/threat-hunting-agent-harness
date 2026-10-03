@@ -196,7 +196,12 @@ def thinking_label(result: dict | None, model: dict, settings: dict) -> str:
 
 
 def context_label(allocated, used, model_max) -> str:
-    text = f"used {display(used)} / allocated {display(allocated)}"
+    """Card line: used tokens with percent of allocated context, then the model max."""
+    if used is None or used == "":
+        used_text = "—"
+    else:
+        used_text = context_used_cell(used, allocated)
+    text = f"used {used_text} / allocated {display(allocated)}"
     if model_max is not None:
         text += f" (model max {model_max})"
     return text
@@ -244,13 +249,12 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             result = by_pair.get((case["name"], model.get("run_key", model["name"])))
             name = e(slot_label(model))
             think = thinking_label(result, model, settings)
-            quant = quantization_label(model)
             show_thinking_tokens = think != "not supported"
             if result is None:
                 pending_details = (
                     f'{e(context_label(model.get("num_ctx", settings.get("num_ctx")), None, model.get("context_length")))}<br>'
                     f'{framing_note(model)}'
-                    f'Quantization: {e(quant)}<br>Thinking: {e(think)}<br>'
+                    f'Thinking: {e(think)}<br>'
                     f'{e(tokens_label(None, include_thinking=show_thinking_tokens))}'
                 )
                 cards.append(
@@ -270,6 +274,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             thinking_tokens_cell = (
                 display(tokens.get("thinking_tokens")) if show_thinking_tokens else "—"
             )
+            quant = quantization_label(model)
             rows.append(
                 f'<tr><td>{e(case["name"])}</td><td>{name}</td>'
                 f'<td>{e(quant)}</td>'
@@ -291,7 +296,6 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             run_details = (
                 f'{e(context_label(allocated, used, model_max))}<br>'
                 f'{framing_note(model)}'
-                f'Quantization: {e(quant)}<br>'
                 f'Thinking: {e(think)}<br>'
                 f'{e(tokens_label(tokens, include_thinking=show_thinking_tokens))}<br>'
                 f'Prompt processing: {duration_seconds_one_decimal(timing.get("prompt_eval_duration_seconds"))} · '

@@ -87,7 +87,7 @@ required_stops = ["<end>"]
                     api.show.return_value.modelfile = 'PARSER future-parser\n'
                     api.show.return_value.parameters = 'stop "<end>"\nstop "<turn>"\n'
                     output = root / cli.__name__
-                    argv = arguments + ['--output-dir', str(output), '--inference-configurations-dir', str(root / 'inference-configurations')]
+                    argv = arguments + ['--output-dir', str(output), '--inference-config-dir', str(root / 'inference_config')]
                     with patch.object(model_config, 'MODEL_FORMATS', formats), \
                             patch.object(cli, 'Client', return_value=api), \
                             patch.object(sys, 'argv', argv), \
@@ -314,7 +314,7 @@ required_stops = ["<end>"]
             path.write_text(json.dumps(EVENTS[0])+'\n')
             api = client()
             result = harness.run_hunt('foundation-sec-alpha', EVENTS, client=api)
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--inference-configurations-dir', str(Path(tmp)/'inference-configurations')]), \
+            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--inference-config-dir', str(Path(tmp)/'inference_config')]), \
                     patch.object(single_hunt, 'Client', return_value=api), \
                     patch.object(single_hunt, 'run_hunt', return_value=result) as run, \
                     contextlib.redirect_stdout(io.StringIO()) as out:
@@ -333,7 +333,7 @@ required_stops = ["<end>"]
             self.assertEqual(result['timing']['evaluation_seconds'], 1.5)
             result['status'] = 'invalid'
             result['validation_errors'] = ['Invalid output']
-            with patch.object(sys, 'argv', ['main.py', str(path), '--output-dir', str(Path(tmp)/'results'), '--inference-configurations-dir', str(Path(tmp)/'inference-configurations')]), \
+            with patch.object(sys, 'argv', ['main.py', str(path), '--output-dir', str(Path(tmp)/'results'), '--inference-config-dir', str(Path(tmp)/'inference_config')]), \
                     patch.object(single_hunt, 'Client', return_value=api), \
                     patch.object(single_hunt, 'run_hunt', return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()), \
@@ -348,7 +348,7 @@ required_stops = ["<end>"]
             path.write_text(json.dumps(EVENTS[0])+'\n')
             api = client()
             result = harness.run_hunt('foundation-sec-alpha', EVENTS, client=api)
-            base = ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--inference-configurations-dir', str(Path(tmp)/'inference-configurations')]
+            base = ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--inference-config-dir', str(Path(tmp)/'inference_config')]
             with patch.object(sys, 'argv', base), \
                     patch.object(single_hunt, 'Client', return_value=api) as constructed, \
                     patch.object(single_hunt, 'run_hunt', return_value=result), \
@@ -368,7 +368,7 @@ required_stops = ["<end>"]
             path.write_text(json.dumps(EVENTS[0])+'\n')
             api = client()
             api.show.return_value.template = "{{ .Prompt }}"
-            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--inference-configurations-dir', str(Path(tmp)/'inference-configurations')]), \
+            with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--inference-config-dir', str(Path(tmp)/'inference_config')]), \
                     patch.object(single_hunt, 'Client', return_value=api), \
                     patch.object(single_hunt, 'run_hunt') as run, \
                     contextlib.redirect_stdout(io.StringIO()), \
@@ -844,7 +844,7 @@ class ComparisonTests(unittest.TestCase):
 
     def test_compare_cli_defaults_to_no_timeout_and_forwards_seconds(self):
         api = client()
-        argv = ['compare_models.py', '--models', 'foundation-sec-alpha', '--logs', self.logs[0], '--output-dir', str(self.root/'results'), '--inference-configurations-dir', str(self.root/'inference-configurations')]
+        argv = ['compare_models.py', '--models', 'foundation-sec-alpha', '--logs', self.logs[0], '--output-dir', str(self.root/'results'), '--inference-config-dir', str(self.root/'inference_config')]
         with patch.object(compare_models, 'Client', return_value=api) as constructed, \
                 patch.object(sys, 'argv', argv), \
                 contextlib.redirect_stdout(io.StringIO()):
@@ -862,7 +862,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.configurations = self.root / "inference-configurations"
+        self.configurations = self.root / "inference_config"
         self.configurations.mkdir()
         self.log = self.root / "case.jsonl"
         self.log.write_text(json.dumps(EVENTS[0]) + "\n")
@@ -872,9 +872,9 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
 
     def test_checked_in_qwen_inference_configuration_parses(self):
         configuration = inference_configurations.parse_inference_configuration_file(
-            Path(__file__).resolve().parent.parent / "inference-configurations" / "qwen3-32b.conf"
+            Path(__file__).resolve().parent.parent / "inference_config" / "qwen3-32b.conf"
         )
-        self.assertEqual(configuration["source"], "inference-configurations/qwen3-32b.conf")
+        self.assertEqual(configuration["source"], "inference_config/qwen3-32b.conf")
         self.assertEqual(
             configuration["fields"],
             {
@@ -932,7 +932,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             "mistral-nemo-12b.conf": ("0.3", 0.3, "0.90", 0.9, "40", 40),
             "foundation-sec-8b-instruct.conf": ("0.2", 0.2, "0.90", 0.9, "40", 40),
         }
-        root = Path(__file__).resolve().parent.parent / "inference-configurations"
+        root = Path(__file__).resolve().parent.parent / "inference_config"
         for name, (model, text, number, thinking, parsed) in expected.items():
             configuration = inference_configurations.parse_inference_configuration_file(root / name)
             temperature, temperature_value, top_p, top_p_value, top_k, top_k_value = sampling[name]
@@ -1292,7 +1292,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
 
         with patch.object(sys, "argv", [
             "main.py", str(self.log), "--model", "foundation-sec-alpha",
-            "--inference-configurations-dir", str(self.configurations),
+            "--inference-config-dir", str(self.configurations),
             "--output-dir", str(output),
         ]), patch.object(single_hunt, "Client", return_value=api), \
                 patch.object(single_hunt, "run_hunt", side_effect=fake_run), \
@@ -1317,7 +1317,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         output = self.root / "single-results"
         with patch.object(sys, "argv", [
             "main.py", str(self.log), "--model", "foundation-sec-alpha",
-            "--inference-configurations-dir", str(self.configurations),
+            "--inference-config-dir", str(self.configurations),
             "--output-dir", str(output),
         ]), patch.object(single_hunt, "Client", return_value=api), \
                 patch.object(single_hunt, "run_hunt") as run, \
@@ -1338,7 +1338,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             with patch.object(sys, "argv", [
                 "main.py", str(self.log), "--model", "foundation-sec-alpha",
                 "--inference-configuration", str(self.configurations / configuration_name),
-                "--inference-configurations-dir", str(self.configurations),
+                "--inference-config-dir", str(self.configurations),
                 "--output-dir", str(output),
             ]), patch.object(single_hunt, "Client", return_value=api), \
                     patch.object(single_hunt, "run_hunt", return_value=result), \
@@ -1365,7 +1365,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         api = client()
         with patch.object(sys, "argv", [
             "main.py", str(self.log), "--model", "foundation-sec-alpha",
-            "--inference-configurations-dir", str(self.configurations),
+            "--inference-config-dir", str(self.configurations),
         ]), patch.object(single_hunt, "Client", return_value=api), \
                 patch.object(single_hunt, "run_hunt") as run, \
                 contextlib.redirect_stdout(io.StringIO()), \

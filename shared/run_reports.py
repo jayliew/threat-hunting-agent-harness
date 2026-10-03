@@ -363,9 +363,9 @@ def open_recorded_run(
     ]
     write_declared_inference_configurations(directory, attached)
     manifest = {
-        "schema_version": 2,
+        "schema_version": 3,
         "created_at": now.isoformat(),
-        "inference_configurations_dir": (
+        "inference_config_dir": (
             display_source(configurations_directory)
             if configurations_directory.exists()
             else str(configurations_directory)
@@ -390,7 +390,7 @@ def open_recorded_run(
 
 def annotate_result(result: dict, slot: dict, case: dict) -> dict:
     result.update({
-        "schema_version": 2,
+        "schema_version": 3,
         "case": case["name"],
         "log_path": case["path"],
         "events_sha256": case["events_sha256"],

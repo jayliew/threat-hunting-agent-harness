@@ -41,7 +41,7 @@ uv sync
 uv run python main.py
 uv run python main.py --model qwen3:32b
 uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
-uv run python main.py --inference-configuration inference-configurations/qwen3-32b.conf
+uv run python main.py --inference-configuration inference_config/qwen3-32b.conf
 uv run python main.py --timeout 600
 ```
 
@@ -73,7 +73,7 @@ Usage at or above 90% of `num_ctx`, while still under that window, prints a warn
 
 The run stops before it can look like a successful hunt when:
 
-- a file in `inference-configurations/` is empty, missing `model`, is not `key=value` lines, or uses a key that is not an exact inference configuration field name
+- a file in `inference_config/` is empty, missing `model`, is not `key=value` lines, or uses a key that is not an exact inference configuration field name
 - the model is missing from `ollama list`, lacks text completion, or its installed template, renderer, parser, or stops fail the format check (see [Chat templates](#chat-templates))
 - the log file is missing, unreadable, malformed, or contains no events
 - several inference configurations name the model and you omitted `--inference-configuration`
@@ -94,11 +94,11 @@ Grade every case with the [answer keys](evals/answer-keys.md). Keep those keys o
 
 ## Inference configurations and request settings
 
-Each file in `inference-configurations/` is one eval setup: the installed Ollama name, and the request values for that run. An uncommented value is sent on the chat request and overrides the Ollama or Modelfile default for that call. A `#` line stays in the file for a later change and leaves the default in place. Blank lines are ignored.
+Each file in `inference_config/` is one eval setup: the installed Ollama name, and the request values for that run. An uncommented value is sent on the chat request and overrides the Ollama or Modelfile default for that call. A `#` line stays in the file for a later change and leaves the default in place. Blank lines are ignored.
 
 Lines are `key=value`. The key must be exactly `model`, `num_ctx`, `thinking`, `temperature`, `top_p`, `top_k`, `weight_precision`, `weight_quant`, `kv_cache`, or `repeat_penalty`. A different case, hyphen, or space (`Num Ctx`, `num-ctx`) stops the run. `alpha` and `alpha:latest` are the same model. Two files may name the same model when the settings differ; those are different runs. Pass `--inference-configuration` with the file you want. If more than one file matches and you omit `--inference-configuration`, the run stops and lists them.
 
-`inference-configurations/qwen3-32b.conf`:
+`inference_config/qwen3-32b.conf`:
 
 ```
 model=qwen3:32b
@@ -139,11 +139,11 @@ Edit `MODELS` and `DEFAULT_SCENARIO_LOGS` at the top of `compare_models.py`, or 
 uv run python compare_models.py
 uv run python compare_models.py --models qwen3:32b mistral-small3.2:24b --logs logs/password-spray.jsonl logs/http-beaconing.jsonl
 uv run python compare_models.py --models mistral-small3.2:24b --timeout 600 --output-dir results
-uv run python compare_models.py --inference-configurations-dir inference-configurations
-uv run python compare_models.py --models qwen3:32b --inference-configuration inference-configurations/qwen3-32b.conf inference-configurations/qwen3-32b-other.conf
+uv run python compare_models.py --inference-config-dir inference_config
+uv run python compare_models.py --models qwen3:32b --inference-configuration inference_config/qwen3-32b.conf inference_config/qwen3-32b-other.conf
 ```
 
-Log paths are relative to the script, or absolute. `--output-dir` and `--inference-configurations-dir` are relative to the current working directory. The default inference configurations directory is `inference-configurations/` next to the script.
+Log paths are relative to the script, or absolute. `--output-dir` and `--inference-config-dir` are relative to the current working directory. The default directory is `inference_config/` next to the script.
 
 Each invocation creates a unique US Eastern Time subdirectory named with the day, month, year, weekday, and time, for example `20-Sep-2026-Sun_09-28am-ET`:
 
@@ -197,7 +197,7 @@ hint = "Create example-instruct using modelfiles/Modelfile.example-instruct."
 
 Replace those tokens with the model's own tokens. `parsers = []` means plain text and no `PARSER` directive. A nonempty `parsers` list names the accepted parsers. Omitting `parsers` leaves the parser unconstrained. `required_stops` must be configured. Extra stops are allowed unless `allowed_stops` is set, which limits stops to that list. Foundation-Sec's EOS-only policy is its registry entry. Marker presence does not prove every rendered conversation matches the training template.
 
-If an imported GGUF lacks the right framing, add a Modelfile under `modelfiles/` and create a local wrapper, as with Foundation-Sec. The registry checks the installed package. It does not download models or rewrite installed templates. Add an `inference-configurations/*.conf` file for that wrapper. Both CLIs then use the same configuration without code changes.
+If an imported GGUF lacks the right framing, add a Modelfile under `modelfiles/` and create a local wrapper, as with Foundation-Sec. The registry checks the installed package. It does not download models or rewrite installed templates. Add an `inference_config/*.conf` file for that wrapper. Both CLIs then use the same configuration without code changes.
 
 ## Layout
 
@@ -210,7 +210,7 @@ If an imported GGUF lacks the right framing, add a Modelfile under `modelfiles/`
 | `shared/model_formats.toml` | Ordered model format requirements |
 | `shared/inference_configurations.py` | Inference configuration loading, settings validation, and run selection |
 | `shared/run_reports.py` | Run directories, inference configuration snapshots, result files, and HTML reports |
-| `inference-configurations/*.conf` | Per-model eval setup. Uncommented values override Ollama and Modelfile defaults for that run |
+| `inference_config/*.conf` | Per-model eval setup. Uncommented values override Ollama and Modelfile defaults for that run |
 | `modelfiles/Modelfile.foundation-sec-8b-instruct` | `<\|system\|>` / `<\|user\|>` / `<\|assistant\|>` template for the Foundation-Sec GGUF import |
 | `logs/*.jsonl` | Seven synthetic ECS scenarios. The default hunt file is `logs/http-beaconing.jsonl` |
 | `logs/README.md` | Field notes for the lookalike evidence packages |

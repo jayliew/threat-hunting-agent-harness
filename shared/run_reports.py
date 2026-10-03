@@ -310,6 +310,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
                 pending_details = (
                     f'{context_label_html(model.get("num_ctx", settings.get("num_ctx")), None, model.get("context_length"))}<br>'
                     f'{framing_note(model)}'
+                    f'Prompt: {e(model.get("system_prompt") or "default")}<br>'
                     f'Thinking: {e(think)}<br>'
                     f'{e(tokens_label(None, include_thinking=show_thinking_tokens))}'
                 )
@@ -349,9 +350,11 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             )
             thinking = (f'<details><summary>Thinking trace</summary><pre>{e(result["thinking"])}</pre></details>'
                         if result["thinking"] else '')
+            prompt_name = result.get("system_prompt") or model.get("system_prompt") or "default"
             run_details = (
                 f'{context_label_html(allocated, used, model_max)}<br>'
                 f'{framing_note(model)}'
+                f'Prompt: {e(prompt_name)}<br>'
                 f'Thinking: {e(think)}<br>'
                 f'{e(tokens_label(tokens, include_thinking=show_thinking_tokens))}<br>'
                 f'Prompt processing: {duration_seconds_one_decimal(timing.get("prompt_eval_duration_seconds"))} · '
@@ -445,6 +448,7 @@ def annotate_result(result: dict, slot: dict, case: dict) -> dict:
         "model_digest": slot["digest"],
         "run_key": slot["run_key"],
         "declared_inference_configuration": slot.get("inference_configuration_source"),
+        "system_prompt": slot.get("system_prompt") or "default",
     })
     return result
 

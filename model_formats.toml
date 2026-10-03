@@ -12,7 +12,7 @@ forbidden = ["<|start_header_id|>"]
 parsers = []
 required_stops = ["<|end_of_text|>"]
 allowed_stops = ["<|end_of_text|>"]
-hint = "Foundation-Sec-8B-Instruct expects <|system|>, <|user|>, and <|assistant|>. Create a local model from Modelfile.foundation-sec-8b-instruct before running."
+hint = "Foundation-Sec-8B-Instruct expects <|system|>, <|user|>, and <|assistant|>. Create a local model from modelfiles/Modelfile.foundation-sec-8b-instruct before running."
 
 [[formats]]
 label = "CyberPal 2.0"

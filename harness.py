@@ -19,7 +19,7 @@ from model_config import chat_template_error, installed_model_error, installed_r
 
 # Default Ollama model. Must already be installed locally (`ollama list`).
 # Pass --model to use a different installed name.
-# Apply Modelfile.foundation-sec-8b-instruct to the Hugging Face GGUF import
+# Apply modelfiles/Modelfile.foundation-sec-8b-instruct to the Hugging Face GGUF import
 # so Ollama sends <|system|> / <|user|> / <|assistant|> instead of {{ .Prompt }}.
 DEFAULT_MODEL = "foundation-sec-8b-instruct"
 # DEFAULT_MODEL = "hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest"

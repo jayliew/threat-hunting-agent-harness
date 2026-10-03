@@ -8,7 +8,7 @@ import sys
 
 from ollama import Client
 
-import shared.model_profiles as model_profiles
+import shared.inference_configurations as inference_configurations
 import shared.run_reports as run_reports
 from shared.harness import (
     DEFAULT_LOG_FILE, DEFAULT_MODEL, KV_CACHE_TYPE, SEED,
@@ -30,23 +30,26 @@ def main() -> None:
         help=(
             "Ollama model already installed on this machine "
             f"(ollama list). Default: {DEFAULT_MODEL}. "
-            "With --profile, this must match the profile's model= value."
+            "With --inference-configuration, this must match the inference configuration's model= value."
         ),
     )
     parser.add_argument(
-        "--profile",
+        "--inference-configuration",
         type=Path,
         default=None,
         help=(
-            "Declared profile file for this run. Use another file on a later "
+            "Declared inference configuration file for this run. Use another file on a later "
             "run to test the same model under different settings."
         ),
     )
     parser.add_argument(
-        "--profiles-dir",
+        "--inference-configurations-dir",
         type=Path,
         default=None,
-        help="Directory of declared *.profile files (default: profiles/ next to this script)",
+        help=(
+            "Directory of declared *.conf files "
+            "(default: inference-configurations/ next to this script)"
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -64,28 +67,35 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
-    profiles_directory = (
-        model_profiles.DEFAULT_PROFILES_DIR
-        if args.profiles_dir is None
-        else args.profiles_dir
+    configurations_directory = (
+        inference_configurations.DEFAULT_INFERENCE_CONFIGURATIONS_DIR
+        if args.inference_configurations_dir is None
+        else args.inference_configurations_dir
     )
     output_root = run_reports.OUTPUT_ROOT if args.output_dir is None else args.output_dir
     try:
-        if args.profile is not None:
-            explicit = model_profiles.load_profile_paths([args.profile])
+        if args.inference_configuration is not None:
+            explicit = inference_configurations.load_inference_configuration_paths(
+                [args.inference_configuration]
+            )
             chosen = explicit[0]
-            if args.model and not model_profiles.model_names_match(args.model, chosen["model"]):
+            if args.model and not inference_configurations.model_names_match(
+                args.model, chosen["model"]
+            ):
                 raise ValueError(
-                    f"Profile {chosen['source']} declares {chosen['model']}, not {args.model}."
+                    f"Inference configuration {chosen['source']} declares {chosen['model']}, "
+                    f"not {args.model}."
                 )
             model_name = chosen["model"]
             loaded: list[dict] = []
         else:
             explicit = []
             model_name = args.model or DEFAULT_MODEL
-            loaded = model_profiles.load_profiles(profiles_directory)
+            loaded = inference_configurations.load_inference_configurations(
+                configurations_directory
+            )
             # Choose the setup before Ollama is contacted. Several matches must be pinned.
-            model_profiles.unique_profile(loaded, model_name)
+            inference_configurations.unique_inference_configuration(loaded, model_name)
     except ValueError as error:
         print(error, file=sys.stderr)
         raise SystemExit(1)
@@ -95,7 +105,7 @@ def main() -> None:
         selected, cases = preflight_models_and_logs(
             client, [model_name], [str(log_path)]
         )
-        slots = model_profiles.assign_run_slots(selected, loaded, explicit)
+        slots = inference_configurations.assign_run_slots(selected, loaded, explicit)
     except ValueError as error:
         print(error, file=sys.stderr)
         raise SystemExit(1)
@@ -118,7 +128,7 @@ def main() -> None:
     print(f"Log file: {displayed_log}")
     print(f"Security events supplied:\n{events}")
     directory, manifest = run_reports.open_recorded_run(
-        output_root, profiles_directory, slots, cases
+        output_root, configurations_directory, slots, cases
     )
     print("\n--- Analysis ---", flush=True)
     result = run_hunt(

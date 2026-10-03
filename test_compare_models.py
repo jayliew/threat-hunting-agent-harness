@@ -602,7 +602,7 @@ class ComparisonTests(unittest.TestCase):
                 ['hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest'],
                 self.logs[:1],
             )
-        self.assertIn('Modelfile.foundation-sec-8b-instruct', str(error.exception))
+        self.assertIn('modelfiles/Modelfile.foundation-sec-8b-instruct', str(error.exception))
         self.assertFalse(api.chat.called)
 
     def test_run_hunt_rechecks_template_with_renderer(self):
@@ -623,7 +623,7 @@ class ComparisonTests(unittest.TestCase):
             chat_template='{{ .Prompt }}', renderer='gemma4',
         )
         self.assertEqual(refused['status'], 'error')
-        self.assertIn('Modelfile.foundation-sec-8b-instruct', refused['error'])
+        self.assertIn('modelfiles/Modelfile.foundation-sec-8b-instruct', refused['error'])
         self.assertFalse(api.chat.called)
 
     def test_report_escapes_model_output(self):

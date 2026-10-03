@@ -429,7 +429,7 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertIsNotNone(error)
         self.assertIn("{{ .Prompt }}", error)
         self.assertIn("<|system|>", error)
-        self.assertIn("Modelfile.foundation-sec-8b-instruct", error)
+        self.assertIn("modelfiles/Modelfile.foundation-sec-8b-instruct", error)
         llama_headers = chat_template_error(
             "foundation-sec-8b-instruct",
             "{{ range .Messages }}<|start_header_id|>{{ .Role }}<|end_header_id|>\n{{ .Content }}{{ end }}",
@@ -511,7 +511,7 @@ class ChatTemplateTests(unittest.TestCase):
             "gemma4",
         )
         self.assertIsNotNone(blocked)
-        self.assertIn("Modelfile.foundation-sec-8b-instruct", blocked)
+        self.assertIn("modelfiles/Modelfile.foundation-sec-8b-instruct", blocked)
 
     def test_deepseek_fullwidth_markers_pass(self) -> None:
         template = "<\uff5cUser\uff5c>{{ .Content }}<\uff5cAssistant\uff5c>"
@@ -527,7 +527,7 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertIsNone(installed_renderer(""))
 
     def test_modelfile_passes_preflight(self) -> None:
-        text = (REPO_ROOT / "Modelfile.foundation-sec-8b-instruct").read_text()
+        text = (REPO_ROOT / "modelfiles" / "Modelfile.foundation-sec-8b-instruct").read_text()
         template = text.split("TEMPLATE", 1)[1].split("PARAMETER", 1)[0]
         self.assertIsNone(chat_template_error("foundation-sec-8b-instruct", template))
         self.assertIn("FROM hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest", text)

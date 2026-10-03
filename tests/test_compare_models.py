@@ -1,6 +1,6 @@
 """Tests for the comparison runner and the shared hunt contract.
 
-Hunt-contract tests live here because both CLIs share run_hunt() from main.py.
+Hunt-contract tests live here because both CLIs share run_hunt() from shared/harness.py.
 The rest of the file covers the comparison matrix and HTML report.
 """
 from __future__ import annotations
@@ -19,7 +19,11 @@ from unittest.mock import Mock, patch
 from ollama import ChatResponse, Message
 
 import compare_models
-import main as harness
+import main as single_hunt
+import shared.harness as harness
+import shared.model_config as model_config
+import shared.model_profiles as model_profiles
+import shared.run_reports as run_reports
 
 
 ANSWER = 'Verdict: benign\nThreat type: none\nSummary: Normal activity.\nEvidence: e1'
@@ -48,11 +52,55 @@ def client():
     result.show.return_value.template = (
         "<|system|>\n{{ .System }}\n<|user|>\n{{ .Content }}\n<|assistant|>\n"
     )
+    result.show.return_value.parameters = 'stop "<|end_of_text|>"\n'
+    result.show.return_value.modelfile = ""
     result.chat.return_value = response()
     return result
 
 
 class HuntTests(unittest.TestCase):
+    def test_both_clis_use_a_model_added_through_configuration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "formats.toml"
+            config.write_text('''
+[[formats]]
+label = "Future Instruct"
+name_pattern = "future-instruct"
+markers = ["<system>", "<user>", "<assistant>"]
+parsers = ["future-parser"]
+required_stops = ["<end>"]
+''')
+            formats = model_config.load_model_formats(config)
+            log = root / "case.jsonl"
+            log.write_text(json.dumps(EVENTS[0]) + '\n')
+            for cli, arguments in (
+                (single_hunt, ['main.py', str(log), '--model', 'future-instruct']),
+                (compare_models, ['compare_models.py', '--models', 'future-instruct', '--logs', str(log)]),
+            ):
+                with self.subTest(cli=cli.__name__):
+                    api = client()
+                    api.list.return_value.models = [
+                        SimpleNamespace(model='future-instruct:latest', digest='future-digest')
+                    ]
+                    api.show.return_value.template = '<system>{{ .System }}<user>{{ .Content }}<assistant>'
+                    api.show.return_value.modelfile = 'PARSER future-parser\n'
+                    api.show.return_value.parameters = 'stop "<end>"\nstop "<turn>"\n'
+                    output = root / cli.__name__
+                    argv = arguments + ['--output-dir', str(output), '--profiles-dir', str(root / 'profiles')]
+                    with patch.object(model_config, 'MODEL_FORMATS', formats), \
+                            patch.object(cli, 'Client', return_value=api), \
+                            patch.object(sys, 'argv', argv), \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        cli.main()
+                    api.chat.assert_called_once()
+                    rows = list(output.glob('*/results.jsonl'))
+                    self.assertEqual(len(rows), 1)
+                    result = json.loads(rows[0].read_text())
+                    self.assertEqual(result['model'], 'future-instruct:latest')
+                    self.assertEqual(result['status'], 'ok')
+                    self.assertTrue(rows[0].with_name('report.html').is_file())
+
     def test_shared_hunt_preserves_request_response_and_timing(self):
         api = client()
         result = harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api, capabilities=['completion', 'thinking'])
@@ -161,6 +209,25 @@ class HuntTests(unittest.TestCase):
         self.assertEqual(result['tokens'], harness.empty_tokens())
         self.assertIsNone(result['context']['used'])
 
+    def test_foundation_configuration_blocks_both_entry_points(self):
+        for modelfile, parameters, expected in (
+            ("PARSER llama3\n", 'stop "<|end_of_text|>"', "without a PARSER"),
+            ("", 'stop "<|eot_id|>"', "must use only stop"),
+            ("", "", "must use only stop"),
+        ):
+            with self.subTest(modelfile=modelfile, parameters=parameters):
+                api = client()
+                api.show.return_value.modelfile = modelfile
+                api.show.return_value.parameters = parameters
+                with self.assertRaisesRegex(ValueError, expected):
+                    compare_models.prepare_comparison(
+                        api, ['foundation-sec-alpha'], ['logs/http-beaconing.jsonl']
+                    )
+                result = harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api)
+                self.assertEqual(result['status'], 'error')
+                self.assertIn(expected, result['error'])
+                api.chat.assert_not_called()
+
     def test_run_hunt_records_native_context_from_show(self):
         api = client()
         api.show.return_value.modelinfo = {"llama.context_length": 131072}
@@ -248,31 +315,31 @@ class HuntTests(unittest.TestCase):
             api = client()
             result = harness.run_hunt('foundation-sec-alpha', EVENTS, client=api)
             with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
-                    patch.object(harness, 'Client', return_value=api), \
-                    patch.object(harness, 'run_hunt', return_value=result) as run, \
+                    patch.object(single_hunt, 'Client', return_value=api), \
+                    patch.object(single_hunt, 'run_hunt', return_value=result) as run, \
                     contextlib.redirect_stdout(io.StringIO()) as out:
-                harness.main()
+                single_hunt.main()
             self.assertEqual(run.call_args.args[:2], ('foundation-sec-alpha:latest', EVENTS))
             self.assertIn(ANSWER, out.getvalue())
             self.assertIn(
-                'Tokens: input 80 · thinking 0 · output 40 (exact) · context 120 / '
+                'Tokens: input 80 · output 40 (exact) · context 120 / '
                 f'{harness.NUM_CTX}',
                 out.getvalue(),
             )
             self.assertIn(
-                f"{result['status']} · {compare_models.seconds(result['timing']['evaluation_seconds'])}",
+                f"{result['status']} · {run_reports.seconds(result['timing']['evaluation_seconds'])}",
                 out.getvalue(),
             )
             self.assertEqual(result['timing']['evaluation_seconds'], 1.5)
             result['status'] = 'invalid'
             result['validation_errors'] = ['Invalid output']
             with patch.object(sys, 'argv', ['main.py', str(path), '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
-                    patch.object(harness, 'Client', return_value=api), \
-                    patch.object(harness, 'run_hunt', return_value=result), \
+                    patch.object(single_hunt, 'Client', return_value=api), \
+                    patch.object(single_hunt, 'run_hunt', return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(io.StringIO()), \
                     self.assertRaises(SystemExit) as exit:
-                harness.main()
+                single_hunt.main()
             self.assertEqual(exit.exception.code, 1)
 
     def test_single_hunt_cli_defaults_to_no_timeout_and_forwards_seconds(self):
@@ -283,16 +350,16 @@ class HuntTests(unittest.TestCase):
             result = harness.run_hunt('foundation-sec-alpha', EVENTS, client=api)
             base = ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]
             with patch.object(sys, 'argv', base), \
-                    patch.object(harness, 'Client', return_value=api) as constructed, \
-                    patch.object(harness, 'run_hunt', return_value=result), \
+                    patch.object(single_hunt, 'Client', return_value=api) as constructed, \
+                    patch.object(single_hunt, 'run_hunt', return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()):
-                harness.main()
+                single_hunt.main()
             constructed.assert_called_once_with(timeout=None)
             with patch.object(sys, 'argv', base + ['--timeout', '45']), \
-                    patch.object(harness, 'Client', return_value=api) as constructed, \
-                    patch.object(harness, 'run_hunt', return_value=result), \
+                    patch.object(single_hunt, 'Client', return_value=api) as constructed, \
+                    patch.object(single_hunt, 'run_hunt', return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()):
-                harness.main()
+                single_hunt.main()
             constructed.assert_called_once_with(timeout=45.0)
 
     def test_single_hunt_cli_rejects_bad_template_before_inference(self):
@@ -302,12 +369,12 @@ class HuntTests(unittest.TestCase):
             api = client()
             api.show.return_value.template = "{{ .Prompt }}"
             with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha', '--output-dir', str(Path(tmp)/'results'), '--profiles-dir', str(Path(tmp)/'profiles')]), \
-                    patch.object(harness, 'Client', return_value=api), \
-                    patch.object(harness, 'run_hunt') as run, \
+                    patch.object(single_hunt, 'Client', return_value=api), \
+                    patch.object(single_hunt, 'run_hunt') as run, \
                     contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(io.StringIO()) as err, \
                     self.assertRaises(SystemExit) as exit:
-                harness.main()
+                single_hunt.main()
             self.assertEqual(exit.exception.code, 1)
             self.assertFalse(run.called)
             self.assertFalse(api.chat.called)
@@ -320,12 +387,12 @@ class HuntTests(unittest.TestCase):
             path.write_text('')
             api = client()
             with patch.object(sys, 'argv', ['main.py', str(path), '--model', 'foundation-sec-alpha']), \
-                    patch.object(harness, 'Client', return_value=api), \
-                    patch.object(harness, 'run_hunt') as run, \
+                    patch.object(single_hunt, 'Client', return_value=api), \
+                    patch.object(single_hunt, 'run_hunt') as run, \
                     contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(io.StringIO()) as err, \
                     self.assertRaises(SystemExit) as exit:
-                harness.main()
+                single_hunt.main()
             self.assertEqual(exit.exception.code, 1)
             self.assertFalse(run.called)
             self.assertFalse(api.chat.called)
@@ -335,34 +402,48 @@ class HuntTests(unittest.TestCase):
 
 class DurationFormatTests(unittest.TestCase):
     def test_displays_minutes_and_seconds(self):
-        self.assertEqual(compare_models.seconds(None), "—")
-        self.assertEqual(compare_models.seconds(1.5), "0m 1.50s")
-        self.assertEqual(compare_models.seconds(90.5), "1m 30.50s")
-        self.assertEqual(compare_models.seconds(125.2), "2m 5.20s")
+        self.assertEqual(run_reports.seconds(None), "—")
+        self.assertEqual(run_reports.seconds(1.5), "0m 1.50s")
+        self.assertEqual(run_reports.seconds(90.5), "1m 30.50s")
+        self.assertEqual(run_reports.seconds(125.2), "2m 5.20s")
+
+    def test_duration_seconds_one_decimal_rounds_up(self):
+        self.assertEqual(run_reports.duration_seconds_one_decimal(None), "—")
+        self.assertEqual(run_reports.duration_seconds_one_decimal(0.2), "0.2s")
+        self.assertEqual(run_reports.duration_seconds_one_decimal(1.3), "1.3s")
+        self.assertEqual(run_reports.duration_seconds_one_decimal(1.01), "1.1s")
+        self.assertEqual(run_reports.duration_seconds_one_decimal(1.001), "1.1s")
+
+    def test_collapsible_run_details_default_closed(self):
+        html = run_reports.collapsible_run_details("line one<br>line two")
+        self.assertIn('<details class="run-details">', html)
+        self.assertIn("<summary>Show run details</summary>", html)
+        self.assertNotIn('<details class="run-details" open', html)
+        self.assertIn("line one<br>line two", html)
 
 
 class ContextUsedCellTests(unittest.TestCase):
     def test_includes_percent_of_allocated(self):
-        self.assertEqual(compare_models.context_used_cell(None, 32768), "—")
-        self.assertEqual(compare_models.context_used_cell(120, None), "120")
-        self.assertEqual(compare_models.context_used_cell(120, 0), "120")
-        self.assertEqual(compare_models.context_used_cell(120, 32768), "120 (0%)")
-        self.assertEqual(compare_models.context_used_cell(30000, 32768), "30000 (92%)")
-        self.assertEqual(compare_models.context_used_cell(32768, 32768), "32768 (100%)")
+        self.assertEqual(run_reports.context_used_cell(None, 32768), "—")
+        self.assertEqual(run_reports.context_used_cell(120, None), "120")
+        self.assertEqual(run_reports.context_used_cell(120, 0), "120")
+        self.assertEqual(run_reports.context_used_cell(120, 32768), "120 (0%)")
+        self.assertEqual(run_reports.context_used_cell(30000, 32768), "30000 (92%)")
+        self.assertEqual(run_reports.context_used_cell(32768, 32768), "32768 (100%)")
 
 
 class ResultsDirectoryNameTests(unittest.TestCase):
     def test_eastern_daylight_sunday_morning(self):
         when = datetime(2026, 9, 20, 13, 28, tzinfo=timezone.utc)
         self.assertEqual(
-            compare_models.results_directory_name(when),
+            run_reports.results_directory_name(when),
             "20-Sep-2026-Sun_09-28am-ET",
         )
 
     def test_eastern_standard_saturday_evening(self):
         when = datetime(2026, 1, 11, 2, 5, tzinfo=timezone.utc)
         self.assertEqual(
-            compare_models.results_directory_name(when),
+            run_reports.results_directory_name(when),
             "10-Jan-2026-Sat_09-05pm-ET",
         )
 
@@ -488,7 +569,7 @@ class ComparisonTests(unittest.TestCase):
             'models': models,
             'cases': [{'name': 'one.jsonl'}],
         }
-        compare_models.write_report(directory, manifest, [])
+        run_reports.write_report(directory, manifest, [])
         html = (directory / 'report.html').read_text()
         self.assertIn('Framing: RENDERER gemma4', html)
         self.assertNotIn('{{ .Prompt }}', html)
@@ -521,7 +602,7 @@ class ComparisonTests(unittest.TestCase):
                 ['hf.co/fdtn-ai/Foundation-Sec-8B-Instruct-Q8_0-GGUF:latest'],
                 self.logs[:1],
             )
-        self.assertIn('Modelfile.foundation-sec-8b-instruct', str(error.exception))
+        self.assertIn('modelfiles/Modelfile.foundation-sec-8b-instruct', str(error.exception))
         self.assertFalse(api.chat.called)
 
     def test_run_hunt_rechecks_template_with_renderer(self):
@@ -542,7 +623,7 @@ class ComparisonTests(unittest.TestCase):
             chat_template='{{ .Prompt }}', renderer='gemma4',
         )
         self.assertEqual(refused['status'], 'error')
-        self.assertIn('Modelfile.foundation-sec-8b-instruct', refused['error'])
+        self.assertIn('modelfiles/Modelfile.foundation-sec-8b-instruct', refused['error'])
         self.assertFalse(api.chat.called)
 
     def test_report_escapes_model_output(self):
@@ -571,7 +652,7 @@ class ComparisonTests(unittest.TestCase):
 
     def test_output_directory_uses_readable_eastern_name(self):
         when = datetime(2026, 9, 20, 13, 28, tzinfo=timezone.utc)
-        with patch.object(compare_models, "eastern_now", return_value=when):
+        with patch.object(run_reports, "eastern_now", return_value=when):
             first = self.run_quietly(client())
             second = self.run_quietly(client())
         self.assertEqual(first.name, "20-Sep-2026-Sun_09-28am-ET")
@@ -584,7 +665,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('Quantization: —', html)
         self.assertIn('Thinking: not supported', html)
         self.assertIn(f'used 120 / allocated {harness.NUM_CTX}', html)
-        self.assertIn(compare_models.context_used_cell(120, harness.NUM_CTX), html)
+        self.assertIn(run_reports.context_used_cell(120, harness.NUM_CTX), html)
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
         self.assertEqual(rows[0]['tokens']['prompt_eval_count'], 80)
         self.assertEqual(rows[0]['tokens']['eval_count'], 40)
@@ -596,7 +677,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(rows[0]['context']['used'], 120)
         self.assertEqual(rows[0]['context']['limit'], 'ok')
         self.assertEqual(rows[0]['warnings'], [])
-        self.assertIn('Thinking: 0', html)
+        self.assertNotIn('Thinking: 0', html)
+        self.assertIn('Input: 80', html)
+        self.assertIn('Output: 40', html)
         self.assertEqual(rows[0]['context']['allocated'], harness.NUM_CTX)
         self.assertFalse(rows[0]['request']['shift'])
         manifest = json.loads((directory / 'manifest.json').read_text())
@@ -618,6 +701,8 @@ class ComparisonTests(unittest.TestCase):
             return SimpleNamespace(
                 capabilities=['completion', 'thinking'] if thinking else ['completion'],
                 template=template,
+                parameters='stop "<|end_of_text|>"\n',
+                modelfile="",
                 details=SimpleNamespace(
                     quantization_level='Q4_K_M' if thinking else 'Q8_0',
                     parameter_size='32.8B' if thinking else '8B',
@@ -639,8 +724,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(by_name['foundation-sec-8b-beta:1']['quantization_level'], 'Q8_0')
         self.assertEqual(by_name['foundation-sec-8b-beta:1']['context_length'], 131072)
         html = (directory / 'report.html').read_text()
-        self.assertIn('Q4_K_M · 32.8B · gguf', html)
-        self.assertIn('Q8_0 · 8B · gguf', html)
+        self.assertIn('Q4_K_M · 32.8B', html)
+        self.assertIn('Q8_0 · 8B', html)
+        self.assertNotIn('gguf', html)
         self.assertIn('Thinking: disabled', html)
         self.assertIn('Thinking: not supported', html)
         self.assertIn(f'used 120 / allocated {harness.NUM_CTX} (model max 40960)', html)
@@ -667,12 +753,13 @@ class ComparisonTests(unittest.TestCase):
             }],
             'cases': [{'name': 'one.jsonl'}],
         }
-        compare_models.write_report(directory, manifest, [])
+        run_reports.write_report(directory, manifest, [])
         html = (directory / 'report.html').read_text()
         self.assertIn('Pending', html)
         self.assertIn('used — / allocated 32768', html)
         self.assertIn('model max 40960', html)
-        self.assertIn('Quantization: Q4_K_M · 7B · gguf', html)
+        self.assertIn('Quantization: Q4_K_M · 7B', html)
+        self.assertNotIn('gguf', html)
         self.assertIn('Thinking: disabled', html)
         self.assertIn('Input: —', html)
 
@@ -690,7 +777,7 @@ class ComparisonTests(unittest.TestCase):
             'models': [],
             'cases': [],
         }
-        compare_models.write_report(directory, manifest, [])
+        run_reports.write_report(directory, manifest, [])
         html = (directory / 'report.html').read_text()
         self.assertIn('num_predict=-1 (no limit)', html)
         self.assertIn(
@@ -733,12 +820,16 @@ class ComparisonTests(unittest.TestCase):
             },
             'context': {'allocated': 32768, 'used': 30000, 'model_max': None, 'limit': 'warn'},
         }
-        compare_models.write_report(directory, manifest, [result])
+        run_reports.write_report(directory, manifest, [result])
         html = (directory / 'report.html').read_text()
+        self.assertIn('<summary>Show run details</summary>', html)
         self.assertIn('Thinking: enabled', html)
         self.assertIn('Thinking: 12 (estimated)', html)
         self.assertIn('Output: 28 (estimated)', html)
-        self.assertIn('Cached: 20', html)
+        self.assertNotIn('Cached:', html)
+        self.assertNotIn('Uncached:', html)
+        self.assertNotIn('Cached tokens', html)
+        self.assertNotIn('cached-token', html)
         self.assertIn('class="warn"', html)
         self.assertIn('Context window nearly full: used 30000 / 32768 configured tokens.', html)
         self.assertIn('<th>Thinking tokens</th>', html)
@@ -780,8 +871,8 @@ class DeclaredProfileTests(unittest.TestCase):
         (self.profiles / name).write_text(text, encoding="utf-8")
 
     def test_checked_in_qwen_profile_parses(self):
-        profile = compare_models.parse_profile_file(
-            Path(__file__).resolve().parent / "profiles" / "qwen3-32b.profile"
+        profile = model_profiles.parse_profile_file(
+            Path(__file__).resolve().parent.parent / "profiles" / "qwen3-32b.profile"
         )
         self.assertEqual(profile["source"], "profiles/qwen3-32b.profile")
         self.assertEqual(
@@ -795,10 +886,10 @@ class DeclaredProfileTests(unittest.TestCase):
                 "top_k": "20",
             },
         )
-        self.assertEqual(compare_models.profile_num_ctx(profile), 40960)
-        self.assertIs(compare_models.profile_think(profile), True)
+        self.assertEqual(model_profiles.profile_num_ctx(profile), 40960)
+        self.assertIs(model_profiles.profile_think(profile), True)
         self.assertEqual(
-            compare_models.profile_sampling(profile),
+            model_profiles.profile_sampling(profile),
             {"temperature": 0.6, "top_p": 0.95, "top_k": 20},
         )
         self.assertIn("# weight_precision=Developer Q8_0", profile["text"])
@@ -841,9 +932,9 @@ class DeclaredProfileTests(unittest.TestCase):
             "mistral-nemo-12b.profile": ("0.3", 0.3, "0.90", 0.9, "40", 40),
             "foundation-sec-8b-instruct.profile": ("0.2", 0.2, "0.90", 0.9, "40", 40),
         }
-        root = Path(__file__).resolve().parent / "profiles"
+        root = Path(__file__).resolve().parent.parent / "profiles"
         for name, (model, text, number, thinking, parsed) in expected.items():
-            profile = compare_models.parse_profile_file(root / name)
+            profile = model_profiles.parse_profile_file(root / name)
             temperature, temperature_value, top_p, top_p_value, top_k, top_k_value = sampling[name]
             fields = {
                 "model": model,
@@ -856,15 +947,15 @@ class DeclaredProfileTests(unittest.TestCase):
                 fields["thinking"] = thinking
             self.assertEqual(profile["fields"], fields)
             self.assertEqual(
-                compare_models.profile_sampling(profile),
+                model_profiles.profile_sampling(profile),
                 {
                     "temperature": temperature_value,
                     "top_p": top_p_value,
                     "top_k": top_k_value,
                 },
             )
-            self.assertEqual(compare_models.profile_num_ctx(profile), number)
-            self.assertEqual(compare_models.profile_think(profile), parsed)
+            self.assertEqual(model_profiles.profile_num_ctx(profile), number)
+            self.assertEqual(model_profiles.profile_think(profile), parsed)
             self.assertIn("# weight_precision=", profile["text"])
             self.assertIn("# repeat_penalty=", profile["text"])
             self.assertIn("# basis:", profile["text"])
@@ -875,15 +966,15 @@ class DeclaredProfileTests(unittest.TestCase):
                     "# thinking levels: false, low, medium, high",
                     profile["text"],
                 )
-        self.assertIsNone(compare_models.quantization_note("Developer Q8_0", "Q8_0"))
-        self.assertIsNone(compare_models.quantization_note("Developer QAT Q4_0", "Q4_0"))
+        self.assertIsNone(model_profiles.quantization_note("Developer Q8_0", "Q8_0"))
+        self.assertIsNone(model_profiles.quantization_note("Developer QAT Q4_0", "Q4_0"))
         self.assertIsNone(
-            compare_models.quantization_note("Existing developer Q8_0", "Q8_0")
+            model_profiles.quantization_note("Existing developer Q8_0", "Q8_0")
         )
-        self.assertIn("Q4_K_M", compare_models.quantization_note("Q4_K_M", "Q8_0"))
+        self.assertIn("Q4_K_M", model_profiles.quantization_note("Q4_K_M", "Q8_0"))
 
     def test_comments_and_blank_lines_are_ignored(self):
-        profile = compare_models.parse_profile_text(
+        profile = model_profiles.parse_profile_text(
             "# intended setup\n\nmodel=qwen3:32b\n", "memory"
         )
         self.assertEqual(profile["fields"], {"model": "qwen3:32b"})
@@ -1071,11 +1162,11 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertFalse((self.root / "results").exists())
 
     def test_num_ctx_rejects_commas(self):
-        profile = compare_models.parse_profile_text(
+        profile = model_profiles.parse_profile_text(
             "model=foundation-sec-alpha\nnum_ctx=16,384\n", "memory"
         )
         with self.assertRaises(ValueError) as error:
-            compare_models.profile_num_ctx(profile)
+            model_profiles.profile_num_ctx(profile)
         self.assertIn("no commas", str(error.exception))
         self.assertIn("16,384", str(error.exception))
 
@@ -1177,10 +1268,10 @@ class DeclaredProfileTests(unittest.TestCase):
             "main.py", str(self.log), "--model", "foundation-sec-alpha",
             "--profiles-dir", str(self.profiles),
             "--output-dir", str(output),
-        ]), patch.object(harness, "Client", return_value=api), \
-                patch.object(harness, "run_hunt", side_effect=fake_run), \
+        ]), patch.object(single_hunt, "Client", return_value=api), \
+                patch.object(single_hunt, "run_hunt", side_effect=fake_run), \
                 contextlib.redirect_stdout(io.StringIO()) as out:
-            harness.main()
+            single_hunt.main()
         self.assertTrue(seen["before"])
         printed = out.getvalue()
         self.assertLess(printed.index("kv_cache="), printed.index("--- Analysis ---"))
@@ -1202,12 +1293,12 @@ class DeclaredProfileTests(unittest.TestCase):
             "main.py", str(self.log), "--model", "foundation-sec-alpha",
             "--profiles-dir", str(self.profiles),
             "--output-dir", str(output),
-        ]), patch.object(harness, "Client", return_value=api), \
-                patch.object(harness, "run_hunt") as run, \
+        ]), patch.object(single_hunt, "Client", return_value=api), \
+                patch.object(single_hunt, "run_hunt") as run, \
                 contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()) as err, \
                 self.assertRaises(SystemExit) as exit:
-            harness.main()
+            single_hunt.main()
         self.assertEqual(exit.exception.code, 1)
         self.assertFalse(run.called)
         self.assertFalse(api.chat.called)
@@ -1223,10 +1314,10 @@ class DeclaredProfileTests(unittest.TestCase):
                 "--profile", str(self.profiles / profile_name),
                 "--profiles-dir", str(self.profiles),
                 "--output-dir", str(output),
-            ]), patch.object(harness, "Client", return_value=api), \
-                    patch.object(harness, "run_hunt", return_value=result), \
+            ]), patch.object(single_hunt, "Client", return_value=api), \
+                    patch.object(single_hunt, "run_hunt", return_value=result), \
                     contextlib.redirect_stdout(io.StringIO()):
-                harness.main()
+                single_hunt.main()
 
         run_with("think.profile")
         run_with("direct.profile")
@@ -1249,12 +1340,12 @@ class DeclaredProfileTests(unittest.TestCase):
         with patch.object(sys, "argv", [
             "main.py", str(self.log), "--model", "foundation-sec-alpha",
             "--profiles-dir", str(self.profiles),
-        ]), patch.object(harness, "Client", return_value=api), \
-                patch.object(harness, "run_hunt") as run, \
+        ]), patch.object(single_hunt, "Client", return_value=api), \
+                patch.object(single_hunt, "run_hunt") as run, \
                 contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()) as err, \
                 self.assertRaises(SystemExit) as exit:
-            harness.main()
+            single_hunt.main()
         self.assertEqual(exit.exception.code, 1)
         self.assertFalse(run.called)
         self.assertFalse(api.chat.called)

@@ -1,0 +1,67 @@
+# Ordered rules: the first matching name_pattern wins.
+# These checks describe the model package; Ollama renders the actual template.
+# Omitted parsers/allowed_stops mean that setting has no additional constraint.
+# parsers = [] requires plain text (no PARSER directive).
+# required_stops must be present; allowed_stops optionally restricts extra stops.
+
+[[formats]]
+label = "Foundation-Sec-8B-Instruct"
+name_pattern = "foundation-sec"
+markers = ["<|system|>", "<|user|>", "<|assistant|>"]
+forbidden = ["<|start_header_id|>"]
+parsers = []
+required_stops = ["<|end_of_text|>"]
+allowed_stops = ["<|end_of_text|>"]
+hint = "Foundation-Sec-8B-Instruct expects <|system|>, <|user|>, and <|assistant|>. Create a local model from modelfiles/Modelfile.foundation-sec-8b-instruct before running."
+
+[[formats]]
+label = "CyberPal 2.0"
+# Fine-tune of gpt-oss-20b. Harmony role tags, not Llama headers.
+name_pattern = "cyberpal"
+markers = ["<|start|>system<|message|>", "<|start|>developer<|message|>", "<|channel|>", "<|end|>"]
+required_stops = ["<|return|>", "<|call|>"]
+allowed_stops = ["<|return|>", "<|call|>"]
+hint = "CyberPal 2.0 expects Harmony framing with <|start|>, <|message|>, and <|channel|>, and stops <|return|> and <|call|>."
+
+[[formats]]
+label = "Mistral Small"
+name_pattern = "mistral-small"
+markers = ["[SYSTEM_PROMPT]", "[/SYSTEM_PROMPT]", "[INST]", "[/INST]"]
+
+[[formats]]
+label = "Mistral Nemo"
+name_pattern = "mistral-nemo"
+markers = ["[INST]", "[/INST]", ".System"]
+
+[[formats]]
+label = "Gemma 4"
+name_pattern = "gemma4"
+renderers = ["gemma4", "gemma4-large"]
+hint = "Gemma 4 must use RENDERER gemma4 or gemma4-large."
+
+[[formats]]
+label = "Granite 4"
+name_pattern = "granite4"
+markers = ["<|im_start|>", "<|im_end|>"]
+
+[[formats]]
+label = "DeepSeek-R1"
+name_pattern = "deepseek-r1"
+# Fullwidth vertical bar U+FF5C, not ASCII |.
+markers = ["<｜User｜>", "<｜Assistant｜>"]
+
+[[formats]]
+label = "Command R"
+name_pattern = "command-r"
+markers = ["<|START_OF_TURN_TOKEN|>", "<|SYSTEM_TOKEN|>", "<|USER_TOKEN|>", "<|CHATBOT_TOKEN|>"]
+
+[[formats]]
+label = "Qwen3"
+# Qwen3.5 has a different renderer and must not match this rule.
+name_pattern = 'qwen3(?!\.5)'
+markers = ["<|im_start|>", "<|im_end|>"]
+
+[[formats]]
+label = "Llama 3"
+name_pattern = "llama3"
+markers = ["<|start_header_id|>", "<|eot_id|>"]

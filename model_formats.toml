@@ -15,6 +15,15 @@ allowed_stops = ["<|end_of_text|>"]
 hint = "Foundation-Sec-8B-Instruct expects <|system|>, <|user|>, and <|assistant|>. Create a local model from Modelfile.foundation-sec-8b-instruct before running."
 
 [[formats]]
+label = "CyberPal 2.0"
+# Fine-tune of gpt-oss-20b. Harmony role tags, not Llama headers.
+name_pattern = "cyberpal"
+markers = ["<|start|>system<|message|>", "<|start|>developer<|message|>", "<|channel|>", "<|end|>"]
+required_stops = ["<|return|>", "<|call|>"]
+allowed_stops = ["<|return|>", "<|call|>"]
+hint = "CyberPal 2.0 expects Harmony framing with <|start|>, <|message|>, and <|channel|>, and stops <|return|> and <|call|>."
+
+[[formats]]
 label = "Mistral Small"
 name_pattern = "mistral-small"
 markers = ["[SYSTEM_PROMPT]", "[/SYSTEM_PROMPT]", "[INST]", "[/INST]"]

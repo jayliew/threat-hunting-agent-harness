@@ -24,6 +24,14 @@ allowed_stops = ["<|return|>", "<|call|>"]
 hint = "CyberPal 2.0 expects Harmony framing with <|start|>, <|message|>, and <|channel|>, and stops <|return|> and <|call|>."
 
 [[formats]]
+label = "gpt-oss"
+# Base Harmony model. Ollama's library tag ships this template and does not set
+# RENDERER, PARSER, or PARAMETER stop. <|return|> is the tokenizer EOS.
+name_pattern = "gpt-?oss"
+markers = ["<|start|>system<|message|>", "<|start|>developer<|message|>", "<|channel|>", "<|end|>"]
+hint = "gpt-oss expects Harmony framing with <|start|>, <|message|>, and <|channel|>. The Ollama library tag does not set a PARSER or stop parameters."
+
+[[formats]]
 label = "Mistral Small"
 name_pattern = "mistral-small"
 markers = ["[SYSTEM_PROMPT]", "[/SYSTEM_PROMPT]", "[INST]", "[/INST]"]

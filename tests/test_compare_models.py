@@ -872,7 +872,7 @@ class DeclaredProfileTests(unittest.TestCase):
 
     def test_checked_in_qwen_profile_parses(self):
         profile = model_profiles.parse_profile_file(
-            Path(__file__).resolve().parent / "profiles" / "qwen3-32b.profile"
+            Path(__file__).resolve().parent.parent / "profiles" / "qwen3-32b.profile"
         )
         self.assertEqual(profile["source"], "profiles/qwen3-32b.profile")
         self.assertEqual(
@@ -932,7 +932,7 @@ class DeclaredProfileTests(unittest.TestCase):
             "mistral-nemo-12b.profile": ("0.3", 0.3, "0.90", 0.9, "40", 40),
             "foundation-sec-8b-instruct.profile": ("0.2", 0.2, "0.90", 0.9, "40", 40),
         }
-        root = Path(__file__).resolve().parent / "profiles"
+        root = Path(__file__).resolve().parent.parent / "profiles"
         for name, (model, text, number, thinking, parsed) in expected.items():
             profile = model_profiles.parse_profile_file(root / name)
             temperature, temperature_value, top_p, top_p_value, top_k, top_k_value = sampling[name]

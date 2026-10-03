@@ -263,9 +263,9 @@ If an imported GGUF lacks correct framing, add a model-specific Modelfile under 
 | `logs/managed-telemetry.jsonl` | Optional demo: ECS managed check-ins that look like beaconing |
 | `logs/scheduled-discovery.jsonl` | Optional demo: ECS authorized scanning that looks like an internal scan |
 | `logs/opaque-sync-transfers.jsonl` | Optional demo: ECS host and network evidence with an inconclusive transfer assessment |
-| `test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |
-| `test_compare_models.py` | Unit tests for the comparison matrix, HTML report, and the shared hunt runner |
-| `test_model_config.py` | Config-driven validation for existing and future model packages |
+| `tests/test_main.py` | Unit tests for think-arg gating, incomplete replies, and hunt-output validation |
+| `tests/test_compare_models.py` | Unit tests for the comparison matrix, HTML report, and the shared hunt runner |
+| `tests/test_model_config.py` | Config-driven validation for existing and future model packages |
 | `pyproject.toml` | Project metadata and the `ollama` client |
 
 Keep the harness thin so the lesson stays in the open.

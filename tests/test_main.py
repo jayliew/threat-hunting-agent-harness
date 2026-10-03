@@ -33,6 +33,8 @@ from shared.harness import (
     empty_tokens,
     incomplete_response_message,
     invalid_hunt_output_message,
+    parse_evidence_ids,
+    parse_hunt_output,
     load_security_events,
     model_detail_fields,
     native_context_length,
@@ -355,6 +357,48 @@ class HuntOutputValidationTests(unittest.TestCase):
             "Evidence: c01-e006, c01-e043"
         )
         self.assertIsNone(invalid_hunt_output_message(content, self.beaconing_ids))
+        sections, unexpected = parse_hunt_output(content)
+        self.assertEqual(
+            sections["Summary"],
+            "Host ws-014 sent periodic GET /api/heartbeat requests\n"
+            "to 203.0.113.77 with low jitter.",
+        )
+        self.assertEqual(unexpected, [])
+
+    def test_unexpected_text_stays_out_of_required_sections(self) -> None:
+        content = (
+            "Assessment follows.\n"
+            "Verdict: suspicious\n"
+            "Threat type: password spray\n"
+            "Verdict: benign\n"
+            "Summary: External source sprayed several accounts then succeeded.\n"
+            "Confidence: high\n"
+            "because the failures repeat.\n"
+            "Evidence: c04-e005,\n"
+            "c04-e011\n"
+            "I hope this helps."
+        )
+        sections, unexpected = parse_hunt_output(content)
+        self.assertEqual(sections["Verdict"], "suspicious")
+        self.assertEqual(sections["Threat type"], "password spray")
+        self.assertEqual(
+            sections["Summary"],
+            "External source sprayed several accounts then succeeded.",
+        )
+        self.assertEqual(sections["Evidence"], "c04-e005,\nc04-e011")
+        self.assertEqual(
+            unexpected,
+            [
+                "Assessment follows.",
+                "Verdict: benign",
+                "Confidence: high\nbecause the failures repeat.",
+                "I hope this helps.",
+            ],
+        )
+        self.assertIsNone(
+            invalid_hunt_output_message(content, self.password_spray_ids)
+        )
+        self.assertEqual(parse_evidence_ids(sections["Evidence"]), ["c04-e005", "c04-e011"])
 
     def test_evidence_none_is_accepted(self) -> None:
         content = hunt_output(verdict="inconclusive", evidence="none")
@@ -559,6 +603,23 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertIsNone(installed_renderer("TEMPLATE {{ .Prompt }}\n"))
         self.assertIsNone(installed_renderer(None))
         self.assertIsNone(installed_renderer(""))
+
+    def test_command_r_modelfile_drops_the_extra_end_token(self) -> None:
+        text = (REPO_ROOT / "modelfiles" / "Modelfile.command-r").read_text()
+        template = text.split('TEMPLATE """', 1)[1].rsplit('"""', 1)[0]
+        doubled = "<|END_OF_TURN_TOKEN|><|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>"
+        self.assertNotIn(doubled, template)
+        self.assertIn("<|END_OF_TURN_TOKEN|>\n{{- end }}<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>", template)
+        self.assertIsNone(chat_template_error("command-r:latest", template))
+        library = template.replace(
+            "<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>",
+            doubled,
+            1,
+        )
+        rejected = chat_template_error("command-r:latest", library)
+        self.assertIsNotNone(rejected)
+        self.assertIn("END_OF_TURN_TOKEN", rejected)
+        self.assertIn("Modelfile.command-r", rejected)
 
     def test_modelfile_passes_preflight(self) -> None:
         text = (REPO_ROOT / "modelfiles" / "Modelfile.foundation-sec-8b-instruct").read_text()

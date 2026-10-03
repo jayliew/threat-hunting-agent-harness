@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
@@ -22,6 +23,7 @@ import compare_models
 import shared.harness as harness
 import shared.model_config as model_config
 import shared.inference_configurations as inference_configurations
+import shared.prompts as prompts
 import shared.run_reports as run_reports
 
 
@@ -136,6 +138,17 @@ required_stops = ["<end>"]
         self.assertEqual(result['context']['used'], 120)
         self.assertEqual(result['context']['limit'], 'ok')
         self.assertEqual(result['warnings'], [])
+        self.assertEqual(result['unexpected'], [])
+
+    def test_unexpected_content_warns_without_failing_a_valid_answer(self):
+        api = client()
+        api.chat.return_value = response(ANSWER + '\nConfidence: high\nI hope this helps.')
+        result = harness.run_hunt('foundation-sec-alpha:latest', EVENTS, client=api, capabilities=['completion'])
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(result['sections']['Evidence'], 'e1')
+        self.assertEqual(result['unknown_evidence_ids'], [])
+        self.assertEqual(result['unexpected'], ['Confidence: high\nI hope this helps.'])
+        self.assertEqual(result['warnings'], [harness.UNEXPECTED_CONTENT_WARNING])
 
     def test_non_thinking_model_omits_think(self):
         api = client()
@@ -411,6 +424,134 @@ required_stops = ["<end>"]
             self.assertIn("log contains no events", err.getvalue())
 
 
+class PromptSelectionTests(unittest.TestCase):
+    def test_unregistered_names_use_the_default_prompt(self):
+        for name in (
+            'foundation-sec-alpha',
+            'foundation-sec-alpha:latest',
+            'qwen3:32b',
+        ):
+            with self.subTest(name=name):
+                self.assertIs(prompts.prompt_for_model(name), prompts.DEFAULT_PROMPT)
+        self.assertEqual(prompts.DEFAULT_PROMPT.name, 'default')
+        self.assertEqual(prompts.DEFAULT_PROMPT.system, prompts.SYSTEM_PROMPT)
+        self.assertEqual(prompts.prompt_for_model('qwen3:32b:latest').name, 'default')
+
+    def test_deepseek_r1_32b_uses_its_user_turn_prompt(self):
+        for name in ('deepseek-r1:32b', 'deepseek-r1:32b:latest'):
+            with self.subTest(name=name):
+                selected = prompts.prompt_for_model(name)
+                self.assertIs(selected, prompts.DEEPSEEK_R1_32B)
+        self.assertEqual(prompts.DEEPSEEK_R1_32B.system, '')
+        self.assertNotEqual(prompts.DEEPSEEK_R1_32B.user_task, prompts.USER_TASK)
+        task = prompts.DEEPSEEK_R1_32B.user_task
+        self.assertIn('suspicious, benign, or inconclusive', task)
+        self.assertIn('Verdict:', task)
+        self.assertIn('Threat type:', task)
+        self.assertIn('Summary:', task)
+        self.assertIn('Evidence:', task)
+        self.assertIn('untrusted evidence', task)
+        messages = harness.build_messages(EVENTS, prompts.DEEPSEEK_R1_32B)
+        self.assertEqual(messages[0]['content'], '')
+        self.assertIn(task, messages[1]['content'])
+        self.assertNotIn(prompts.SYSTEM_PROMPT, messages[1]['content'])
+        self.assertIs(prompts.prompt_for_model('deepseek-r1'), prompts.DEFAULT_PROMPT)
+
+    def test_phi3_medium_128k_keeps_the_contract_in_the_user_turn(self):
+        for name in ('phi3:medium-128k', 'phi3:medium-128k:latest'):
+            with self.subTest(name=name):
+                self.assertIs(prompts.prompt_for_model(name), prompts.PHI3_MEDIUM_128K)
+        self.assertEqual(prompts.PHI3_MEDIUM_128K.system, '')
+        task = prompts.PHI3_MEDIUM_128K.user_task
+        self.assertIn(prompts.SYSTEM_PROMPT, task)
+        self.assertIn(prompts.USER_TASK, task)
+        messages = harness.build_messages(EVENTS, prompts.PHI3_MEDIUM_128K)
+        self.assertEqual(messages[0]['content'], '')
+        self.assertIn(prompts.SYSTEM_PROMPT, messages[1]['content'])
+        self.assertIs(prompts.prompt_for_model('phi3:medium'), prompts.DEFAULT_PROMPT)
+
+    def test_command_r_uses_cohere_preamble_headings(self):
+        for name in ('command-r', 'command-r:latest'):
+            with self.subTest(name=name):
+                self.assertIs(prompts.prompt_for_model(name), prompts.COMMAND_R)
+        system = prompts.COMMAND_R.system
+        self.assertEqual(prompts.COMMAND_R.user_task, prompts.USER_TASK)
+        task_at = system.index('## Task and Context')
+        style_at = system.index('## Style Guide')
+        self.assertEqual(task_at, 0)
+        self.assertLess(task_at, style_at)
+        self.assertEqual(system.count('\n## '), 1)
+        self.assertIn(
+            'Choose exactly one verdict for every case: suspicious, benign, or inconclusive.',
+            system,
+        )
+        self.assertIn(
+            'A plausible explanation or absence of threat indicators alone is insufficient.',
+            system,
+        )
+        self.assertIn('<verdicts>', system)
+        self.assertIn('<output_fields>', system)
+        messages = harness.build_messages(EVENTS, prompts.COMMAND_R)
+        self.assertEqual(messages[0]['content'], system)
+        self.assertIn(prompts.USER_TASK, messages[1]['content'])
+        self.assertIs(prompts.prompt_for_model('command-r-plus'), prompts.DEFAULT_PROMPT)
+
+    def test_cyberpal2_asks_for_step_by_step_reasoning(self):
+        for name in ('cyberpal2-20b', 'cyberpal2-20b:latest'):
+            with self.subTest(name=name):
+                self.assertIs(prompts.prompt_for_model(name), prompts.CYBERPAL2_20B)
+        self.assertEqual(prompts.CYBERPAL2_20B.system, prompts.SYSTEM_PROMPT)
+        self.assertTrue(prompts.CYBERPAL2_20B.user_task.startswith(prompts.USER_TASK))
+        self.assertIn('Think step-by-step before answering.', prompts.CYBERPAL2_20B.user_task)
+        messages = harness.build_messages(EVENTS, prompts.CYBERPAL2_20B)
+        self.assertEqual(messages[0]['content'], prompts.SYSTEM_PROMPT)
+        self.assertIn('Think step-by-step before answering.', messages[1]['content'])
+        self.assertIs(prompts.prompt_for_model('cyberpal'), prompts.DEFAULT_PROMPT)
+
+    def test_registered_prompt_is_sent_only_for_that_model(self):
+        custom = prompts.ModelPrompt(
+            name='foundation-sec-alpha',
+            system='Custom analyst instructions for this model only.',
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            logs = []
+            for name in ('one', 'two'):
+                path = root / (name + '.jsonl')
+                path.write_text(json.dumps(EVENTS[0]) + '\n')
+                logs.append(str(path))
+            api = client()
+            registered = {'foundation-sec-alpha': custom}
+            with patch.dict(prompts.MODEL_PROMPTS, registered, clear=True), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                directory = compare_models.run_comparison(
+                    api,
+                    ['foundation-sec-alpha', 'foundation-sec-8b-beta:1'],
+                    logs,
+                    root / 'results',
+                )
+            requests = [call.kwargs for call in api.chat.call_args_list]
+            self.assertEqual(requests[0]['messages'][0]['content'], custom.system)
+            self.assertEqual(requests[1]['messages'][0]['content'], custom.system)
+            self.assertEqual(requests[2]['messages'][0]['content'], prompts.SYSTEM_PROMPT)
+            self.assertEqual(requests[3]['messages'][0]['content'], prompts.SYSTEM_PROMPT)
+            self.assertIn(prompts.USER_TASK, requests[0]['messages'][1]['content'])
+            rows = [json.loads(line) for line in (directory / 'results.jsonl').read_text().splitlines()]
+            self.assertEqual(
+                [row['system_prompt'] for row in rows],
+                ['foundation-sec-alpha', 'foundation-sec-alpha', 'default', 'default'],
+            )
+            self.assertNotEqual(rows[0]['prompt_sha256'], rows[2]['prompt_sha256'])
+            html = (directory / 'report.html').read_text()
+            self.assertIn('Prompt: foundation-sec-alpha', html)
+            self.assertIn('Prompt: default', html)
+            manifest = json.loads((directory / 'manifest.json').read_text())
+            self.assertEqual(
+                [model['system_prompt'] for model in manifest['models']],
+                ['foundation-sec-alpha', 'default'],
+            )
+
+
 class DurationFormatTests(unittest.TestCase):
     def test_displays_minutes_and_seconds(self):
         self.assertEqual(run_reports.seconds(None), "—")
@@ -441,6 +582,26 @@ class ContextUsedCellTests(unittest.TestCase):
         self.assertEqual(run_reports.context_used_cell(120, 32768), "120 (0%)")
         self.assertEqual(run_reports.context_used_cell(30000, 32768), "30000 (92%)")
         self.assertEqual(run_reports.context_used_cell(32768, 32768), "32768 (100%)")
+
+    def test_high_usage_markup_is_red_at_ninety_percent(self):
+        allocated = 32768
+        below = math.floor(allocated * harness.CONTEXT_WARN_RATIO)
+        at_ratio = math.ceil(allocated * harness.CONTEXT_WARN_RATIO)
+        self.assertFalse(run_reports.context_used_high(below, allocated))
+        self.assertTrue(run_reports.context_used_high(at_ratio, allocated))
+        self.assertTrue(run_reports.context_used_high(30000, allocated))
+        self.assertTrue(run_reports.context_used_high(allocated, allocated))
+        self.assertFalse(run_reports.context_used_high(None, allocated))
+        self.assertFalse(run_reports.context_used_high(120, 0))
+        self.assertEqual(run_reports.context_used_markup(120, allocated), "120 (0%)")
+        self.assertEqual(
+            run_reports.context_used_markup(30000, allocated),
+            '<span class="error">30000 (92%)</span>',
+        )
+        self.assertEqual(
+            run_reports.context_label_html(allocated, 30000, None),
+            'used <span class="error">30000 (92%)</span> / allocated 32768',
+        )
 
 
 class ResultsDirectoryNameTests(unittest.TestCase):
@@ -539,7 +700,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertTrue(all(len(r['messages']) == 2 for r in requests))
         self.assertEqual(requests[0]['messages'], requests[2]['messages'])
         self.assertEqual(rows[0]['prompt_sha256'], rows[2]['prompt_sha256'])
+        self.assertEqual(rows[0]['system_prompt'], 'default')
         html = (directory / 'report.html').read_text()
+        self.assertIn('Prompt: default', html)
         self.assertIn('4 / 4 runs recorded', html)
         self.assertIn('<th>Eval time</th>', html)
         self.assertNotIn('excludes model load and unload', html)
@@ -707,6 +870,10 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('Thinking: not supported', html)
         self.assertIn(f'used 120 (0%) / allocated {harness.NUM_CTX}', html)
         self.assertIn(run_reports.context_used_cell(120, harness.NUM_CTX), html)
+        self.assertNotIn(
+            f'<span class="error">{run_reports.context_used_cell(120, harness.NUM_CTX)}</span>',
+            html,
+        )
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
         self.assertEqual(rows[0]['tokens']['prompt_eval_count'], 80)
         self.assertEqual(rows[0]['tokens']['eval_count'], 40)
@@ -874,7 +1041,157 @@ class ComparisonTests(unittest.TestCase):
         self.assertNotIn('cached-token', html)
         self.assertIn('class="warn"', html)
         self.assertIn('Context window nearly full: used 30000 / 32768 configured tokens.', html)
+        self.assertIn('<td><span class="error">30000 (92%)</span></td>', html)
+        self.assertIn(
+            'used <span class="error">30000 (92%)</span> / allocated 32768',
+            html,
+        )
         self.assertIn('<th>Thinking tokens</th>', html)
+
+    def test_report_spaces_valid_hunt_sections(self):
+        manifest = {
+            'created_at': 'now',
+            'request_settings': {'num_ctx': 32768, 'think': False},
+            'models': [{'name': 'foundation-sec-alpha:latest', 'capabilities': ['completion']}],
+            'cases': [{'name': 'one.jsonl'}],
+        }
+        sections = {
+            'Verdict': 'benign',
+            'Threat type': 'none',
+            'Summary': 'Normal activity.\nSecond line.',
+            'Evidence': 'e1',
+        }
+        base = {
+            'case': 'one.jsonl',
+            'model': 'foundation-sec-alpha:latest',
+            'timing': {},
+            'unknown_evidence_ids': [],
+            'validation_errors': [],
+            'error': None,
+            'warnings': [],
+            'thinking': '',
+            'raw_content': ANSWER,
+            'request': {'think': False},
+            'tokens': {},
+            'context': {},
+        }
+        ok_dir = self.root / 'spaced'
+        ok_dir.mkdir()
+        run_reports.write_report(ok_dir, manifest, [{
+            **base,
+            'status': 'ok',
+            'sections': sections,
+        }])
+        html = (ok_dir / 'report.html').read_text()
+        self.assertIn('.hunt-answer{display:flex;flex-direction:column;gap:1.35rem}', html)
+        self.assertIn('<div class="hunt-answer">', html)
+        for name, value in sections.items():
+            self.assertIn(f'<div class="hunt-section">{name}: {value}</div>', html)
+        self.assertIn(
+            f'<details class="raw-output"><summary>Show raw output</summary><pre>{ANSWER}</pre></details>',
+            html,
+        )
+        self.assertNotIn('<details class="raw-output" open', html)
+
+        invalid_dir = self.root / 'unspaced'
+        invalid_dir.mkdir()
+        raw = 'Verdict: benign\nnot a valid answer'
+        run_reports.write_report(invalid_dir, manifest, [{
+            **base,
+            'status': 'invalid',
+            'sections': {'Verdict': 'benign'},
+            'raw_content': raw,
+            'validation_errors': ['Invalid hunt output'],
+        }])
+        invalid_html = (invalid_dir / 'report.html').read_text()
+        self.assertIn('<div class="hunt-section">Verdict: benign</div>', invalid_html)
+        self.assertIn(
+            f'<details class="raw-output"><summary>Show raw output</summary><pre>{raw}</pre></details>',
+            invalid_html,
+        )
+        self.assertNotIn('<details class="raw-output" open', invalid_html)
+
+    def test_report_shows_unexpected_text_and_collapses_raw_output(self):
+        directory = self.root / 'unexpected'
+        directory.mkdir()
+        manifest = {
+            'created_at': 'now',
+            'request_settings': {'num_ctx': 32768, 'think': False},
+            'models': [{'name': 'foundation-sec-alpha:latest', 'capabilities': ['completion']}],
+            'cases': [{'name': 'one.jsonl'}],
+        }
+        raw = ANSWER + '\nConfidence: high'
+        result = {
+            'case': 'one.jsonl',
+            'model': 'foundation-sec-alpha:latest',
+            'status': 'ok',
+            'sections': {
+                'Verdict': 'benign',
+                'Threat type': 'none',
+                'Summary': 'Normal activity.',
+                'Evidence': 'e1',
+            },
+            'unexpected': ['Confidence: high'],
+            'timing': {},
+            'unknown_evidence_ids': [],
+            'validation_errors': [],
+            'error': None,
+            'warnings': [harness.UNEXPECTED_CONTENT_WARNING],
+            'thinking': '',
+            'raw_content': raw,
+            'request': {'think': False},
+            'tokens': {},
+            'context': {},
+        }
+        run_reports.write_report(directory, manifest, [result])
+        html = (directory / 'report.html').read_text()
+        self.assertIn(harness.UNEXPECTED_CONTENT_WARNING, html)
+        self.assertIn('class="warn"', html)
+        self.assertIn('<div class="hunt-unexpected">Confidence: high</div>', html)
+        self.assertLess(
+            html.index('<div class="hunt-section">Evidence: e1</div>'),
+            html.index('<div class="hunt-unexpected">Confidence: high</div>'),
+        )
+        self.assertIn(
+            f'<details class="raw-output"><summary>Show raw output</summary><pre>{raw}</pre></details>',
+            html,
+        )
+        self.assertNotIn('<details class="raw-output" open', html)
+
+        invalid_dir = self.root / 'invalid-raw'
+        invalid_dir.mkdir()
+        run_reports.write_report(invalid_dir, manifest, [{
+            **result,
+            'status': 'invalid',
+            'sections': {},
+            'unexpected': [],
+            'warnings': [],
+            'raw_content': 'bad answer',
+            'validation_errors': ['Invalid hunt output'],
+        }])
+        invalid_html = (invalid_dir / 'report.html').read_text()
+        self.assertNotIn('<div class="hunt-answer">', invalid_html)
+        self.assertNotIn('<pre>bad answer</pre></article>', invalid_html)
+        self.assertIn(
+            '<details class="raw-output"><summary>Show raw output</summary><pre>bad answer</pre></details>',
+            invalid_html,
+        )
+        self.assertNotIn('<details class="raw-output" open', invalid_html)
+
+        empty_dir = self.root / 'empty-answer'
+        empty_dir.mkdir()
+        run_reports.write_report(empty_dir, manifest, [{
+            **result,
+            'status': 'invalid',
+            'sections': {},
+            'unexpected': [],
+            'warnings': [],
+            'raw_content': '',
+            'validation_errors': ['Invalid hunt output'],
+        }])
+        empty_html = (empty_dir / 'report.html').read_text()
+        self.assertIn('<pre>No answer returned.</pre>', empty_html)
+        self.assertNotIn('Show raw output', empty_html)
 
     def test_cli_exits_nonzero_after_recording_invalid_runs(self):
         api = client()

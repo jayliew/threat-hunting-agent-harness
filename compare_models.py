@@ -3,8 +3,10 @@
 Runs each selected model against each JSONL log file, then writes a timestamped
 directory under results/ with report.html, results.jsonl, and manifest.json.
 Models are never downloaded; names must already appear in `ollama list`.
-Comparisons use harness.run_hunt and its shared three-verdict prompt: suspicious,
-benign, or inconclusive.
+Comparisons use harness.run_hunt and a three-verdict prompt: suspicious, benign,
+or inconclusive. Every model uses the shared prompt in shared/prompts.py unless
+its canonical name is registered in MODEL_PROMPTS. A custom prompt still has to
+request those three verdicts and the four output fields.
 
 A single model and a single log file use this same command. Pass one name to
 --models and one path to --logs.
@@ -25,6 +27,7 @@ import sys
 from ollama import Client
 
 from shared.harness import parse_timeout, preflight_models_and_logs, run_hunt
+from shared.prompts import ModelPrompt, prompt_for_model
 from shared.inference_configurations import (
     DEFAULT_INFERENCE_CONFIG_DIR, assign_run_slots, canonical_model_name,
     load_inference_configuration_paths, load_inference_configurations,
@@ -48,6 +51,20 @@ DEFAULT_SCENARIO_LOGS = [
     "logs/scheduled-discovery.jsonl",
     "logs/opaque-sync-transfers.jsonl",
 ]
+
+
+def _attach_system_prompts(slots: list[dict]) -> list[ModelPrompt]:
+    """Record each slot's prompt name and return the prompts in slot order.
+
+    The name is a string because slots are written to manifest.json. The prompt
+    object itself is not stored on the slot.
+    """
+    hunt_prompts = []
+    for slot in slots:
+        hunt_prompt = prompt_for_model(slot["name"])
+        slot["system_prompt"] = hunt_prompt.name
+        hunt_prompts.append(hunt_prompt)
+    return hunt_prompts
 
 
 def prepare_comparison(client: Client, models: list[str], logs: list[str]) -> tuple[list[dict], list[dict]]:
@@ -76,10 +93,11 @@ def run_comparison(
     if any(canonical_model_name(model["name"]) not in pinned for model in selected):
         loaded = load_inference_configurations(configurations_directory)
     slots = assign_run_slots(selected, loaded, explicit)
+    hunt_prompts = _attach_system_prompts(slots)
     directory, manifest = open_recorded_run(output_root, configurations_directory, slots, cases)
     results: list[dict] = []
     total = len(slots) * len(cases)
-    for slot in slots:
+    for slot, hunt_prompt in zip(slots, hunt_prompts, strict=True):
         for index, case in enumerate(cases):
             print(
                 f'[{len(results)+1}/{total}] {slot_label(slot)} · {case["name"]}',
@@ -93,6 +111,7 @@ def run_comparison(
                               num_ctx=slot["num_ctx"],
                               think=slot.get("think"),
                               sampling=slot.get("sampling"),
+                              prompt=hunt_prompt,
                               keep_alive=0 if index == len(cases)-1 else "5m")
             annotate_result(result, slot, case)
             save_result(directory, manifest, results, result)

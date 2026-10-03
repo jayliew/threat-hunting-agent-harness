@@ -501,6 +501,27 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertIsNotNone(wrong_gemma)
         self.assertIn("gemma4-large", wrong_gemma)
 
+    def test_glm47_renderer_allows_placeholder_template(self) -> None:
+        self.assertIsNone(chat_template_error("glm-4.7-flash:q4_K_M", "{{ .Prompt }}", "glm-4.7"))
+        self.assertIsNone(chat_template_error("GLM-4.7-Flash:latest", "{{ .Prompt }}", "glm-4.7"))
+        missing = chat_template_error("glm-4.7-flash:q4_K_M", "{{ .Prompt }}")
+        self.assertIsNotNone(missing)
+        self.assertIn("RENDERER glm-4.7", missing)
+        wrong = chat_template_error("glm-4.7-flash:q4_K_M", "{{ .Prompt }}", "gemma4")
+        self.assertIsNotNone(wrong)
+        self.assertIn("PARSER glm-4.7", wrong)
+        earlier = chat_template_error("glm-4.6:latest", "{{ .Prompt }}", "glm-4.7")
+        self.assertIsNotNone(earlier)
+        self.assertIn("No expected chat template is registered", earlier)
+        info = SimpleNamespace(
+            template="{{ .Prompt }}",
+            modelfile="TEMPLATE {{ .Prompt }}\nRENDERER glm-4.7\nPARSER glm-4.7\n",
+            parameters="temperature 1\ntop_p 0.95\n",
+        )
+        self.assertIsNone(installed_model_error("glm-4.7-flash:q4_K_M", info))
+        info.modelfile = "TEMPLATE {{ .Prompt }}\nRENDERER glm-4.7\n"
+        self.assertIn("expects PARSER glm-4.7", installed_model_error("glm-4.7-flash:q4_K_M", info))
+
     def test_gemma_renderer_allows_placeholder_template(self) -> None:
         self.assertIsNone(chat_template_error("gemma4:26b", "{{ .Prompt }}", "gemma4"))
         self.assertIsNone(chat_template_error("gemma4:31b", "{{ .Prompt }}", "gemma4-large"))

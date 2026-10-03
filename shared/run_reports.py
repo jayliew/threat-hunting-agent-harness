@@ -15,6 +15,7 @@ from .harness import (
     KV_CACHE_TYPE,
     NUM_CTX,
     NUM_PREDICT,
+    REQUIRED_SECTIONS,
     SEED,
     SHIFT,
     THINK,
@@ -263,6 +264,22 @@ def collapsible_run_details(inner_html: str) -> str:
     )
 
 
+def hunt_answer_html(result: dict) -> str:
+    """Spaced labeled sections for a valid answer; raw text otherwise."""
+    raw = escape(result.get("raw_content") or "No answer returned.")
+    fallback = f"<pre>{raw}</pre>"
+    if result.get("status") != "ok":
+        return fallback
+    sections = result.get("sections") or {}
+    if any(not str(sections.get(name) or "").strip() for name in REQUIRED_SECTIONS):
+        return fallback
+    blocks = [
+        f'<div class="hunt-section">{escape(name)}: {escape(sections[name])}</div>'
+        for name in REQUIRED_SECTIONS
+    ]
+    return f'<div class="hunt-answer">{"".join(blocks)}</div>'
+
+
 def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
     """Static, escaped HTML: model responses are displayed only as text."""
     e = lambda value: escape(str(value))
@@ -330,7 +347,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             cards.append(
                 f'<article><h3>{name}</h3><p class="{e(status)}">{e(status)} · {evaluated}</p>'
                 f'{collapsible_run_details(run_details)}'
-                f'{warning_html}{error_html}<pre>{e(result["raw_content"]) or "No answer returned."}</pre>{thinking}</article>'
+                f'{warning_html}{error_html}{hunt_answer_html(result)}{thinking}</article>'
             )
         sections.append(f'<section><h2>{e(case["name"])}</h2><div class="answers">{"".join(cards)}</div></section>')
     total = len(manifest["models"]) * len(manifest["cases"])
@@ -344,6 +361,8 @@ th,td{text-align:left;padding:10px 14px;border-bottom:1px solid #2e3a48}th{backg
 .scroll{overflow:auto}.answers{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(300px,1fr);gap:16px;overflow-x:auto;padding-bottom:12px}
 article{padding:20px;border:1px solid #2e3a48;border-radius:10px;background:#1a222c;min-width:0}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,monospace}
+.hunt-answer{display:flex;flex-direction:column;gap:1.35rem}
+.hunt-section{white-space:pre-wrap;overflow-wrap:anywhere}
 .invalid,.error{color:#f07178}.warn{color:#e6b450}.pending{color:#8b9aab}summary{cursor:pointer}
 .run-details{margin:8px 0 12px}.run-details summary{display:inline-block;padding:6px 12px;border:1px solid #2e3a48;border-radius:6px;background:#222c38;color:#e7edf3;font-size:14px;list-style:none}
 .run-details summary::-webkit-details-marker{display:none}.run-details-body{margin-top:8px;color:#9aa8b5;line-height:1.6}

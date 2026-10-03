@@ -459,6 +459,29 @@ class ResultsDirectoryNameTests(unittest.TestCase):
         )
 
 
+class ReportTimestampTests(unittest.TestCase):
+    def test_eastern_daylight_sunday_morning(self):
+        self.assertEqual(
+            run_reports.format_report_timestamp("2026-09-20T13:28:00+00:00"),
+            "Sunday, September 20, 2026, 9:28 AM ET",
+        )
+
+    def test_eastern_standard_saturday_evening(self):
+        self.assertEqual(
+            run_reports.format_report_timestamp("2026-01-11T02:05:00Z"),
+            "Saturday, January 10, 2026, 9:05 PM ET",
+        )
+
+    def test_naive_timestamp_is_read_as_eastern(self):
+        self.assertEqual(
+            run_reports.format_report_timestamp("2026-09-20T09:28:00"),
+            "Sunday, September 20, 2026, 9:28 AM ET",
+        )
+
+    def test_unparsed_value_is_left_unchanged(self):
+        self.assertEqual(run_reports.format_report_timestamp("now"), "now")
+
+
 class DefaultScenarioLogsTests(unittest.TestCase):
     def test_default_scenario_logs_include_all_seven_fixtures(self):
         self.assertEqual(
@@ -519,12 +542,15 @@ class ComparisonTests(unittest.TestCase):
         html = (directory / 'report.html').read_text()
         self.assertIn('4 / 4 runs recorded', html)
         self.assertIn('<th>Eval time</th>', html)
-        self.assertIn('excludes model load and unload', html)
+        self.assertNotIn('excludes model load and unload', html)
+        self.assertNotIn('Request settings:', html)
         self.assertIn('ok · 0m 1.50s', html)
         self.assertIn('TimeoutError', html)
         self.assertIn('e999', html)
         self.assertIn('color-scheme:dark', html)
         self.assertIn('background:#0f1419', html)
+        self.assertNotIn('#3dd68c', html)
+        self.assertIn('.invalid,.error{color:#f07178}', html)
         self.assertTrue((directory / 'manifest.json').exists())
 
     def test_missing_models_reported_together_without_starting_run(self):
@@ -669,13 +695,17 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(first.name, "20-Sep-2026-Sun_09-28am-ET")
         self.assertEqual(second.name, "20-Sep-2026-Sun_09-28am-ET-2")
         self.assertTrue((first / "results.jsonl").exists())
+        self.assertIn(
+            "Sunday, September 20, 2026, 9:28 AM ET",
+            (first / "report.html").read_text(),
+        )
 
     def test_missing_details_render_as_unknown(self):
         directory = self.run_quietly(client())
         html = (directory / 'report.html').read_text()
-        self.assertIn('Quantization: —', html)
+        self.assertNotIn('Quantization:', html)
         self.assertIn('Thinking: not supported', html)
-        self.assertIn(f'used 120 / allocated {harness.NUM_CTX}', html)
+        self.assertIn(f'used 120 (0%) / allocated {harness.NUM_CTX}', html)
         self.assertIn(run_reports.context_used_cell(120, harness.NUM_CTX), html)
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
         self.assertEqual(rows[0]['tokens']['prompt_eval_count'], 80)
@@ -698,10 +728,10 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(manifest['request_settings']['seed'], harness.SEED)
         self.assertEqual(manifest['request_settings']['kv_cache_type'], harness.KV_CACHE_TYPE)
         self.assertFalse(manifest['request_settings']['shift'])
-        self.assertIn('seed=0', html)
-        self.assertIn('Context shift is disabled for every model.', html)
+        self.assertNotIn('seed=0', html)
+        self.assertNotIn('Context shift is disabled for every model.', html)
         self.assertIsNone(manifest['models'][0]['quantization_level'])
-        self.assertIn(f'kv_cache_type={harness.KV_CACHE_TYPE}', html)
+        self.assertNotIn(f'kv_cache_type={harness.KV_CACHE_TYPE}', html)
 
     def test_report_includes_model_settings_tokens_and_context(self):
         api = client()
@@ -740,8 +770,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertNotIn('gguf', html)
         self.assertIn('Thinking: disabled', html)
         self.assertIn('Thinking: not supported', html)
-        self.assertIn(f'used 120 / allocated {harness.NUM_CTX} (model max 40960)', html)
-        self.assertIn(f'used 120 / allocated {harness.NUM_CTX} (model max 131072)', html)
+        self.assertIn(f'used 120 (0%) / allocated {harness.NUM_CTX} (model max 40960)', html)
+        self.assertIn(f'used 120 (0%) / allocated {harness.NUM_CTX} (model max 131072)', html)
+        self.assertNotIn('Quantization:', html)
         self.assertIn('Input: 80', html)
         self.assertIn('Output: 40', html)
         rows = [json.loads(s) for s in (directory / 'results.jsonl').read_text().splitlines()]
@@ -768,13 +799,15 @@ class ComparisonTests(unittest.TestCase):
         html = (directory / 'report.html').read_text()
         self.assertIn('Pending', html)
         self.assertIn('used — / allocated 32768', html)
+        self.assertNotIn('used — (', html)
         self.assertIn('model max 40960', html)
-        self.assertIn('Quantization: Q4_K_M · 7B', html)
+        self.assertNotIn('Quantization:', html)
+        self.assertNotIn('Q4_K_M', html)
         self.assertNotIn('gguf', html)
         self.assertIn('Thinking: disabled', html)
         self.assertIn('Input: —', html)
 
-    def test_report_shows_unlimited_num_predict(self):
+    def test_report_omits_introductory_disclaimer(self):
         directory = self.root / 'unlimited'
         directory.mkdir()
         manifest = {
@@ -790,12 +823,10 @@ class ComparisonTests(unittest.TestCase):
         }
         run_reports.write_report(directory, manifest, [])
         html = (directory / 'report.html').read_text()
-        self.assertIn('num_predict=-1 (no limit)', html)
-        self.assertIn(
-            'These are the harness fallbacks unless an inference configuration overrides them',
-            html,
-        )
-        self.assertIn('not necessarily what each model was sent', html)
+        self.assertNotIn('num_predict=-1 (no limit)', html)
+        self.assertNotIn('harness fallbacks', html)
+        self.assertNotIn('not necessarily what each model was sent', html)
+        self.assertNotIn('does not establish detection accuracy', html)
 
     def test_report_shows_thinking_tokens_and_context_warning(self):
         directory = self.root / 'think'
@@ -1036,10 +1067,14 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         self.assertEqual(len({row["run_key"] for row in rows}), 2)
         self.assertNotEqual(rows[0]["declared_inference_configuration"], rows[1]["declared_inference_configuration"])
         html = (directory / "report.html").read_text()
-        self.assertIn("temperature=0.6", html)
-        self.assertIn("temperature=0", html)
+        self.assertIn("think.conf", html)
+        self.assertIn("direct.conf", html)
+        self.assertNotIn("Declared inference configs", html)
+        copied = directory / "declared-inference-configurations"
+        self.assertIn("temperature=0.6", (copied / "think.conf").read_text())
+        self.assertIn("temperature=0\n", (copied / "direct.conf").read_text())
         self.assertEqual(
-            sorted(path.name for path in (directory / "declared-inference-configurations").iterdir()),
+            sorted(path.name for path in copied.iterdir()),
             ["direct.conf", "think.conf"],
         )
 
@@ -1058,7 +1093,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         self.assertEqual(manifest["models"][0]["num_ctx"], 16384)
         self.assertEqual(manifest["request_settings"]["num_ctx"], harness.NUM_CTX)
         html = (directory / "report.html").read_text()
-        self.assertIn("used 120 / allocated 16384", html)
+        self.assertIn("used 120 (1%) / allocated 16384", html)
 
     def test_inference_configuration_sampling_is_sent(self):
         self.write_inference_configuration(
@@ -1242,15 +1277,12 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             self.assertEqual(manifest["inference_configurations"][0]["fields"]["kv_cache"], "f16")
             self.assertIn("Q4_K_M", manifest["inference_configurations"][0]["quantization_note"])
             report = saved[0].with_name("report.html").read_text()
-            self.assertIn("Declared inference configurations", report)
-            self.assertIn(
-                "Uncommented inference configuration values drive the Ollama request",
-                report,
-            )
-            self.assertIn("this block is the archived source file", report)
+            self.assertNotIn("Declared inference configs", report)
+            self.assertNotIn("inference config values drive the Ollama request", report)
+            self.assertNotIn("archived source file", report)
             self.assertIn("0 / 1 runs recorded", report)
             self.assertNotIn("<script>", report)
-            self.assertIn("&lt;script&gt;", report)
+            self.assertNotIn("&lt;script&gt;", report)
             copied = saved[0].parent / "declared-inference-configurations" / "alpha.conf"
             self.assertIn("<script>", copied.read_text())
             seen["before"] = True
@@ -1278,7 +1310,8 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             )
         self.assertIn("No declared inference configuration for foundation-sec-alpha:latest", out.getvalue())
         html = (directory / "report.html").read_text()
-        self.assertIn("No declared inference configuration", html)
+        self.assertNotIn("Declared inference configs", html)
+        self.assertNotIn("No declared inference config", html)
         manifest = json.loads((directory / "manifest.json").read_text())
         self.assertEqual(manifest["inference_configurations"], [])
         rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]

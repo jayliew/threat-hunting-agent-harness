@@ -31,6 +31,14 @@ renderers = ["gemma4", "gemma4-large"]
 hint = "Gemma 4 must use RENDERER gemma4 or gemma4-large."
 
 [[formats]]
+label = "GLM-4.7"
+# GLM-4.6 and earlier use a different renderer and must not match this rule.
+name_pattern = 'glm-4\.7(?!\d)'
+renderers = ["glm-4.7"]
+parsers = ["glm-4.7"]
+hint = "GLM-4.7 must use RENDERER glm-4.7 and PARSER glm-4.7. That renderer writes [gMASK]<sop>, <|system|>, <|user|>, and <|assistant|>; {{ .Prompt }} is valid only with this renderer."
+
+[[formats]]
 label = "Granite 4"
 name_pattern = "granite4"
 markers = ["<|im_start|>", "<|im_end|>"]

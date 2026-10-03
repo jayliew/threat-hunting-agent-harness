@@ -457,6 +457,57 @@ class PromptSelectionTests(unittest.TestCase):
         self.assertNotIn(prompts.SYSTEM_PROMPT, messages[1]['content'])
         self.assertIs(prompts.prompt_for_model('deepseek-r1'), prompts.DEFAULT_PROMPT)
 
+    def test_phi3_medium_128k_keeps_the_contract_in_the_user_turn(self):
+        for name in ('phi3:medium-128k', 'phi3:medium-128k:latest'):
+            with self.subTest(name=name):
+                self.assertIs(prompts.prompt_for_model(name), prompts.PHI3_MEDIUM_128K)
+        self.assertEqual(prompts.PHI3_MEDIUM_128K.system, '')
+        task = prompts.PHI3_MEDIUM_128K.user_task
+        self.assertIn(prompts.SYSTEM_PROMPT, task)
+        self.assertIn(prompts.USER_TASK, task)
+        messages = harness.build_messages(EVENTS, prompts.PHI3_MEDIUM_128K)
+        self.assertEqual(messages[0]['content'], '')
+        self.assertIn(prompts.SYSTEM_PROMPT, messages[1]['content'])
+        self.assertIs(prompts.prompt_for_model('phi3:medium'), prompts.DEFAULT_PROMPT)
+
+    def test_command_r_uses_cohere_preamble_headings(self):
+        for name in ('command-r', 'command-r:latest'):
+            with self.subTest(name=name):
+                self.assertIs(prompts.prompt_for_model(name), prompts.COMMAND_R)
+        system = prompts.COMMAND_R.system
+        self.assertEqual(prompts.COMMAND_R.user_task, prompts.USER_TASK)
+        task_at = system.index('## Task and Context')
+        style_at = system.index('## Style Guide')
+        self.assertEqual(task_at, 0)
+        self.assertLess(task_at, style_at)
+        self.assertEqual(system.count('\n## '), 1)
+        self.assertIn(
+            'Choose exactly one verdict for every case: suspicious, benign, or inconclusive.',
+            system,
+        )
+        self.assertIn(
+            'A plausible explanation or absence of threat indicators alone is insufficient.',
+            system,
+        )
+        self.assertIn('<verdicts>', system)
+        self.assertIn('<output_fields>', system)
+        messages = harness.build_messages(EVENTS, prompts.COMMAND_R)
+        self.assertEqual(messages[0]['content'], system)
+        self.assertIn(prompts.USER_TASK, messages[1]['content'])
+        self.assertIs(prompts.prompt_for_model('command-r-plus'), prompts.DEFAULT_PROMPT)
+
+    def test_cyberpal2_asks_for_step_by_step_reasoning(self):
+        for name in ('cyberpal2-20b', 'cyberpal2-20b:latest'):
+            with self.subTest(name=name):
+                self.assertIs(prompts.prompt_for_model(name), prompts.CYBERPAL2_20B)
+        self.assertEqual(prompts.CYBERPAL2_20B.system, prompts.SYSTEM_PROMPT)
+        self.assertTrue(prompts.CYBERPAL2_20B.user_task.startswith(prompts.USER_TASK))
+        self.assertIn('Think step-by-step before answering.', prompts.CYBERPAL2_20B.user_task)
+        messages = harness.build_messages(EVENTS, prompts.CYBERPAL2_20B)
+        self.assertEqual(messages[0]['content'], prompts.SYSTEM_PROMPT)
+        self.assertIn('Think step-by-step before answering.', messages[1]['content'])
+        self.assertIs(prompts.prompt_for_model('cyberpal'), prompts.DEFAULT_PROMPT)
+
     def test_registered_prompt_is_sent_only_for_that_model(self):
         custom = prompts.ModelPrompt(
             name='foundation-sec-alpha',

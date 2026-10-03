@@ -22,7 +22,7 @@ TEMPLATE """{{- if .System }}<|system|>
 {{ end }}{{- range .Messages }}{{- if eq .Role "user" }}<|user|>
 {{ .Content }}
 {{ else if eq .Role "assistant" }}<|assistant|>
-{{ .Content }}
+{{ .Content }}<|end_of_text|>
 {{ end }}{{- end }}<|assistant|>
 """
 

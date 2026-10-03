@@ -9,28 +9,30 @@ from unittest.mock import Mock
 
 from ollama import ChatResponse, Message
 
-from main import (
+from model_config import (
+    chat_template_error, installed_renderer, installed_model_error, is_bare_prompt_template, inspect_installed_model,
+)
+
+from harness import (
     CONTEXT_WARN_RATIO,
     EVIDENCE_END,
     EVIDENCE_START,
     NUM_CTX,
     SYSTEM_PROMPT,
+    TASK_END,
+    TASK_START,
     USER_TASK,
     parse_timeout,
     build_messages,
     allowed_evidence_ids,
     event_id,
     event_sort_key,
-    chat_template_error,
     chat_think_kwargs,
-    installed_renderer,
     context_limit,
     context_usage,
     empty_tokens,
     incomplete_response_message,
-    inspect_installed_model,
     invalid_hunt_output_message,
-    is_bare_prompt_template,
     load_security_events,
     model_detail_fields,
     native_context_length,
@@ -130,9 +132,23 @@ class BuildMessagesTests(unittest.TestCase):
             "the Evidence field must cite both the observed activity and the records that corroborate",
             messages[0]["content"],
         )
+        for heading in (
+            "## Role",
+            "## Task",
+            "## Evidence rules",
+            "## Decision rules",
+            "## Output format",
+        ):
+            self.assertIn(heading, SYSTEM_PROMPT)
+        self.assertIn("<verdicts>", SYSTEM_PROMPT)
+        self.assertIn("</verdicts>", SYSTEM_PROMPT)
+        self.assertIn("<output_fields>", SYSTEM_PROMPT)
+        self.assertIn("</output_fields>", SYSTEM_PROMPT)
         self.assertNotIn("ignore prior instructions", messages[0]["content"])
         user = messages[1]["content"]
-        self.assertTrue(user.startswith(USER_TASK))
+        self.assertTrue(user.startswith(f"{TASK_START}{USER_TASK}{TASK_END}\n"))
+        self.assertEqual(user.count(TASK_START), 1)
+        self.assertEqual(user.count(TASK_END), 1)
         self.assertIn("Choose one verdict: suspicious, benign, or inconclusive.", user)
         self.assertTrue(user.endswith(EVIDENCE_END))
         payload = user.split(EVIDENCE_START + "\n", 1)[1].rsplit("\n" + EVIDENCE_END, 1)[0]
@@ -442,12 +458,20 @@ class ChatTemplateTests(unittest.TestCase):
             "<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{{ .System }}"
             "<|USER_TOKEN|>{{ .Content }}<|CHATBOT_TOKEN|>"
         )
+        cyberpal = (
+            "<|start|>system<|message|>You are ChatGPT.<|end|>"
+            "<|start|>developer<|message|>{{ .System }}<|end|>"
+            "<|start|>user<|message|>{{ .Content }}<|end|>"
+            "<|start|>assistant<|channel|>final<|message|>"
+        )
         self.assertIsNone(chat_template_error("qwen3:32b", qwen))
         self.assertIsNone(chat_template_error("llama3.3:70b", llama))
         self.assertIsNone(chat_template_error("mistral-small3.2:24b", mistral_small))
         self.assertIsNone(chat_template_error("mistral-nemo:12b", mistral_nemo))
         self.assertIsNone(chat_template_error("granite4.2:30b", qwen))
         self.assertIsNone(chat_template_error("command-r:latest", command_r))
+        self.assertIsNone(chat_template_error("cyberpal2-20b:latest", cyberpal))
+        self.assertIsNotNone(chat_template_error("cyberpal2-20b:latest", "{{ .Prompt }}"))
         self.assertIsNotNone(chat_template_error("qwen3:32b", "{{ .Prompt }}"))
         self.assertIsNotNone(chat_template_error("qwen3:32b", mistral_small))
         self.assertIsNotNone(chat_template_error("llama3.3:70b", qwen))
@@ -513,6 +537,48 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertIn("PARAMETER stop <|end_of_text|>", text)
         self.assertNotIn("<|start_header_id|>", text)
         self.assertNotIn("{{ .Prompt }}", template)
+
+    def test_foundation_sec_parser_and_stops(self) -> None:
+        from types import SimpleNamespace
+
+        info = SimpleNamespace(
+            template="<|system|>\n<|user|>\n<|assistant|>\n",
+            modelfile="",
+            parameters='stop "<|end_of_text|>"\n',
+        )
+        name = "foundation-sec-8b-instruct:latest"
+        self.assertIsNone(installed_model_error(name, info))
+        info.modelfile = "PARSER llama3\n"
+        self.assertIn("without a PARSER", installed_model_error(name, info))
+        info.modelfile = ""
+        for parameters in (None, "", 'stop "<|eot_id|>"',
+                           'stop "<|end_of_text|>"\nstop "Verdict:"'):
+            with self.subTest(parameters=parameters):
+                info.parameters = parameters
+                self.assertIn("must use only stop", installed_model_error(name, info))
+        info.parameters = 'stop "unterminated'
+        self.assertIn("malformed stop", installed_model_error(name, info))
+
+    def test_cyberpal_requires_harmony_stops(self) -> None:
+        template = (
+            "<|start|>system<|message|>You are ChatGPT.<|end|>"
+            "<|start|>developer<|message|>{{ .System }}<|end|>"
+            "<|channel|>final"
+        )
+        info = SimpleNamespace(
+            template=template,
+            modelfile="",
+            parameters='stop "<|return|>"\nstop "<|call|>"\n',
+        )
+        name = "cyberpal2-20b:latest"
+        self.assertIsNone(installed_model_error(name, info))
+        for parameters in (
+            'stop "<|return|>"',
+            'stop "<|return|>"\nstop "<|call|>"\nstop "<|end|>"',
+        ):
+            with self.subTest(parameters=parameters):
+                info.parameters = parameters
+                self.assertIn("must use only stop", installed_model_error(name, info))
 
     def test_inspect_installed_model_blocks_before_chat(self) -> None:
         api = Mock()

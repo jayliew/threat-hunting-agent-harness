@@ -6,6 +6,9 @@ Models are never downloaded; names must already appear in `ollama list`.
 Comparisons use harness.run_hunt and its shared three-verdict prompt: suspicious,
 benign, or inconclusive.
 
+A single model and a single log file use this same command. Pass one name to
+--models and one path to --logs.
+
 Declared inference configurations in inference_config/*.conf are copied
 into that directory before inference. An uncommented num_ctx line is the context
 window sent for that model. Uncommented temperature, top_p, and top_k lines are

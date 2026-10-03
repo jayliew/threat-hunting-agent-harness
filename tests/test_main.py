@@ -42,7 +42,7 @@ from shared.harness import (
 
 
 NUM_PREDICT = 1024
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 PASSWORD_SPRAY = REPO_ROOT / "logs" / "password-spray.jsonl"
 HTTP_BEACONING = REPO_ROOT / "logs" / "http-beaconing.jsonl"
 INTERNAL_NETWORK_SCAN = REPO_ROOT / "logs" / "internal-network-scan.jsonl"

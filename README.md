@@ -41,13 +41,13 @@ uv sync
 uv run python main.py
 uv run python main.py --model qwen3:32b
 uv run python main.py logs/http-beaconing.jsonl --model qwen3:32b
-uv run python main.py --profile profiles/qwen3-32b.profile
+uv run python main.py --inference-configuration inference-configurations/qwen3-32b.conf
 uv run python main.py --timeout 600
 ```
 
 `--timeout` is a positive number of seconds for one Ollama HTTP request. `--timeout none` is the same unlimited wait as the default. The limit applies to a single request.
 
-The script prints the model, the declared profile, the installed chat template, the log file, the events, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It also prints input, thinking, and output tokens, how those generated tokens were split, and context used versus `num_ctx`. It writes a results directory the same way a comparison does: the profile is copied in before inference, then the hunt result is appended.
+The script prints the model, the declared inference configuration, the installed chat template, the log file, the events, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It also prints input, thinking, and output tokens, how those generated tokens were split, and context used versus `num_ctx`. It writes a results directory the same way a comparison does: the inference configuration is copied in before inference, then the hunt result is appended.
 
 ## What a hunt does
 
@@ -73,10 +73,10 @@ Usage at or above 90% of `num_ctx`, while still under that window, prints a warn
 
 The run stops before it can look like a successful hunt when:
 
-- a file in `profiles/` is empty, missing `model`, is not `key=value` lines, or uses a key that is not an exact profile field name
+- a file in `inference-configurations/` is empty, missing `model`, is not `key=value` lines, or uses a key that is not an exact inference configuration field name
 - the model is missing from `ollama list`, lacks text completion, or its installed template, renderer, parser, or stops fail the format check (see [Chat templates](#chat-templates))
 - the log file is missing, unreadable, malformed, or contains no events
-- several profiles name the model and you omitted `--profile`
+- several inference configurations name the model and you omitted `--inference-configuration`
 
 ## Scenarios
 
@@ -92,13 +92,13 @@ Grade every case with the [answer keys](evals/answer-keys.md). Keep those keys o
 | `logs/scheduled-discovery.jsonl` | Scheduled discovery that resembles an internal scan |
 | `logs/opaque-sync-transfers.jsonl` | Host and network evidence for an inconclusive transfer |
 
-## Profiles and request settings
+## Inference configurations and request settings
 
-Each file in `profiles/` is one eval setup: the installed Ollama name, and the request values for that run. An uncommented value is sent on the chat request and overrides the Ollama or Modelfile default for that call. A `#` line stays in the file for a later change and leaves the default in place. Blank lines are ignored.
+Each file in `inference-configurations/` is one eval setup: the installed Ollama name, and the request values for that run. An uncommented value is sent on the chat request and overrides the Ollama or Modelfile default for that call. A `#` line stays in the file for a later change and leaves the default in place. Blank lines are ignored.
 
-Lines are `key=value`. The key must be exactly `model`, `num_ctx`, `thinking`, `temperature`, `top_p`, `top_k`, `weight_precision`, `weight_quant`, `kv_cache`, or `repeat_penalty`. A different case, hyphen, or space (`Num Ctx`, `num-ctx`) stops the run. `alpha` and `alpha:latest` are the same model. Two files may name the same model when the settings differ; those are different runs. Pass `--profile` with the file you want. If more than one file matches and you omit `--profile`, the run stops and lists them.
+Lines are `key=value`. The key must be exactly `model`, `num_ctx`, `thinking`, `temperature`, `top_p`, `top_k`, `weight_precision`, `weight_quant`, `kv_cache`, or `repeat_penalty`. A different case, hyphen, or space (`Num Ctx`, `num-ctx`) stops the run. `alpha` and `alpha:latest` are the same model. Two files may name the same model when the settings differ; those are different runs. Pass `--inference-configuration` with the file you want. If more than one file matches and you omit `--inference-configuration`, the run stops and lists them.
 
-`profiles/qwen3-32b.profile`:
+`inference-configurations/qwen3-32b.conf`:
 
 ```
 model=qwen3:32b
@@ -115,9 +115,9 @@ top_k=20
 
 Other recorded setups: `llama3.3:70b` (`num_ctx` 16384), `granite4.2:30b` (65536, `thinking=high`), `deepseek-r1:32b` (65536, `thinking=true`), `command-r:latest` (131072), `gemma4:31b` (32768, `thinking=true`), `mistral-small3.2:24b` (131072), `mistral-nemo:12b` (131072), and `foundation-sec-8b-instruct` (131072). `thinking` stays commented on models that do not support it. Granite 4.2 accepts `false`, `low`, `medium`, and `high`. Qwen3, DeepSeek-R1, and Gemma 4 are on or off (`thinking=true` or `false`).
 
-Both CLIs load the chosen profile before the first inference call, print it, and copy it into the results directory. A model with no file is reported as having no declared profile. If an uncommented weight quant differs from the installed Ollama quantization, the report keeps both and notes the difference. A malformed profile stops the run before any results directory is created. `num_ctx` must be one positive integer written as digits only (commas are rejected). `temperature` is a non-negative decimal, `top_p` is a decimal from 0 through 1, and `top_k` is a positive integer.
+Both CLIs load the chosen inference configuration before the first inference call, print it, and copy it into the results directory. A model with no file is reported as having no declared inference configuration. If an uncommented weight quant differs from the installed Ollama quantization, the report keeps both and notes the difference. A malformed inference configuration stops the run before any results directory is created. `num_ctx` must be one positive integer written as digits only (commas are rejected). `temperature` is a non-negative decimal, `top_p` is a decimal from 0 through 1, and `top_k` is a positive integer.
 
-| Profile key | Request field | If the line is absent |
+| Inference configuration key | Request field | If the line is absent |
 | --- | --- | --- |
 | `num_ctx` | `options.num_ctx` | `32768` from `NUM_CTX` in `shared/harness.py` |
 | `thinking` | `think`: `true`, `false`, `low`, `medium`, or `high` | `THINK` in `shared/harness.py` (`False`) |
@@ -127,9 +127,9 @@ Both CLIs load the chosen profile before the first inference call, print it, and
 | — | `options.num_predict` | always `-1` (no output-token limit) |
 | — | `shift` | always off (`SHIFT = False`) |
 
-The harness asks Ollama (`/api/show`) and sends `think` only when the model lists the `thinking` capability. Models without that capability reject the argument. Qwen3-class models think by default when the API omits `think`, so those models always receive an explicit value. A profile that sets `thinking` for a model without the capability stops the run before any chat call. Set `THINK` in `shared/harness.py` to `True` or `False` before a run whose profile has no `thinking` line. Thinking tokens and the final answer share `num_ctx`.
+The harness asks Ollama (`/api/show`) and sends `think` only when the model lists the `thinking` capability. Models without that capability reject the argument. Qwen3-class models think by default when the API omits `think`, so those models always receive an explicit value. An inference configuration that sets `thinking` for a model without the capability stops the run before any chat call. Set `THINK` in `shared/harness.py` to `True` or `False` before a run whose inference configuration has no `thinking` line. Thinking tokens and the final answer share `num_ctx`.
 
-Weight precision, KV cache, and repeat penalty stay commented out. The expected KV cache type is `f16` (`OLLAMA_KV_CACHE_TYPE` on the Ollama server). It is recorded on each hunt and is not sent as a chat option. The saved profile is what distinguishes two runs of the same model when those settings later differ.
+Weight precision, KV cache, and repeat penalty stay commented out. The expected KV cache type is `f16` (`OLLAMA_KV_CACHE_TYPE` on the Ollama server). It is recorded on each hunt and is not sent as a chat option. The saved inference configuration is what distinguishes two runs of the same model when those settings later differ.
 
 ## Compare models
 
@@ -139,20 +139,20 @@ Edit `MODELS` and `DEFAULT_SCENARIO_LOGS` at the top of `compare_models.py`, or 
 uv run python compare_models.py
 uv run python compare_models.py --models qwen3:32b mistral-small3.2:24b --logs logs/password-spray.jsonl logs/http-beaconing.jsonl
 uv run python compare_models.py --models mistral-small3.2:24b --timeout 600 --output-dir results
-uv run python compare_models.py --profiles-dir profiles
-uv run python compare_models.py --models qwen3:32b --profile profiles/qwen3-32b.profile profiles/qwen3-32b-other.profile
+uv run python compare_models.py --inference-configurations-dir inference-configurations
+uv run python compare_models.py --models qwen3:32b --inference-configuration inference-configurations/qwen3-32b.conf inference-configurations/qwen3-32b-other.conf
 ```
 
-Log paths are relative to the script, or absolute. `--output-dir` and `--profiles-dir` are relative to the current working directory. The default profiles directory is `profiles/` next to the script.
+Log paths are relative to the script, or absolute. `--output-dir` and `--inference-configurations-dir` are relative to the current working directory. The default inference configurations directory is `inference-configurations/` next to the script.
 
 Each invocation creates a unique US Eastern Time subdirectory named with the day, month, year, weekday, and time, for example `20-Sep-2026-Sun_09-28am-ET`:
 
-- `report.html` — dark summary table and full answers, grouped by case. Declared profiles sit above the table, including models with none recorded. Each model card shows quantization, thinking mode (enabled, disabled, or unsupported), context used versus allocated, and token counts (input, thinking, output). Run details on each card stay collapsed until opened. A near-full context window is a warning. Thinking traces expand when present. Output, profile, and error text are HTML-escaped.
-- `declared-profiles/` — a copy of each matching profile, written before inference. The initial report already lists those profiles at `0 / N` runs recorded.
-- `results.jsonl` — one row per attempted model/case pair, saved immediately. Includes the raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages and options, prompt and input hashes, model digest, declared profile path, timings, token counts, and context allocated and used.
-- `manifest.json` — selected models (digest, capabilities, quantization, native context, and the `num_ctx` sent), declared profiles, shared request settings, and input file identities. Pending cases stay visible if the process is interrupted.
+- `report.html` — dark summary table and full answers, grouped by case. Declared inference configurations sit above the table, including models with none recorded. Each model card shows quantization, thinking mode (enabled, disabled, or unsupported), context used versus allocated, and token counts (input, thinking, output). Run details on each card stay collapsed until opened. A near-full context window is a warning. Thinking traces expand when present. Output, inference configuration, and error text are HTML-escaped.
+- `declared-inference-configurations/` — a copy of each matching inference configuration, written before inference. The initial report already lists those inference configurations at `0 / N` runs recorded.
+- `results.jsonl` — one row per attempted model/case pair, saved immediately. Includes the raw Ollama response, parsed sections, validation errors, unknown evidence IDs, exact request messages and options, prompt and input hashes, model digest, declared inference configuration path, timings, token counts, and context allocated and used.
+- `manifest.json` — selected models (digest, capabilities, quantization, native context, and the `num_ctx` sent), declared inference configurations, shared request settings, and input file identities. Pending cases stay visible if the process is interrupted.
 
-Runs are sequential and grouped by model to reduce repeated loading. Every case gets a fresh conversation. Sampling, context, and thinking come from the matched profile, using the fallbacks above. The last case for each model requests unloading afterward. An individual inference error leaves the remaining cases running, and the report updates after every saved result.
+Runs are sequential and grouped by model to reduce repeated loading. Every case gets a fresh conversation. Sampling, context, and thinking come from the matched inference configuration, using the fallbacks above. The last case for each model requests unloading afterward. An individual inference error leaves the remaining cases running, and the report updates after every saved result.
 
 Exit status is nonzero when any run is invalid or failed, any run meets or exceeds its `num_ctx`, preflight fails, or execution is interrupted. Completed results remain available.
 
@@ -197,20 +197,20 @@ hint = "Create example-instruct using modelfiles/Modelfile.example-instruct."
 
 Replace those tokens with the model's own tokens. `parsers = []` means plain text and no `PARSER` directive. A nonempty `parsers` list names the accepted parsers. Omitting `parsers` leaves the parser unconstrained. `required_stops` must be configured. Extra stops are allowed unless `allowed_stops` is set, which limits stops to that list. Foundation-Sec's EOS-only policy is its registry entry. Marker presence does not prove every rendered conversation matches the training template.
 
-If an imported GGUF lacks the right framing, add a Modelfile under `modelfiles/` and create a local wrapper, as with Foundation-Sec. The registry checks the installed package. It does not download models or rewrite installed templates. Add a `profiles/*.profile` file for that wrapper. Both CLIs then use the same configuration without code changes.
+If an imported GGUF lacks the right framing, add a Modelfile under `modelfiles/` and create a local wrapper, as with Foundation-Sec. The registry checks the installed package. It does not download models or rewrite installed templates. Add an `inference-configurations/*.conf` file for that wrapper. Both CLIs then use the same configuration without code changes.
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `main.py` | Single-hunt CLI. Uses the shared harness, profiles, and report writer |
+| `main.py` | Single-hunt CLI. Uses the shared harness, inference configurations, and report writer |
 | `compare_models.py` | Compare installed models across the JSONL scenarios and write `results/` |
 | `shared/harness.py` | Defaults, log loading, preflight, prompts, inference, token accounting, and output validation |
 | `shared/model_config.py` | Validation of installed templates, renderers, parsers, and stop sequences |
 | `shared/model_formats.toml` | Ordered model format requirements |
-| `shared/model_profiles.py` | Profile loading, settings validation, and run selection |
-| `shared/run_reports.py` | Run directories, profile snapshots, result files, and HTML reports |
-| `profiles/*.profile` | Per-model eval setup. Uncommented values override Ollama and Modelfile defaults for that run |
+| `shared/inference_configurations.py` | Inference configuration loading, settings validation, and run selection |
+| `shared/run_reports.py` | Run directories, inference configuration snapshots, result files, and HTML reports |
+| `inference-configurations/*.conf` | Per-model eval setup. Uncommented values override Ollama and Modelfile defaults for that run |
 | `modelfiles/Modelfile.foundation-sec-8b-instruct` | `<\|system\|>` / `<\|user\|>` / `<\|assistant\|>` template for the Foundation-Sec GGUF import |
 | `logs/*.jsonl` | Seven synthetic ECS scenarios. The default hunt file is `logs/http-beaconing.jsonl` |
 | `logs/README.md` | Field notes for the lookalike evidence packages |

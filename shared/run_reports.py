@@ -1,4 +1,4 @@
-"""Shared run records, profile snapshots, and HTML reports."""
+"""Shared run records, inference configuration snapshots, and HTML reports."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from . import REPO_ROOT
 from .harness import KV_CACHE_TYPE, NUM_CTX, NUM_PREDICT, SEED, SHIFT, THINK
-from .model_profiles import display_source
+from .inference_configurations import display_source
 
 OUTPUT_ROOT = REPO_ROOT / "results"
 EASTERN = ZoneInfo("America/New_York")
@@ -59,26 +59,26 @@ def allocate_results_directory(output_root: Path, when: datetime) -> Path:
     return directory
 
 
-def write_declared_profiles(directory: Path, profiles: list[dict]) -> None:
+def write_declared_inference_configurations(directory: Path, configurations: list[dict]) -> None:
     """Copy the text recorded before the run into the results directory."""
-    if not profiles:
+    if not configurations:
         return
-    dest = directory / "declared-profiles"
+    dest = directory / "declared-inference-configurations"
     dest.mkdir()
     used: set[str] = set()
-    for profile in profiles:
-        base = Path(profile["source"]).name
-        if not base.endswith(".profile"):
-            base += ".profile"
-        stem = base[: -len(".profile")]
+    for configuration in configurations:
+        base = Path(configuration["source"]).name
+        if not base.endswith(".conf"):
+            base += ".conf"
+        stem = base[: -len(".conf")]
         name = base
         suffix = 2
         while name in used:
-            name = f"{stem}-{suffix}.profile"
+            name = f"{stem}-{suffix}.conf"
             suffix += 1
         used.add(name)
-        profile["copy_name"] = name
-        text = profile["text"]
+        configuration["copy_name"] = name
+        text = configuration["text"]
         if not text.endswith("\n"):
             text += "\n"
         (dest / name).write_text(text, encoding="utf-8")
@@ -86,36 +86,36 @@ def write_declared_profiles(directory: Path, profiles: list[dict]) -> None:
 
 def slot_label(model: dict) -> str:
     """Distinguish two setups of the same installed model."""
-    source = model.get("profile_source")
+    source = model.get("inference_configuration_source")
     if source:
         return f"{model['name']} ({source})"
     return model["name"]
 
 
-def declared_profiles_html(manifest: dict) -> str:
-    """Show the archived profile source file that drove each model's request."""
+def declared_inference_configurations_html(manifest: dict) -> str:
+    """Show the archived inference configuration that drove each model's request."""
     blocks = []
     for model in manifest.get("models") or []:
         name = escape(slot_label(model))
-        profile = model.get("declared_profile")
-        if not profile:
+        configuration = model.get("declared_inference_configuration")
+        if not configuration:
             blocks.append(
                 f'<article><h3>{name}</h3>'
-                f'<p class="pending">No declared profile</p></article>'
+                f'<p class="pending">No declared inference configuration</p></article>'
             )
             continue
-        note = profile.get("quantization_note")
+        note = configuration.get("quantization_note")
         note_html = f"<p>{escape(note)}</p>" if note else ""
         blocks.append(
             f"<article><h3>{name}</h3>"
-            f"<p>Recorded from {escape(profile['source'])}</p>"
-            f"{note_html}<pre>{escape(profile['text'].rstrip())}</pre></article>"
+            f"<p>Recorded from {escape(configuration['source'])}</p>"
+            f"{note_html}<pre>{escape(configuration['text'].rstrip())}</pre></article>"
         )
     if not blocks:
         return ""
     return (
-        "<h2>Declared profiles</h2>"
-        "<p>Recorded before inference. Uncommented profile values drive the Ollama "
+        "<h2>Declared inference configurations</h2>"
+        "<p>Recorded before inference. Uncommented inference configuration values drive the Ollama "
         "request; this block is the archived source file, including comments and "
         "fields that are not chat options.</p>"
         f'<div class="answers">{"".join(blocks)}</div>'
@@ -324,7 +324,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
              f'think={e(settings.get("think"))}, '
              f'kv_cache_type={e(settings.get("kv_cache_type"))} '
              '(server env <code>OLLAMA_KV_CACHE_TYPE</code>; not a chat API option). '
-             'These are the harness fallbacks unless a profile overrides them; '
+             'These are the harness fallbacks unless an inference configuration overrides them; '
              'they are not necessarily what each model was sent. '
              'Each model card shows the context window and thinking value actually used.</p>'
              '<p>Output validity checks format and cited IDs; '
@@ -336,7 +336,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
              'estimated by character length when both are present. '
              'A run warns at 90% of num_ctx and is an error at or above num_ctx. '
              'Context shift is disabled for every model.</p>'
-             f'{declared_profiles_html(manifest)}'
+             f'{declared_inference_configurations_html(manifest)}'
              '<div class="scroll"><table><thead><tr><th>Case</th><th>Model</th><th>Quantization</th>'
              '<th>Verdict</th><th>Output status</th><th>Unknown IDs</th><th>Eval time</th><th>Thinking</th>'
              '<th>Context used</th><th>Context allocated</th>'
@@ -349,24 +349,28 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
 
 def open_recorded_run(
     output_root: Path,
-    profiles_directory: Path,
+    configurations_directory: Path,
     slots: list[dict],
     cases: list[dict],
 ) -> tuple[Path, dict]:
-    """Create the results directory and write profiles before any inference."""
+    """Create the results directory and write inference configurations before any inference."""
     now = eastern_now()
     directory = allocate_results_directory(output_root, now)
-    attached = [slot["declared_profile"] for slot in slots if slot.get("declared_profile")]
-    write_declared_profiles(directory, attached)
+    attached = [
+        slot["declared_inference_configuration"]
+        for slot in slots
+        if slot.get("declared_inference_configuration")
+    ]
+    write_declared_inference_configurations(directory, attached)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_at": now.isoformat(),
-        "profiles_dir": (
-            display_source(profiles_directory)
-            if profiles_directory.exists()
-            else str(profiles_directory)
+        "inference_configurations_dir": (
+            display_source(configurations_directory)
+            if configurations_directory.exists()
+            else str(configurations_directory)
         ),
-        "profiles": attached,
+        "inference_configurations": attached,
         "request_settings": {
             "num_ctx": NUM_CTX,
             "num_predict": NUM_PREDICT,
@@ -386,19 +390,19 @@ def open_recorded_run(
 
 def annotate_result(result: dict, slot: dict, case: dict) -> dict:
     result.update({
-        "schema_version": 1,
+        "schema_version": 2,
         "case": case["name"],
         "log_path": case["path"],
         "events_sha256": case["events_sha256"],
         "model_digest": slot["digest"],
         "run_key": slot["run_key"],
-        "declared_profile": slot.get("profile_source"),
+        "declared_inference_configuration": slot.get("inference_configuration_source"),
     })
     return result
 
 
 def save_result(directory: Path, manifest: dict, results: list[dict], result: dict) -> None:
-    """Append one hunt and refresh the report. The profile is already on disk."""
+    """Append one hunt and refresh the report. The inference configuration is already on disk."""
     with (directory / "results.jsonl").open("a", encoding="utf-8") as output:
         output.write(json.dumps(result) + "\n")
         output.flush()

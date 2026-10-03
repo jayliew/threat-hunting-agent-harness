@@ -30,7 +30,7 @@ DEFAULT_MODEL = "foundation-sec-8b-instruct"
 # DEFAULT_LOG_FILE = "logs/password-spray.jsonl"
 DEFAULT_LOG_FILE = "logs/http-beaconing.jsonl"
 
-# Fallback context window when the matched profile has no num_ctx line.
+# Fallback context window when the matched inference configuration has no num_ctx line.
 NUM_CTX = 32768
 # Generation budget sent on every chat as options.num_predict.
 # Ollama treats -1 as infinite generation. Always send it so a Modelfile or
@@ -42,8 +42,8 @@ NUM_PREDICT = -1
 # Always send options.seed. When seed is absent, Ollama uses -1, and a
 # negative seed selects a new random seed each run. 0 is a fixed seed.
 SEED = 0
-# Fallback sampling temperature when the matched profile has no temperature
-# line. top_p and top_k are omitted unless that profile sets them.
+# Fallback sampling temperature when the matched inference configuration has no
+# temperature line. top_p and top_k are omitted unless that inference configuration sets them.
 TEMPERATURE = 0
 # Warn when context used reaches this fraction of the configured num_ctx.
 # At or above that window the run is an error.
@@ -52,7 +52,7 @@ CONTEXT_WARN_RATIO = 0.9
 # DeepSeek2, and slides older tokens out once num_ctx is full. Send False for
 # every model so a full window errors instead of shifting history.
 SHIFT = False
-# Fallback when a profile has no thinking line. Thinking models (Qwen3,
+# Fallback when an inference configuration has no thinking line. Thinking models (Qwen3,
 # DeepSeek-R1, …): Ollama default is True if `think` is omitted. Models
 # without the thinking capability reject the argument (HTTP 400: "does not
 # support thinking"). Send think only when /api/show lists "thinking". For

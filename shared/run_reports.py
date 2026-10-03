@@ -9,10 +9,11 @@ import os
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from harness import KV_CACHE_TYPE, NUM_CTX, NUM_PREDICT, SEED, SHIFT, THINK
-from model_profiles import display_source
+from . import REPO_ROOT
+from .harness import KV_CACHE_TYPE, NUM_CTX, NUM_PREDICT, SEED, SHIFT, THINK
+from .model_profiles import display_source
 
-OUTPUT_ROOT = Path(__file__).parent / "results"
+OUTPUT_ROOT = REPO_ROOT / "results"
 EASTERN = ZoneInfo("America/New_York")
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 MONTHS = (

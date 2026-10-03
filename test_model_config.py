@@ -5,7 +5,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 
-from model_config import installed_model_error, load_model_formats
+from shared.model_config import installed_model_error, load_model_formats
 
 
 class ModelConfigTests(unittest.TestCase):

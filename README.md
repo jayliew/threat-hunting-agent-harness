@@ -73,7 +73,7 @@ Usage at or above 90% of `num_ctx`, while still under that window, prints a warn
 
 The run stops before it can look like a successful hunt when:
 
-- a file in `profiles/` is empty, missing `model`, or is not `key=value` lines
+- a file in `profiles/` is empty, missing `model`, is not `key=value` lines, or uses a key that is not an exact profile field name
 - the model is missing from `ollama list`, lacks text completion, or its installed template, renderer, parser, or stops fail the format check (see [Chat templates](#chat-templates))
 - the log file is missing, unreadable, malformed, or contains no events
 - several profiles name the model and you omitted `--profile`
@@ -96,7 +96,7 @@ Grade every case with the [answer keys](evals/answer-keys.md). Keep those keys o
 
 Each file in `profiles/` is one eval setup: the installed Ollama name, and the request values for that run. An uncommented value is sent on the chat request and overrides the Ollama or Modelfile default for that call. A `#` line stays in the file for a later change and leaves the default in place. Blank lines are ignored.
 
-Lines are `key=value`. `alpha` and `alpha:latest` are the same model. Two files may name the same model when the settings differ; those are different runs. Pass `--profile` with the file you want. If more than one file matches and you omit `--profile`, the run stops and lists them.
+Lines are `key=value`. The key must be exactly `model`, `num_ctx`, `thinking`, `temperature`, `top_p`, `top_k`, `weight_precision`, `weight_quant`, `kv_cache`, or `repeat_penalty`. A different case, hyphen, or space (`Num Ctx`, `num-ctx`) stops the run. `alpha` and `alpha:latest` are the same model. Two files may name the same model when the settings differ; those are different runs. Pass `--profile` with the file you want. If more than one file matches and you omit `--profile`, the run stops and lists them.
 
 `profiles/qwen3-32b.profile`:
 

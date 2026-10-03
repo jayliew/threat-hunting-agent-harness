@@ -979,6 +979,19 @@ class DeclaredProfileTests(unittest.TestCase):
         )
         self.assertEqual(profile["fields"], {"model": "qwen3:32b"})
 
+    def test_profile_field_name_must_match_exactly(self):
+        rejected = (
+            "Model=alpha\n",
+            "model=alpha\nNum Ctx=40960\n",
+            "model=alpha\nnum-ctx=40960\n",
+        )
+        for text in rejected:
+            with self.assertRaises(ValueError) as error:
+                model_profiles.parse_profile_text(text, "memory")
+            message = str(error.exception)
+            self.assertIn("unknown field", message)
+            self.assertIn("expected an exact key", message)
+
     def test_ambiguous_profiles_stop_before_inference(self):
         self.write_profile("think.profile", "model=foundation-sec-alpha\ntemperature=0.6\n")
         self.write_profile("direct.profile", "model=foundation-sec-alpha:latest\ntemperature=0\n")
@@ -1170,6 +1183,19 @@ class DeclaredProfileTests(unittest.TestCase):
         self.assertIn("no commas", str(error.exception))
         self.assertIn("16,384", str(error.exception))
 
+    def test_inexact_profile_field_stops_before_chat(self):
+        self.write_profile("alpha.profile", "model=foundation-sec-alpha\nnum-ctx=16384\n")
+        api = client()
+        with self.assertRaises(ValueError) as error:
+            compare_models.run_comparison(
+                api, ["foundation-sec-alpha"], [str(self.log)], self.root / "results", self.profiles
+            )
+        message = str(error.exception)
+        self.assertIn("unknown field 'num-ctx'", message)
+        self.assertIn("num_ctx", message)
+        self.assertFalse(api.chat.called)
+        self.assertFalse((self.root / "results").exists())
+
     def test_malformed_profile_stops_before_results_and_inference(self):
         self.write_profile("alpha.profile", "weight_quant=Q6_K\n")
         api = client()
@@ -1186,7 +1212,7 @@ class DeclaredProfileTests(unittest.TestCase):
             "alpha.profile",
             "model=foundation-sec-alpha\n"
             "weight_quant=Q6_K\n"
-            "note=<script>alert(1)</script>\n"
+            "# note=<script>alert(1)</script>\n"
             "kv_cache=f16\n",
         )
         api = client()

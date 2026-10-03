@@ -604,6 +604,23 @@ class ChatTemplateTests(unittest.TestCase):
         self.assertIsNone(installed_renderer(None))
         self.assertIsNone(installed_renderer(""))
 
+    def test_command_r_modelfile_drops_the_extra_end_token(self) -> None:
+        text = (REPO_ROOT / "modelfiles" / "Modelfile.command-r").read_text()
+        template = text.split('TEMPLATE """', 1)[1].rsplit('"""', 1)[0]
+        doubled = "<|END_OF_TURN_TOKEN|><|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>"
+        self.assertNotIn(doubled, template)
+        self.assertIn("<|END_OF_TURN_TOKEN|>\n{{- end }}<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>", template)
+        self.assertIsNone(chat_template_error("command-r:latest", template))
+        library = template.replace(
+            "<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>",
+            doubled,
+            1,
+        )
+        rejected = chat_template_error("command-r:latest", library)
+        self.assertIsNotNone(rejected)
+        self.assertIn("END_OF_TURN_TOKEN", rejected)
+        self.assertIn("Modelfile.command-r", rejected)
+
     def test_modelfile_passes_preflight(self) -> None:
         text = (REPO_ROOT / "modelfiles" / "Modelfile.foundation-sec-8b-instruct").read_text()
         template = text.split("TEMPLATE", 1)[1].split("PARAMETER", 1)[0]

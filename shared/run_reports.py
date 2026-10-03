@@ -48,6 +48,46 @@ def eastern_now() -> datetime:
     return datetime.now(EASTERN)
 
 
+def format_report_timestamp(value: str) -> str:
+    """Human-readable US Eastern time for the report header, labeled ET."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=EASTERN)
+    eastern = parsed.astimezone(EASTERN)
+    hour12 = eastern.hour % 12 or 12
+    meridiem = "AM" if eastern.hour < 12 else "PM"
+    weekday = (
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    )[eastern.weekday()]
+    month = (
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    )[eastern.month - 1]
+    return (
+        f"{weekday}, {month} {eastern.day}, {eastern.year}, "
+        f"{hour12}:{eastern.minute:02d} {meridiem} ET"
+    )
+
+
 def allocate_results_directory(output_root: Path, when: datetime) -> Path:
     base = results_directory_name(when)
     directory = output_root / base
@@ -101,7 +141,7 @@ def declared_inference_configurations_html(manifest: dict) -> str:
         if not configuration:
             blocks.append(
                 f'<article><h3>{name}</h3>'
-                f'<p class="pending">No declared inference configuration</p></article>'
+                f'<p class="pending">No declared inference config</p></article>'
             )
             continue
         note = configuration.get("quantization_note")
@@ -114,8 +154,8 @@ def declared_inference_configurations_html(manifest: dict) -> str:
     if not blocks:
         return ""
     return (
-        "<h2>Declared inference configurations</h2>"
-        "<p>Recorded before inference. Uncommented inference configuration values drive the Ollama "
+        "<h2>Declared inference configs</h2>"
+        "<p>Recorded before inference. Uncommented inference config values drive the Ollama "
         "request; this block is the archived source file, including comments and "
         "fields that are not chat options.</p>"
         f'<div class="answers">{"".join(blocks)}</div>'
@@ -316,7 +356,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
 .run-details summary::-webkit-details-marker{display:none}.run-details-body{margin-top:8px;color:#9aa8b5;line-height:1.6}
 @media(max-width:600px){body{padding:16px}.answers{grid-auto-flow:row;grid-template-columns:1fr}}
 </style></head><body><main>'''
-    html += (f'<h1>Threat hunt model comparison</h1><p>{e(manifest["created_at"])} · '
+    html += (f'<h1>Threat hunt model comparison</h1><p>{e(format_report_timestamp(str(manifest["created_at"])))} · '
              f'{len(results)} / {total} runs recorded</p>'
              f'<p>Request settings: num_ctx={e(settings.get("num_ctx"))}, '
              f'num_predict={e(format_num_predict(settings.get("num_predict")))}, '
@@ -324,7 +364,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
              f'think={e(settings.get("think"))}, '
              f'kv_cache_type={e(settings.get("kv_cache_type"))} '
              '(server env <code>OLLAMA_KV_CACHE_TYPE</code>; not a chat API option). '
-             'These are the harness fallbacks unless an inference configuration overrides them; '
+             'These are the harness fallbacks unless an inference config overrides them; '
              'they are not necessarily what each model was sent. '
              'Each model card shows the context window and thinking value actually used.</p>'
              '<p>Output validity checks format and cited IDs; '

@@ -4,9 +4,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from harness import NUM_CTX
+from . import REPO_ROOT
+from .harness import NUM_CTX
 
-DEFAULT_PROFILES_DIR = Path(__file__).parent / "profiles"
+DEFAULT_PROFILES_DIR = REPO_ROOT / "profiles"
 
 
 def canonical_model_name(name: str) -> str:
@@ -18,7 +19,7 @@ def canonical_model_name(name: str) -> str:
 
 def display_source(path: Path) -> str:
     """Prefer a repo-relative path so reports stay portable."""
-    repo_root = Path(__file__).parent
+    repo_root = REPO_ROOT
     resolved = path.resolve()
     if resolved.is_relative_to(repo_root):
         return str(resolved.relative_to(repo_root))
@@ -95,7 +96,7 @@ def parse_thinking(value: str, source: str) -> bool | str:
 
 
 def profile_think(profile: dict | None) -> bool | str | None:
-    """Think argument for one setup. A missing line uses THINK from harness.py."""
+    """Think argument for one setup. A missing line uses THINK from shared/harness.py."""
     if profile is None:
         return None
     raw = profile.get("fields", {}).get("thinking")

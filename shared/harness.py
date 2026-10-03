@@ -14,7 +14,8 @@ from time import perf_counter
 from ollama import ChatResponse, Client
 from ollama._types import ChatRequest
 
-from model_config import chat_template_error, installed_model_error, installed_renderer
+from . import REPO_ROOT
+from .model_config import chat_template_error, installed_model_error, installed_renderer
 
 
 # Default Ollama model. Must already be installed locally (`ollama list`).
@@ -73,7 +74,7 @@ KV_CACHE_TYPE = "f16"
 def resolve_log_path(log_file: str) -> Path:
     path = Path(log_file)
     if not path.is_absolute():
-        path = Path(__file__).parent / path
+        path = REPO_ROOT / path
     return path
 
 

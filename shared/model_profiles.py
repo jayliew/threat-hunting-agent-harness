@@ -26,11 +26,30 @@ def display_source(path: Path) -> str:
     return str(resolved)
 
 
-def normalize_field_name(label: str) -> str:
-    parts = label.strip().lower().replace("-", " ").replace("_", " ").split()
-    if not parts:
-        raise ValueError("blank field name")
-    return "_".join(parts)
+# Keys are matched exactly. A different case, hyphen, or space is an error.
+PROFILE_FIELDS = (
+    "model",
+    "num_ctx",
+    "thinking",
+    "temperature",
+    "top_p",
+    "top_k",
+    "weight_precision",
+    "weight_quant",
+    "kv_cache",
+    "repeat_penalty",
+)
+PROFILE_FIELD_NAMES = frozenset(PROFILE_FIELDS)
+
+
+def require_profile_field(label: str, source: str, number: int) -> str:
+    """Return the key when it is one of the exact profile field names."""
+    if label not in PROFILE_FIELD_NAMES:
+        allowed = ", ".join(PROFILE_FIELDS)
+        raise ValueError(
+            f"{source}:{number}: unknown field {label!r}; expected an exact key: {allowed}"
+        )
+    return label
 
 
 def parse_profile_text(text: str, source: str) -> dict:
@@ -48,7 +67,7 @@ def parse_profile_text(text: str, source: str) -> dict:
         value = value.strip()
         if not label or not value:
             raise ValueError(f"{source}:{number}: expected 'key=value'")
-        key = normalize_field_name(label)
+        key = require_profile_field(label, source, number)
         if key in fields:
             raise ValueError(f"{source}:{number}: duplicate field {label}")
         fields[key] = value

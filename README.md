@@ -135,7 +135,7 @@ uv run python main.py --profile profiles/qwen3-32b-other.profile
 
 The script prints the model name, the declared profile, the installed chat template, the log file, the events it is sending, then an `--- Analysis ---` block with `Verdict`, `Threat type`, `Summary`, and `Evidence`. It also prints input, thinking, and output tokens, how those generated tokens were split, and context used versus the configured `num_ctx`. It writes a results directory, the same kind of record as a comparison: the profile is copied in before inference, then the hunt result is appended. Pass `--profile` to choose the setup. If several profiles name the model and you do not pass `--profile`, the hunt stops and lists them. It exits with an error instead of looking like a successful hunt when:
 
-- a file in `profiles/` is empty, missing `model`, or is not `key=value` lines
+- a file in `profiles/` is empty, missing `model`, is not `key=value` lines, or uses a key that is not an exact profile field name
 - the model is not installed (`ollama list`), lacks text completion, or its installed template is not the native framing for that family (wrong role markers, a `RENDERER` on a non-Gemma model, Gemma 4 without `RENDERER gemma4` or `gemma4-large`, or a name with no registered template)
 - the log file is missing, unreadable, malformed, or contains no events
 - generation hits the token limit (`done_reason=length`) or returns empty content
@@ -162,7 +162,7 @@ Every chat also sends `options.seed=0` (`SEED` in `shared/harness.py`). That is 
 
 Each model used in a test or eval has its own file in `profiles/`. The file is that model's setup for the run: which installed Ollama name to call, and the request values to use for it. Ollama and the model's Modelfile already have defaults, such as `PARAMETER num_ctx`. An uncommented profile value is sent on the chat request and may override those defaults for that call. `num_ctx` is the eval context window. The harness sends it as `options.num_ctx`, which replaces the Modelfile context size and Ollama's default for the request. A `#` line stays in the file for a later change and leaves the Ollama or Modelfile default in place. Blank lines are ignored.
 
-Each line is `key=value`, the same shape as a `.env` file. `model` names the installed model (`alpha` and `alpha:latest` are the same model). Two files may name the same model when the settings differ; those are different runs and can produce different results. Pass `--profile` with the file for the run you want. If more than one file matches a model and you do not pass `--profile`, the run stops and lists the files.
+Each line is `key=value`, the same shape as a `.env` file. The key must be exactly `model`, `num_ctx`, `thinking`, `temperature`, `top_p`, `top_k`, `weight_precision`, `weight_quant`, `kv_cache`, or `repeat_penalty`. A different case, hyphen, or space (`Num Ctx`, `num-ctx`) stops the run. `model` names the installed model (`alpha` and `alpha:latest` are the same model). Two files may name the same model when the settings differ; those are different runs and can produce different results. Pass `--profile` with the file for the run you want. If more than one file matches a model and you do not pass `--profile`, the run stops and lists the files.
 
 `profiles/qwen3-32b.profile` records this setup:
 

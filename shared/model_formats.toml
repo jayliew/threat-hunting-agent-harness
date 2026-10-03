@@ -62,6 +62,10 @@ markers = ["<｜User｜>", "<｜Assistant｜>"]
 label = "Command R"
 name_pattern = "command-r"
 markers = ["<|START_OF_TURN_TOKEN|>", "<|SYSTEM_TOKEN|>", "<|USER_TOKEN|>", "<|CHATBOT_TOKEN|>"]
+# The library template emits this pair before the chatbot turn. One end token
+# already closed the user turn.
+forbidden = ["<|END_OF_TURN_TOKEN|><|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>"]
+hint = "Command R must not place <|END_OF_TURN_TOKEN|> immediately before the chatbot turn. Create command-r from modelfiles/Modelfile.command-r."
 
 [[formats]]
 label = "Qwen3"

@@ -175,3 +175,16 @@ def prompt_for_model(name: str) -> ModelPrompt:
     """
     key = name[: -len(":latest")] if name.endswith(":latest") else name
     return MODEL_PROMPTS.get(key, DEFAULT_PROMPT)
+
+
+def prompt_instructions(prompt: ModelPrompt) -> str:
+    """Instructions sent to the model, without the security-event log payload.
+
+    An empty system role stays in the text so a user-turn prompt is visible.
+    The user role is the task block only. Event JSON is appended later.
+    """
+    user = f"{TASK_START}{prompt.user_task}{TASK_END}"
+    system = prompt.system
+    if system:
+        return f"system:\n{system}\n\nuser:\n{user}"
+    return f"system:\n\nuser:\n{user}"

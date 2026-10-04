@@ -545,11 +545,43 @@ class PromptSelectionTests(unittest.TestCase):
             html = (directory / 'report.html').read_text()
             self.assertIn('Prompt: foundation-sec-alpha', html)
             self.assertIn('Prompt: default', html)
+            self.assertIn('<h2>Prompts</h2>', html)
+            self.assertIn('<summary>Show prompt (foundation-sec-alpha)</summary>', html)
+            self.assertIn('<summary>Show prompt (default)</summary>', html)
+            self.assertIn('Custom analyst instructions for this model only.', html)
+            self.assertIn('You are a defensive security analyst.', html)
+            self.assertNotIn('2026-09-14T09:45:00.000Z', html)
+            self.assertNotIn('<details class="raw-output" open', html)
+            self.assertLess(html.index('<h2>Prompts</h2>'), html.index(f'<h2>{logs[0]}</h2>'))
             manifest = json.loads((directory / 'manifest.json').read_text())
             self.assertEqual(
                 [model['system_prompt'] for model in manifest['models']],
                 ['foundation-sec-alpha', 'default'],
             )
+            self.assertEqual(
+                manifest['models'][0]['prompt_text'],
+                prompts.prompt_instructions(custom),
+            )
+            self.assertIn(prompts.SYSTEM_PROMPT, manifest['models'][1]['prompt_text'])
+            self.assertNotIn('2026-09-14T09:45:00.000Z', manifest['models'][1]['prompt_text'])
+
+    def test_prompt_instructions_keep_roles_and_omit_logs(self):
+        custom = prompts.ModelPrompt(
+            name='custom',
+            system='Stay in role.',
+            user_task='Assess these events.',
+        )
+        self.assertEqual(
+            prompts.prompt_instructions(custom),
+            'system:\nStay in role.\n\nuser:\n<task>Assess these events.</task>',
+        )
+        self.assertNotIn(prompts.EVIDENCE_START, prompts.prompt_instructions(custom))
+        self.assertNotIn(prompts.EVIDENCE_END, prompts.prompt_instructions(custom))
+        empty = prompts.ModelPrompt(name='empty', system='', user_task='User only.')
+        self.assertEqual(
+            prompts.prompt_instructions(empty),
+            'system:\n\nuser:\n<task>User only.</task>',
+        )
 
 
 class DurationFormatTests(unittest.TestCase):
@@ -1047,6 +1079,37 @@ class ComparisonTests(unittest.TestCase):
             html,
         )
         self.assertIn('<th>Thinking tokens</th>', html)
+
+    def test_report_prompts_section_escapes_instructions(self):
+        directory = self.root / 'prompts'
+        directory.mkdir()
+        manifest = {
+            'created_at': 'now',
+            'request_settings': {'num_ctx': 32768, 'think': False},
+            'models': [
+                {
+                    'name': 'foundation-sec-alpha:latest',
+                    'system_prompt': 'custom',
+                    'prompt_text': 'system:\nStay <alert>\n\nuser:\n<task>Assess.</task>',
+                },
+                {
+                    'name': 'plain:latest',
+                    'system_prompt': 'default',
+                },
+            ],
+            'cases': [{'name': 'one.jsonl'}],
+        }
+        run_reports.write_report(directory, manifest, [])
+        html = (directory / 'report.html').read_text()
+        self.assertIn('<h2>Prompts</h2>', html)
+        self.assertIn('<summary>Show prompt (custom)</summary>', html)
+        self.assertIn('Stay &lt;alert&gt;', html)
+        self.assertIn('&lt;task&gt;Assess.&lt;/task&gt;', html)
+        self.assertNotIn('<alert>', html)
+        self.assertNotIn('<details class="raw-output" open', html)
+        self.assertNotIn('Show prompt (default)', html)
+        self.assertLess(html.index('<h2>Prompts</h2>'), html.index('<h2>one.jsonl</h2>'))
+        self.assertIn('Prompt: default', html)
 
     def test_report_spaces_valid_hunt_sections(self):
         manifest = {

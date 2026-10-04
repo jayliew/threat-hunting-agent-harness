@@ -525,6 +525,8 @@ class ChatTemplateTests(unittest.TestCase):
         )
         self.assertIsNone(chat_template_error("command-r:latest", command_r))
         self.assertIsNone(chat_template_error("cyberpal2-20b:latest", cyberpal))
+        self.assertIsNone(chat_template_error("gpt-oss:20b", cyberpal))
+        self.assertIsNotNone(chat_template_error("gpt-oss:20b", "{{ .Prompt }}"))
         self.assertIsNone(chat_template_error("phi3:medium-128k", phi3))
         self.assertIsNone(chat_template_error("phi-3-medium-128k", phi3))
         self.assertIsNotNone(chat_template_error("cyberpal2-20b:latest", "{{ .Prompt }}"))
@@ -674,6 +676,23 @@ class ChatTemplateTests(unittest.TestCase):
             with self.subTest(parameters=parameters):
                 info.parameters = parameters
                 self.assertIn("must use only stop", installed_model_error(name, info))
+
+    def test_gpt_oss_accepts_library_template_without_stops(self) -> None:
+        template = (
+            "<|start|>system<|message|>You are ChatGPT.<|end|>"
+            "<|start|>developer<|message|>{{ .System }}<|end|>"
+            "<|channel|>final"
+        )
+        info = SimpleNamespace(
+            template=template,
+            modelfile="",
+            parameters="temperature                    1",
+        )
+        self.assertIsNone(installed_model_error("gpt-oss:20b", info))
+        info.template = "{{ .Prompt }}"
+        missing = installed_model_error("gpt-oss:20b", info)
+        self.assertIsNotNone(missing)
+        self.assertIn("<|start|>system<|message|>", missing)
 
     def test_cyberpal_requires_harmony_stops(self) -> None:
         template = (

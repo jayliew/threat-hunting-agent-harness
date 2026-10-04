@@ -1,0 +1,38 @@
+# Native Harmony chat framing for the CyberPal 2.0 20B GGUF import.
+# cyberpal2:20b-bf16
+#
+# CyberPal 2.0 is fine-tuned from gpt-oss-20b. The converted GGUF stores
+# OpenAI's Harmony tokenizer.chat_template as Hugging Face Jinja. Ollama
+# still installs TEMPLATE {{ .Prompt }} as the Go template it executes,
+# so chat sends only the user text. This wrapper keeps those weights and
+# applies the Harmony Go template, PARSER harmony, and the Harmony stops.
+# A custom TEMPLATE without PARSER harmony can leave an empty answer.
+#
+#   ollama create cyberpal2-20b -f modelfiles/Modelfile.cyberpal2-20b
+
+FROM cyberpal2:20b-bf16
+
+TEMPLATE """<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.
+Knowledge cutoff: 2024-06
+{{- if and .IsThinkSet .Think (ne .ThinkLevel "") }}
+
+Reasoning: {{ .ThinkLevel }}
+{{- else if or (not .IsThinkSet) (and .IsThinkSet .Think) }}
+
+Reasoning: medium
+{{- end }}
+
+# Valid channels: analysis, commentary, final. Channel must be included for every message.<|end|>
+{{- if .System }}<|start|>developer<|message|># Instructions
+
+{{ .System }}<|end|>{{- end }}
+{{- range .Messages }}
+{{- if eq .Role "user" }}<|start|>user<|message|>{{ .Content }}<|end|>
+{{- else if eq .Role "assistant" }}<|start|>assistant<|channel|>final<|message|>{{ .Content }}<|end|>
+{{- end }}
+{{- end }}<|start|>assistant
+"""
+
+PARSER harmony
+PARAMETER stop <|return|>
+PARAMETER stop <|call|>

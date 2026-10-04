@@ -264,6 +264,30 @@ def collapsible_run_details(inner_html: str) -> str:
     )
 
 
+def prompts_section_html(models: list[dict]) -> str:
+    """One collapsed prompt per model. Log payloads are not part of this text."""
+    blocks = []
+    for model in models:
+        text = model.get("prompt_text") or ""
+        if not str(text).strip():
+            continue
+        name = escape(slot_label(model))
+        prompt_name = escape(str(model.get("system_prompt") or "default"))
+        blocks.append(
+            f'<article><h3>{name}</h3>'
+            '<details class="raw-output">'
+            f"<summary>Show prompt ({prompt_name})</summary>"
+            f"<pre>{escape(str(text))}</pre>"
+            "</details></article>"
+        )
+    if not blocks:
+        return ""
+    return (
+        "<section><h2>Prompts</h2>"
+        f'<div class="answers">{"".join(blocks)}</div></section>'
+    )
+
+
 def raw_output_html(raw_content: str) -> str:
     """Collapsed raw answer. An empty answer stays visible."""
     if not raw_content.strip():
@@ -392,7 +416,8 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 ui-monospace,mono
              '<th>Verdict</th><th>Output status</th><th>Unknown IDs</th><th>Eval time</th><th>Thinking</th>'
              '<th>Context used</th><th>Context allocated</th>'
              '<th>Input tokens</th><th>Thinking tokens</th><th>Output tokens</th>'
-             f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>{"".join(sections)}</main></body></html>')
+             f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+             f'{prompts_section_html(manifest["models"])}{"".join(sections)}</main></body></html>')
     temp = directory / "report.html.tmp"
     temp.write_text(html, encoding="utf-8")
     temp.replace(directory / "report.html")

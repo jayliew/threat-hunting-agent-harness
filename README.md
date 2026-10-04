@@ -1,16 +1,16 @@
 # Threat Hunting Agent Harness
 
+A bare-bones agentic harness for threat hunting on logs with open weight models. A proof-of-concept.
+
+Give a local model some security events, set the inference config, and print a structured hunt result.
+
 ## TL;DR
 
-If you work in cybersecurity, you can download the open-weight models this suite already runs, or another open-weight model you want to try, and run them locally on these hunt scenarios. The report shows how that model's answers compare with the others. Share your results back with the community by opening an issue or a pull request on this repository.
+You can download the open-weight models this suite already runs, or another open-weight model you want to try, and run them locally on these hunt scenarios. The report shows how that model's answers compare with the others. It would be *amazing* if you can share your results back with the community by opening an issue or a pull request on this repo.
 
 I will help guide you through setup and a first run. Open an issue and say what you want to try.
 
-This project needs security professionals to evaluate and judge the models' responses. Contributions to the evaluation logs (`logs/`) and their answer keys ([evals/answer-keys.md](evals/answer-keys.md)) are welcome. Feedback on how to improve any of this is welcome. I am looking for collaborators of any kind on this project.
-
-A bare-bones agentic harness for education and proof-of-concept work, not a production SOC product.
-
-Give a local model some security events, constrain how it reasons, and print a structured hunt result. The lesson stays in a few files you can hold in your head.
+This project needs cybersecurity professionals to evaluate and judge the models' responses. Contributions to the evaluation logs (`logs/`) and their answer keys ([evals/answer-keys.md](evals/answer-keys.md)) are welcome. I welcome all feedback to improve on any aspects of this—which I am sure there are many.
 
 ## Models
 
@@ -194,6 +194,7 @@ Before any chat call, `compare_models.py` requires the model to appear in `ollam
 | --- | --- |
 | Foundation-Sec | `<\|system\|>`, `<\|user\|>`, `<\|assistant\|>`. Fails on `<\|start_header_id\|>` or any `RENDERER`. No `PARSER`. Stop is only `<\|end_of_text\|>` |
 | CyberPal 2.0 | `<\|start\|>system<\|message\|>`, `<\|start\|>developer<\|message\|>`, `<\|channel\|>`, `<\|end\|>`. Stops `<\|return\|>` and `<\|call\|>` |
+| gpt-oss | `<\|start\|>system<\|message\|>`, `<\|start\|>developer<\|message\|>`, `<\|channel\|>`, `<\|end\|>`. The library package sets no stop lines |
 | Qwen3 | `<\|im_start\|>` and `<\|im_end\|>` |
 | Llama 3 | `<\|start_header_id\|>` and `<\|eot_id\|>` |
 | Mistral Small | `[SYSTEM_PROMPT]`, `[/SYSTEM_PROMPT]`, `[INST]`, `[/INST]` |

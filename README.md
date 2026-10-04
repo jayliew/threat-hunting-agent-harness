@@ -12,6 +12,26 @@ A bare-bones agentic harness for education and proof-of-concept work, not a prod
 
 Give a local model some security events, constrain how it reasons, and print a structured hunt result. The lesson stays in a few files you can hold in your head.
 
+## Models
+
+These Ollama names are the models currently in the suite:
+
+- `command-r:latest`
+- `cyberpal2-20b:latest`
+- `deepseek-r1:32b`
+- `foundation-sec-8b-instruct:latest`
+- `gemma4:26b`
+- `gemma4:31b`
+- `glm-4.7-flash:q4_K_M`
+- `gpt-oss:20b`
+- `granite4.2:30b`
+- `llama3.3:70b`
+- `mistral-nemo:12b`
+- `mistral-small3.2:24b`
+- `mistral-small3.2:latest`
+- `phi3:medium-128k`
+- `qwen3:32b`
+
 ## Run a hunt
 
 You need Python 3.14+, [uv](https://docs.astral.sh/uv/), and [Ollama](https://ollama.com) running locally. Install weights yourself. The harness only calls a model already in `ollama list`.

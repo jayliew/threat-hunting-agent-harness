@@ -6,7 +6,7 @@ If you work in cybersecurity, you can download the open-weight models this suite
 
 I will help guide you through setup and a first run. Open an issue and say what you want to try.
 
-Contributions to the evaluation logs (`logs/`) and their answer keys ([evals/answer-keys.md](evals/answer-keys.md)) are welcome. Feedback on how to improve any of this is welcome. I am looking for collaborators of any kind on this project.
+This project needs security professionals to evaluate and judge the models' responses. Contributions to the evaluation logs (`logs/`) and their answer keys ([evals/answer-keys.md](evals/answer-keys.md)) are welcome. Feedback on how to improve any of this is welcome. I am looking for collaborators of any kind on this project.
 
 A bare-bones agentic harness for education and proof-of-concept work, not a production SOC product.
 

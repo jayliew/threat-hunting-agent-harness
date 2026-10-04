@@ -194,6 +194,7 @@ Before any chat call, `compare_models.py` requires the model to appear in `ollam
 | --- | --- |
 | Foundation-Sec | `<\|system\|>`, `<\|user\|>`, `<\|assistant\|>`. Fails on `<\|start_header_id\|>` or any `RENDERER`. No `PARSER`. Stop is only `<\|end_of_text\|>` |
 | CyberPal 2.0 | `<\|start\|>system<\|message\|>`, `<\|start\|>developer<\|message\|>`, `<\|channel\|>`, `<\|end\|>`. Stops `<\|return\|>` and `<\|call\|>` |
+| gpt-oss | `<\|start\|>system<\|message\|>`, `<\|start\|>developer<\|message\|>`, `<\|channel\|>`, `<\|end\|>`. The library package sets no stop lines |
 | Qwen3 | `<\|im_start\|>` and `<\|im_end\|>` |
 | Llama 3 | `<\|start_header_id\|>` and `<\|eot_id\|>` |
 | Mistral Small | `[SYSTEM_PROMPT]`, `[/SYSTEM_PROMPT]`, `[INST]`, `[/INST]` |

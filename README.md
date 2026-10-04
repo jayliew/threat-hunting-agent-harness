@@ -1,5 +1,13 @@
 # Threat Hunting Agent Harness
 
+## TL;DR
+
+If you work in cybersecurity, you can download the open-weight models this suite already runs, or another open-weight model you want to try, and run them locally on these hunt scenarios. The report shows how that model's answers compare with the others. Share your results back with the community by opening an issue or a pull request on this repository.
+
+I will help guide you through setup and a first run. Open an issue and say what you want to try.
+
+Contributions to the evaluation logs (`logs/`) and their answer keys ([evals/answer-keys.md](evals/answer-keys.md)) are welcome. Feedback on how to improve any of this is welcome. I am looking for collaborators of any kind on this project.
+
 A bare-bones agentic harness for education and proof-of-concept work, not a production SOC product.
 
 Give a local model some security events, constrain how it reasons, and print a structured hunt result. The lesson stays in a few files you can hold in your head.

@@ -27,7 +27,7 @@ import sys
 from ollama import Client
 
 from shared.harness import parse_timeout, preflight_models_and_logs, run_hunt
-from shared.prompts import ModelPrompt, prompt_for_model
+from shared.prompts import ModelPrompt, prompt_for_model, prompt_instructions
 from shared.inference_configurations import (
     DEFAULT_INFERENCE_CONFIG_DIR, assign_run_slots, canonical_model_name,
     load_inference_configuration_paths, load_inference_configurations,
@@ -54,15 +54,17 @@ DEFAULT_SCENARIO_LOGS = [
 
 
 def _attach_system_prompts(slots: list[dict]) -> list[ModelPrompt]:
-    """Record each slot's prompt name and return the prompts in slot order.
+    """Record each slot's prompt name and instruction text, in slot order.
 
-    The name is a string because slots are written to manifest.json. The prompt
-    object itself is not stored on the slot.
+    The name and the instruction text are strings because slots are written to
+    manifest.json. The prompt object itself is not stored on the slot. The text
+    omits the security-event log payload appended at request time.
     """
     hunt_prompts = []
     for slot in slots:
         hunt_prompt = prompt_for_model(slot["name"])
         slot["system_prompt"] = hunt_prompt.name
+        slot["prompt_text"] = prompt_instructions(hunt_prompt)
         hunt_prompts.append(hunt_prompt)
     return hunt_prompts
 

@@ -1,8 +1,36 @@
 # Threat Hunting Agent Harness
 
+## TL;DR
+
+If you work in cybersecurity, you can download the open-weight models this suite already runs, or another open-weight model you want to try, and run them locally on these hunt scenarios. The report shows how that model's answers compare with the others. Share your results back with the community by opening an issue or a pull request on this repository.
+
+I will help guide you through setup and a first run. Open an issue and say what you want to try.
+
+This project needs security professionals to evaluate and judge the models' responses. Contributions to the evaluation logs (`logs/`) and their answer keys ([evals/answer-keys.md](evals/answer-keys.md)) are welcome. Feedback on how to improve any of this is welcome. I am looking for collaborators of any kind on this project.
+
 A bare-bones agentic harness for education and proof-of-concept work, not a production SOC product.
 
 Give a local model some security events, constrain how it reasons, and print a structured hunt result. The lesson stays in a few files you can hold in your head.
+
+## Models
+
+These Ollama names are the models currently in the suite:
+
+- `command-r:latest`
+- `cyberpal2-20b:latest`
+- `deepseek-r1:32b`
+- `foundation-sec-8b-instruct:latest`
+- `gemma4:26b`
+- `gemma4:31b`
+- `glm-4.7-flash:q4_K_M`
+- `gpt-oss:20b`
+- `granite4.2:30b`
+- `llama3.3:70b`
+- `mistral-nemo:12b`
+- `mistral-small3.2:24b`
+- `mistral-small3.2:latest`
+- `phi3:medium-128k`
+- `qwen3:32b`
 
 ## Run a hunt
 

@@ -206,7 +206,7 @@ Grade every case with the [answer keys](evals/answer-keys.md). Keep those keys o
 
 Each file in `inference_config/` is one eval setup: the installed Ollama name, and the request values for that run. An uncommented value is sent on the chat request and overrides the Ollama or Modelfile default for that call. A `#` line is a note and is not sent. Blank lines are ignored.
 
-Lines are `key=value`. The key must be exactly `model`, `num_ctx`, `thinking`, `temperature`, `top_p`, `top_k`, or `repeat_penalty`. A different case, hyphen, or space (`Num Ctx`, `num-ctx`) stops the run. `alpha` and `alpha:latest` are the same model. Two files may name the same model when the settings differ; those are different runs. Pass `--inference-configuration` with the file you want. If more than one file matches and you omit `--inference-configuration`, the run stops and lists them.
+Lines are `key=value`. The key must be exactly `model`, `num_ctx`, `thinking`, `temperature`, `top_p`, or `top_k`. A different case, hyphen, or space (`Num Ctx`, `num-ctx`) stops the run. `alpha` and `alpha:latest` are the same model. Two files may name the same model when the settings differ; those are different runs. Pass `--inference-configuration` with the file you want. If more than one file matches and you omit `--inference-configuration`, the run stops and lists them.
 
 `inference_config/qwen3-32b.conf`:
 
@@ -236,7 +236,7 @@ Other recorded setups: `llama3.3:70b` (`num_ctx` 16384), `granite4.2:30b` (65536
 
 The harness asks Ollama (`/api/show`) and sends `think` only when the model lists the `thinking` capability. Models without that capability reject the argument. Qwen3-class models think by default when the API omits `think`, so those models always receive an explicit value. An inference configuration that sets `thinking` for a model without the capability stops the run before any chat call. Set `THINK` in `shared/harness.py` to `True` or `False` before a run whose inference configuration has no `thinking` line. Thinking tokens and the final answer share `num_ctx`.
 
-Repeat penalty is optional and absent from the checked-in files. The installed model's quantization comes from the Ollama model named by `model`. The expected KV cache type is `f16` (`OLLAMA_KV_CACHE_TYPE` on the Ollama server). It is recorded on each hunt and is not sent as a chat option. The saved inference configuration is what distinguishes two runs of the same model when the settings differ.
+The installed model's quantization comes from the Ollama model named by `model`. The expected KV cache type is `f16` (`OLLAMA_KV_CACHE_TYPE` on the Ollama server). It is recorded on each hunt and is not sent as a chat option. The saved inference configuration is what distinguishes two runs of the same model when the settings differ.
 
 ## Compare models
 

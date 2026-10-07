@@ -34,9 +34,6 @@ INFERENCE_CONFIGURATION_FIELDS = (
     "temperature",
     "top_p",
     "top_k",
-    "weight_precision",
-    "weight_quant",
-    "kv_cache",
     "repeat_penalty",
 )
 INFERENCE_CONFIGURATION_FIELD_NAMES = frozenset(INFERENCE_CONFIGURATION_FIELDS)
@@ -246,39 +243,9 @@ def unique_inference_configuration(configurations: list[dict], model_name: str) 
     return matches[0] if matches else None
 
 
-def weight_tokens(value: str) -> set[str]:
-    """Split a weight-precision note into comparable quant tokens."""
-    tokens: set[str] = set()
-    current: list[str] = []
-    for char in value:
-        if char.isalnum() or char == "_":
-            current.append(char.lower())
-        elif current:
-            tokens.add("".join(current))
-            current = []
-    if current:
-        tokens.add("".join(current))
-    return tokens
-
-
-def declared_weight(fields: dict) -> str | None:
-    return fields.get("weight_precision") or fields.get("weight_quant")
-
-
-def quantization_note(declared: str | None, installed: str | None) -> str | None:
-    """Warn when the written quant does not match the installed Ollama model."""
-    if not declared or not installed:
-        return None
-    if installed.lower() in weight_tokens(declared):
-        return None
-    return (
-        f"Declared weight quant is {declared}; installed quantization is {installed}."
-    )
-
-
 def recorded_inference_configuration(configuration: dict, installed: dict) -> dict:
     """Snapshot the inference configuration chosen for one installed model before inference."""
-    recorded = {
+    return {
         "model": configuration["model"],
         "matched_model": installed["name"],
         "source": configuration["source"],
@@ -286,13 +253,6 @@ def recorded_inference_configuration(configuration: dict, installed: dict) -> di
         "fields": configuration["fields"],
         "run_key": configuration["source"],
     }
-    note = quantization_note(
-        declared_weight(configuration["fields"]),
-        installed.get("quantization_level"),
-    )
-    if note:
-        recorded["quantization_note"] = note
-    return recorded
 
 
 def print_recorded_inference_configuration(recorded: dict | None, model_name: str) -> None:
@@ -301,9 +261,6 @@ def print_recorded_inference_configuration(recorded: dict | None, model_name: st
         return
     print(f"Declared inference configuration ({recorded['source']}):", flush=True)
     print(recorded["text"].rstrip(), flush=True)
-    note = recorded.get("quantization_note")
-    if note:
-        print(note, flush=True)
 
 
 def assign_run_slots(

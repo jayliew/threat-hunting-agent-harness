@@ -1401,12 +1401,6 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
                     "# thinking levels: false, low, medium, high",
                     configuration["text"],
                 )
-        self.assertIsNone(inference_configurations.quantization_note("Developer Q8_0", "Q8_0"))
-        self.assertIsNone(inference_configurations.quantization_note("Developer QAT Q4_0", "Q4_0"))
-        self.assertIsNone(
-            inference_configurations.quantization_note("Existing developer Q8_0", "Q8_0")
-        )
-        self.assertIn("Q4_K_M", inference_configurations.quantization_note("Q4_K_M", "Q8_0"))
 
     def test_comments_and_blank_lines_are_ignored(self):
         configuration = inference_configurations.parse_inference_configuration_text(
@@ -1419,6 +1413,9 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             "Model=alpha\n",
             "model=alpha\nNum Ctx=40960\n",
             "model=alpha\nnum-ctx=40960\n",
+            "model=alpha\nweight_precision=Q4_K_M\n",
+            "model=alpha\nweight_quant=Q4_K_M\n",
+            "model=alpha\nkv_cache=f16\n",
         )
         for text in rejected:
             with self.assertRaises(ValueError) as error:
@@ -1636,7 +1633,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         self.assertFalse((self.root / "results").exists())
 
     def test_malformed_inference_configuration_stops_before_results_and_inference(self):
-        self.write_inference_configuration("alpha.conf", "weight_quant=Q6_K\n")
+        self.write_inference_configuration("alpha.conf", "temperature=0\n")
         api = client()
         with self.assertRaises(ValueError) as error:
             compare_models.run_comparison(
@@ -1650,25 +1647,19 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         self.write_inference_configuration(
             "alpha.conf",
             "model=foundation-sec-alpha\n"
-            "weight_quant=Q6_K\n"
+            "num_ctx=8192\n"
             "# note=<script>alert(1)</script>\n"
-            "kv_cache=f16\n",
+            "temperature=0.2\n",
         )
         api = client()
-        api.show.return_value.details = SimpleNamespace(
-            quantization_level="Q4_K_M",
-            parameter_size="32B",
-            format="gguf",
-            family="qwen",
-        )
         seen = {}
 
         def generate(**kwargs):
             saved = list((self.root / "results").glob("*/manifest.json"))
             self.assertEqual(len(saved), 1)
             manifest = json.loads(saved[0].read_text())
-            self.assertEqual(manifest["inference_configurations"][0]["fields"]["kv_cache"], "f16")
-            self.assertIn("Q4_K_M", manifest["inference_configurations"][0]["quantization_note"])
+            self.assertEqual(manifest["inference_configurations"][0]["fields"]["num_ctx"], "8192")
+            self.assertEqual(manifest["inference_configurations"][0]["fields"]["temperature"], "0.2")
             report = saved[0].with_name("report.html").read_text()
             self.assertNotIn("Declared inference configs", report)
             self.assertNotIn("inference config values drive the Ollama request", report)
@@ -1689,10 +1680,10 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         self.assertTrue(seen["before"])
         printed = out.getvalue()
         self.assertLess(printed.index("Declared inference configuration"), printed.index("Results:"))
-        self.assertIn("installed quantization is Q4_K_M", printed)
         rows = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
         self.assertTrue(rows[0]["declared_inference_configuration"].endswith("alpha.conf"))
-        self.assertEqual(api.chat.call_args.kwargs["options"]["temperature"], 0)
+        self.assertEqual(api.chat.call_args.kwargs["options"]["temperature"], 0.2)
+        self.assertEqual(api.chat.call_args.kwargs["options"]["num_ctx"], 8192)
         self.assertEqual(api.chat.call_args.kwargs["options"]["seed"], harness.SEED)
 
     def test_missing_inference_configuration_is_recorded_as_absent(self):
@@ -1712,7 +1703,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         self.assertFalse((directory / "declared-inference-configurations").exists())
 
     def test_single_hunt_records_inference_configuration_before_analysis(self):
-        self.write_inference_configuration("alpha.conf", "model=foundation-sec-alpha\nkv_cache=f16\n")
+        self.write_inference_configuration("alpha.conf", "model=foundation-sec-alpha\nnum_ctx=8192\n")
         api = client()
         result = harness.run_hunt("foundation-sec-alpha", EVENTS, client=api)
         output = self.root / "single-results"
@@ -1721,7 +1712,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         def fake_run(*args, **kwargs):
             saved = list(output.glob("*/declared-inference-configurations/alpha.conf"))
             self.assertEqual(len(saved), 1)
-            self.assertIn("kv_cache=f16", saved[0].read_text())
+            self.assertIn("num_ctx=8192", saved[0].read_text())
             report = saved[0].parents[1] / "report.html"
             self.assertIn("0 / 1 runs recorded", report.read_text())
             seen["before"] = True
@@ -1737,7 +1728,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             compare_models.main()
         self.assertTrue(seen["before"])
         printed = out.getvalue()
-        self.assertLess(printed.index("kv_cache="), printed.index("[1/1]"))
+        self.assertLess(printed.index("num_ctx="), printed.index("[1/1]"))
         rows = [
             json.loads(line)
             for path in output.glob("*/results.jsonl")
@@ -1748,8 +1739,8 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
         self.assertEqual(rows[0]["status"], "ok")
 
     def test_single_hunt_requires_a_choice_when_settings_differ(self):
-        self.write_inference_configuration("think.conf", "model=foundation-sec-alpha\ntemperature=0.6\nkv_cache=f16\n")
-        self.write_inference_configuration("direct.conf", "model=foundation-sec-alpha\ntemperature=0\nkv_cache=q8_0\n")
+        self.write_inference_configuration("think.conf", "model=foundation-sec-alpha\ntemperature=0.6\n")
+        self.write_inference_configuration("direct.conf", "model=foundation-sec-alpha\ntemperature=0\n")
         api = client()
         output = self.root / "single-results"
         with patch.object(sys, "argv", [

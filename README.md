@@ -206,7 +206,7 @@ Grade every case with the [answer keys](evals/answer-keys.md). Keep those keys o
 
 Each file in `inference_config/` is one eval setup: the installed Ollama name, and the request values for that run. An uncommented value is sent on the chat request and overrides the Ollama or Modelfile default for that call. A `#` line is a note and is not sent. Blank lines are ignored.
 
-Lines are `key=value`. The key must be exactly `model`, `num_ctx`, `thinking`, `temperature`, `top_p`, `top_k`, `weight_precision`, `weight_quant`, `kv_cache`, or `repeat_penalty`. A different case, hyphen, or space (`Num Ctx`, `num-ctx`) stops the run. `alpha` and `alpha:latest` are the same model. Two files may name the same model when the settings differ; those are different runs. Pass `--inference-configuration` with the file you want. If more than one file matches and you omit `--inference-configuration`, the run stops and lists them.
+Lines are `key=value`. The key must be exactly `model`, `num_ctx`, `thinking`, `temperature`, `top_p`, `top_k`, or `repeat_penalty`. A different case, hyphen, or space (`Num Ctx`, `num-ctx`) stops the run. `alpha` and `alpha:latest` are the same model. Two files may name the same model when the settings differ; those are different runs. Pass `--inference-configuration` with the file you want. If more than one file matches and you omit `--inference-configuration`, the run stops and lists them.
 
 `inference_config/qwen3-32b.conf`:
 
@@ -222,7 +222,7 @@ top_k=20
 
 Other recorded setups: `llama3.3:70b` (`num_ctx` 16384), `granite4.2:30b` (65536, `thinking=high`), `deepseek-r1:32b` (65536, `thinking=true`), `command-r:latest` (131072), `gemma4:31b` (32768, `thinking=true`), `gemma4:26b` (32768, `thinking=true`), `glm-4.7-flash:q4_K_M` (202752, `thinking=true`), `mistral-small3.2:24b` (131072), `mistral-nemo:12b` (131072), `phi3:medium-128k` (131072), `foundation-sec-8b-instruct` (131072), and `cyberpal2-20b:latest` (8192, `thinking=medium`). Models that do not support thinking omit that line. Granite 4.2 accepts `false`, `low`, `medium`, and `high`. CyberPal 2.0 uses `thinking=medium`. Qwen3, DeepSeek-R1, Gemma 4, and GLM-4.7-Flash are on or off (`thinking=true` or `false`).
 
-`compare_models.py` loads the chosen inference configuration before the first inference call, prints it, and copies it into the results directory. A model with no file is reported as having no declared inference configuration. If an uncommented weight quant differs from the installed Ollama quantization, the recorded snapshot keeps both and the run prints the difference. A malformed inference configuration stops the run before any results directory is created. `num_ctx` must be one positive integer written as digits only (commas are rejected). `temperature` is a non-negative decimal, `top_p` is a decimal from 0 through 1, and `top_k` is a positive integer.
+`compare_models.py` loads the chosen inference configuration before the first inference call, prints it, and copies it into the results directory. A model with no file is reported as having no declared inference configuration. A malformed inference configuration stops the run before any results directory is created. `num_ctx` must be one positive integer written as digits only (commas are rejected). `temperature` is a non-negative decimal, `top_p` is a decimal from 0 through 1, and `top_k` is a positive integer.
 
 | Inference configuration key | Request field | If the line is absent |
 | --- | --- | --- |
@@ -236,7 +236,7 @@ Other recorded setups: `llama3.3:70b` (`num_ctx` 16384), `granite4.2:30b` (65536
 
 The harness asks Ollama (`/api/show`) and sends `think` only when the model lists the `thinking` capability. Models without that capability reject the argument. Qwen3-class models think by default when the API omits `think`, so those models always receive an explicit value. An inference configuration that sets `thinking` for a model without the capability stops the run before any chat call. Set `THINK` in `shared/harness.py` to `True` or `False` before a run whose inference configuration has no `thinking` line. Thinking tokens and the final answer share `num_ctx`.
 
-Weight precision, KV cache, and repeat penalty are optional and absent from the checked-in files. The expected KV cache type is `f16` (`OLLAMA_KV_CACHE_TYPE` on the Ollama server). It is recorded on each hunt and is not sent as a chat option. The saved inference configuration is what distinguishes two runs of the same model when those settings later differ.
+Repeat penalty is optional and absent from the checked-in files. The installed model's quantization comes from the Ollama model named by `model`. The expected KV cache type is `f16` (`OLLAMA_KV_CACHE_TYPE` on the Ollama server). It is recorded on each hunt and is not sent as a chat option. The saved inference configuration is what distinguishes two runs of the same model when the settings differ.
 
 ## Compare models
 

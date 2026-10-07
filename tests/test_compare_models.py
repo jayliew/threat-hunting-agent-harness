@@ -1416,6 +1416,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             "model=alpha\nweight_precision=Q4_K_M\n",
             "model=alpha\nweight_quant=Q4_K_M\n",
             "model=alpha\nkv_cache=f16\n",
+            "model=alpha\nrepeat_penalty=1.0\n",
         )
         for text in rejected:
             with self.assertRaises(ValueError) as error:

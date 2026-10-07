@@ -211,16 +211,12 @@ Supported keys are:
 - `temperature`
 - `top_p`
 - `top_k`
-- `weight_precision`
-- `weight_quant`
-- `kv_cache`
-- `repeat_penalty`
 
 Uncommented values override Ollama or Modelfile defaults for that request. The runner validates names and values, prints the selected configuration, and copies it into the result directory before inference. If multiple configurations name the same model, select one or more with `--inference-configuration`.
 
 Request defaults in `shared/harness.py` are `num_ctx=32768`, `thinking=false`, `temperature=0`, `seed=0`, `num_predict=-1`, and context shifting disabled. `top_p` and `top_k` are omitted unless configured. Thinking and final output share the context window. The harness sends `think` only to models that advertise the capability.
 
-The checked-in configurations record model-specific context and thinking settings. Optional weight, KV-cache, and repeat-penalty fields document the environment; only request fields are sent to Ollama. The expected server-side KV cache is `f16`.
+The checked-in configurations record model-specific context and thinking settings. The installed model's quantization comes from the Ollama model named by `model`. The expected server-side KV cache is `f16` (`OLLAMA_KV_CACHE_TYPE`). It is recorded on each hunt and is not sent as a chat option.
 
 ## Hunt and validation behavior
 

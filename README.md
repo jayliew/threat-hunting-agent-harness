@@ -106,6 +106,7 @@ The suite currently recognizes these Ollama names:
 - `gpt-oss:20b`
 - `granite4.2:30b`
 - `llama3.3:70b`
+- `muse-glimmer:30b-mlx`
 - `mistral-nemo:12b`
 - `mistral-small3.2:24b`
 - `mistral-small3.2:latest`
@@ -117,6 +118,7 @@ Most are installed directly with `ollama run NAME` or `ollama pull NAME`. For ex
 ```bash
 ollama run deepseek-r1:32b
 ollama run gemma4:31b
+ollama run muse-glimmer:30b-mlx
 ollama run glm-4.7-flash:q4_K_M
 ollama run gpt-oss:20b
 ollama run granite4.2:30b
@@ -246,12 +248,25 @@ Each model uses one prompt across inference configurations.
 
 ## Results
 
-### Example results
+### 12 October 2026
 
-Preview a completed October 2026 comparison (15 configurations × 7 cases):
+**TLDR:** Both models identify the six clear cases, and neither fully handles the opaque transfers in c07. `muse-glimmer:30b-mlx` is slightly ahead of `gemma4:26b` (6/7 vs 5/7) because it keeps restraint on every case (7/7 vs 5/7).
 
-- [Threat hunt grading](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/main/results/03-Oct-2026-Sat_08-57pm-ET/threat-hunt-grading.html): human-reviewed grading of the 105 evaluations—rankings, rubric, failures, and per-run scores for interpretation, evidence, restraint, and output validity.
+2 configurations × 7 cases: `muse-glimmer:30b-mlx` and `gemma4:26b`.
+
+- [Threat hunt grading](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/dev/results/12-Oct-2026-Mon_10-07pm-ET/threat-hunt-grading.html): grading (by GPT 6.1 Sol on high thinking) of the 14 evaluations—per-case scores for interpretation, evidence, restraint, and output validity.
+- [Model comparison report](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/dev/results/12-Oct-2026-Mon_10-07pm-ET/report.html): harness-generated `report.html` for that run—summary table of verdicts, output status, timings, context/token use, plus full answers and prompts.
+
+### 3 October 2026
+
+**TLDR:** Top three are `gemma4:26b` (6/7), `gemma4:31b` (5/7), and `mistral-small3.2:latest` (4/7). Only 32 of 105 runs pass, and none pass c07.
+
+15 configurations × 7 cases.
+
+- [Threat hunt grading](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/main/results/03-Oct-2026-Sat_08-57pm-ET/threat-hunt-grading.html): grading (by GPT-6.1 Sol "high") of the 105 evaluations—rankings, rubric, failures, and per-run scores for interpretation, evidence, restraint, and output validity.
 - [Model comparison report](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/main/results/03-Oct-2026-Sat_08-57pm-ET/report.html): harness-generated `report.html` for that run—summary table of verdicts, output status, timings, context/token use, plus full answers and prompts.
+
+### Run directories
 
 Every run directory contains:
 
@@ -278,6 +293,7 @@ The harness sends ordinary message text and relies on the installed Ollama templ
 | Mistral Small     | `[SYSTEM_PROMPT]`, `[/SYSTEM_PROMPT]`, `[INST]`, `[/INST]`                                |
 | Mistral Nemo      | `[INST]`, `[/INST]`, and `.System`                                                        |
 | Gemma 4           | `RENDERER gemma4` or `RENDERER gemma4-large`                                              |
+| Muse Glimmer      | `RENDERER glimmer` and `PARSER glimmer`                                                   |
 | GLM-4.7           | `RENDERER glm-4.7` and `PARSER glm-4.7`                                                   |
 | Granite 4         | `<\|im_start\|>` and `<\|im_end\|>`                                                       |
 | DeepSeek-R1       | `<｜User｜>` and `<｜Assistant｜>`                                                        |

@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Threat-hunting evaluation · graded by GPT 6.1 Sol</title>
+<style>
+:root{color-scheme:dark;--ink:#e7eef5;--muted:#9aabbd;--line:#2c3d4e;--paper:#0d141c;--white:#172230;--blue:#7ec8ea;--teal:#5dccb8;--red:#f0a3a7;--pale-red:#3d2428;--pale-green:#16332c}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+a{color:var(--blue)}.wrap{max-width:1200px;margin:auto;padding:0 28px}.hero{background:linear-gradient(120deg,#08141f,#123848);color:#f4f8fb;padding:52px 0 42px}
+.eyebrow{font-size:12px;letter-spacing:.13em;text-transform:uppercase;font-weight:700;color:#a9e2de;margin:0 0 8px}h1{font-size:clamp(30px,4vw,48px);line-height:1.13;letter-spacing:-.035em;margin:0 0 14px;max-width:850px}
+.hero p{max-width:830px;color:#d5e6ee;margin:0;font-size:17px}main{padding:30px 0 70px}section{margin:0 0 30px}.lead{font-size:17px;max-width:880px;margin:0 0 20px}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:22px 0}.metric{background:var(--white);border:1px solid var(--line);border-radius:14px;padding:18px 20px;box-shadow:0 3px 12px rgba(0,0,0,.22)}
+.metric strong{display:block;font-size:31px;line-height:1.1;letter-spacing:-.03em}.metric span{display:block;color:var(--muted);margin-top:5px;font-size:13px}
+.panel{background:var(--white);border:1px solid var(--line);border-radius:16px;padding:25px;box-shadow:0 8px 28px rgba(0,0,0,.28)}h2{font-size:23px;line-height:1.25;letter-spacing:-.02em;margin:0 0 14px}h3{margin:0;font-size:17px}
+.summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.summary-grid p{margin:6px 0 0}.callout{background:#2c2616;border-left:4px solid #e0a84a;border-radius:6px;padding:13px 16px;margin-top:18px;color:#f3e6c8}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:15px 0}button{font:inherit;border:1px solid #3d5266;background:#1c2c3c;color:var(--ink);border-radius:999px;padding:7px 13px;cursor:pointer}button.active{background:#1a7a96;color:#f4fbfc;border-color:#1a7a96}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #edb741;outline-offset:2px}
+.table-scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:920px;font-size:13px}th{text-align:left;color:#9aabbd;font-size:11px;text-transform:uppercase;letter-spacing:.07em;background:#1a2836}td,th{padding:11px 9px;border-bottom:1px solid var(--line);vertical-align:top}tbody tr:hover{background:#1e3040}td:first-child{min-width:170px}td:nth-child(2){min-width:175px}.pill{display:inline-block;white-space:nowrap;border-radius:999px;padding:3px 9px;font-size:12px;line-height:1.4;font-weight:700}.pill.pass{background:var(--pale-green);color:#8ee0d0}.pill.fail{background:var(--pale-red);color:#f5b8bb}
+.case-section{scroll-margin-top:20px}.case-heading{display:flex;align-items:flex-start;gap:15px;margin:36px 0 15px}.case-heading h2{margin:0 0 4px}.case-heading p{margin:0;color:var(--muted);max-width:930px}.case-id{font-weight:800;color:#8ee0d4;background:#163832;border-radius:8px;padding:4px 9px;margin-top:2px}
+.model-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.model-card{background:var(--white);border:1px solid var(--line);border-radius:14px;padding:20px;min-width:0}.model-head{display:flex;justify-content:space-between;align-items:start;gap:8px;flex-wrap:wrap}.response-line{font-size:13px;color:var(--muted);margin:8px 0 16px}.checks{display:grid;gap:9px}.check{border-top:1px solid var(--line);padding-top:9px}.check>div{display:flex;align-items:center;gap:8px}.check p{margin:4px 0 0;font-size:13px}details{border-top:1px solid var(--line);margin-top:14px;padding-top:11px}summary{cursor:pointer;font-weight:700;color:var(--blue)}.response{font-size:13px;word-break:break-word;color:#c5d4e2}.response p{margin:9px 0}.methods{font-size:14px}.methods p{margin:7px 0}code{background:#243444;color:#e7eef5;padding:1px 4px;border-radius:4px;word-break:break-all}.fine{color:var(--muted);font-size:12px}[hidden]{display:none!important}
+@media(max-width:760px){.wrap{padding:0 16px}.hero{padding:38px 0}.metrics{grid-template-columns:1fr}.summary-grid,.model-grid{grid-template-columns:1fr}.panel{padding:18px}}
+</style></head><body>
+<header class="hero"><div class="wrap"><p class="eyebrow"><span style="text-transform:none">Graded by GPT 6.1 Sol · high thinking</span> · 12 October 2026 run</p><h1>Both models identify six clear cases; opaque transfers expose the limit</h1><p>Fourteen responses, seven independent scenarios, two model configurations. Graded by GPT 6.1 Sol on high thinking, using the supplied answer keys and each model’s actual citations and explanations.</p></div></header>
+<main class="wrap">
+<section aria-labelledby="summary-title"><h2 id="summary-title">Executive summary</h2>
+<p class="lead">11 of 14 responses pass all three analytical checks; all 14 pass the harness output-format checks. Both models identify the six cases with a supported suspicious or benign verdict. Neither handles c07 fully under the answer key.</p>
+<div class="metrics"><div class="metric"><strong>6/7</strong><span>muse-glimmer:30b-mlx analytical passes</span></div><div class="metric"><strong>5/7</strong><span>gemma4:26b analytical passes</span></div><div class="metric"><strong>14/14</strong><span>Valid output formats</span></div></div>
+<div class="panel"><div class="summary-grid"><div><h3>muse-glimmer:30b-mlx</h3><p>Passes 6 of 7 cases. Its c07 answer acknowledges uncertainty, but its suspicious/exfiltration label lacks a basis to prefer malicious transfer, and it omits the installed-client citation. Checks: interpretation 6/7, evidence 6/7, restraint 7/7.</p></div>
+<div><h3>gemma4:26b</h3><p>Passes 5 of 7 cases. In c06 it adds unsupported “hardware-backed” credential detail. In c07 it infers defense evasion and misreads an unrelated download-heavy flow. Checks: interpretation 6/7, evidence 6/7, restraint 5/7.</p></div></div>
+<div class="callout"><b>c07 review judgment.</b> The key allows a well-supported suspicious alternative. Neither answer establishes why the transfer should be judged malicious rather than unresolved: no record links the installed sync client to the flows, and the sensor gap does not imply tampering. The muse response is narrower and passes restraint; the gemma response adds unsupported claims.</div></div></section>
+<section class="panel" aria-labelledby="matrix-title"><h2 id="matrix-title">Grade matrix</h2><p class="fine">I = Interpretation · E = Evidence · R = Restraint. An analytical pass requires all three. Format validity is shown separately.</p>
+<div class="toolbar" role="group" aria-label="Filter grades"><button class="active" data-filter="all">All responses</button><button data-filter="failed">Analytical failures</button><button data-filter="muse-glimmer:30b-mlx">muse-glimmer</button><button data-filter="gemma4:26b">gemma4</button></div>
+<div class="table-scroll"><table><thead><tr><th>Case</th><th>Model</th><th>Key verdict</th><th>Model verdict</th><th>Format</th><th>I</th><th>E</th><th>R</th><th>Overall</th></tr></thead><tbody><tr data-model="muse-glimmer:30b-mlx" data-passed="1">
+            <td><a href="#case-c01"><strong>c01</strong> · HTTP beaconing</a></td>
+            <td>muse-glimmer:30b-mlx</td>
+            <td>Suspicious</td>
+            <td>suspicious</td>
+            <td><span class="pill pass">Valid</span></td>
+            <td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td>
+            <td><span class="pill pass">Pass</span></td></tr><tr data-model="gemma4:26b" data-passed="1">
+            <td><a href="#case-c01"><strong>c01</strong> · HTTP beaconing</a></td>
+            <td>gemma4:26b</td>
+            <td>Suspicious</td>
+            <td>suspicious</td>
+            <td><span class="pill pass">Valid</span></td>
+            <td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td>
+            <td><span class="pill pass">Pass</span></td></tr><tr data-model="muse-glimmer:30b-mlx" data-passed="1">
+            <td><a href="#case-c02"><strong>c02</strong> · Internal network scanning</a></td>
+            <td>muse-glimmer:30b-mlx</td>
+            <td>Suspicious</td>
+            <td>suspicious</td>
+            <td><span class="pill pass">Valid</span></td>
+            <td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td>
+            <td><span class="pill pass">Pass</span></td></tr><tr data-model="gemma4:26b" data-passed="1">
+            <td><a href="#case-c02"><strong>c02</strong> · Internal network scanning</a></td>
+            <td>gemma4:26b</td>
+            <td>Suspicious</td>
+            <td>suspicious</td>
+            <td><span class="pill pass">Valid</span></td>
+            <td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td>
+            <td><span class="pill pass">Pass</span></td></tr><tr data-model="muse-glimmer:30b-mlx" data-passed="1">
+            <td><a href="#case-c03"><strong>c03</strong> · Managed telemetry</a></td>
+            <td>muse-glimmer:30b-mlx</td>
+            <td>Benign</td>
+            <td>benign</td>
+            <td><span class="pill pass">Valid</span></td>
+            <td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td>
+            <td><span class="pill pass">Pass</span></td></tr><tr data-model="gemma4:26b" data-passed="1">
+            <td><a href="#case-c03"><strong>c03</strong> · Managed telemetry</a></td>
+            <td>gemma4:26b</td>
+            <td>Benign</td>
+            <td>benign</td>
+            <td><span class="pill pass">Valid</span></td>
+            <td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td>
+            <td><span class="pill pass">Pass</span></td></tr><tr data-model="muse-glimmer:30b-mlx" data-passed="1">
+            <td><a href="#case-c04"><strong>c04</strong> · Password spray pattern</a></td>
+            <td>muse-glimmer:30b-mlx</td>
+            <td>Suspicious</td>
+            <td>suspicious</td>
+            <td><span class="pill pass">Valid</span></td>
+            <td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td>
+            <td><span class="pill pass">Pass</span></td></tr><tr data-model="gemma4:26b" data-passed="1">
+            <td><a href="#case-c04"><strong>c04</strong> · Password spray pattern</a></td>
+            <td>gemma4:26b</td>
+            <td>Suspicious</td>
+            <td>suspicious</td>
+            <td><span class="pill pass">Valid</span></td>
+            <td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td>
+            <td><span class="pill pass">Pass</span></td></tr><tr data-model="muse-glimmer:30b-mlx" data-passed="1">
+            <td><a href="#case-c05"><strong>c05</strong> · Scheduled discovery</a></td>
+            <td>muse-glimmer:30b-mlx</td>
+            <td>Benign</td>
+            <td>benign</td>
+            <td><span class="pill pass">Valid</span></td>
+            <td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td>
+            <td><span class="pill pass">Pass</span></td></tr><tr data-model="gemma4:26b" data-passed="1">
+            <td><a href="#case-c05"><strong>c05</strong> · Scheduled discovery</a></td>
+            <td>gemma4:26b</td>
+            <td>Benign</td>
+            <td>benign</td>
+            <td><span class="pill pass">Valid</span></td>
+            <td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td>
+            <td><span class="pill pass">Pass</span></td></tr><tr data-model="muse-glimmer:30b-mlx" data-passed="1">
+            <td><a href="#case-c06"><strong>c06</strong> · Shared VPN logins</a></td>
+            <td>muse-glimmer:30b-mlx</td>
+            <td>Benign</td>
+            <td>benign</td>
+            <td><span class="pill pass">Valid</span></td>
+            <td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td>
+            <td><span class="pill pass">Pass</span></td></tr><tr data-model="gemma4:26b" data-passed="0">
+            <td><a href="#case-c06"><strong>c06</strong> · Shared VPN logins</a></td>
+            <td>gemma4:26b</td>
+            <td>Benign</td>
+            <td>benign</td>
+            <td><span class="pill pass">Valid</span></td>
+            <td><span class="pill pass">Pass</span></td><td><span class="pill pass">Pass</span></td><td><span class="pill fail">Fail</span></td>
+            <td><span class="pill fail">Fail</span></td></tr><tr data-model="muse-glimmer:30b-mlx" data-passed="0">
+            <td><a href="#case-c07"><strong>c07</strong> · Opaque sync transfers</a></td>
+            <td>muse-glimmer:30b-mlx</td>
+            <td>Inconclusive</td>
+            <td>suspicious</td>
+            <td><span class="pill pass">Valid</span></td>
+            <td><span class="pill fail">Fail</span></td><td><span class="pill fail">Fail</span></td><td><span class="pill pass">Pass</span></td>
+            <td><span class="pill fail">Fail</span></td></tr><tr data-model="gemma4:26b" data-passed="0">
+            <td><a href="#case-c07"><strong>c07</strong> · Opaque sync transfers</a></td>
+            <td>gemma4:26b</td>
+            <td>Inconclusive</td>
+            <td>suspicious</td>
+            <td><span class="pill pass">Valid</span></td>
+            <td><span class="pill fail">Fail</span></td><td><span class="pill fail">Fail</span></td><td><span class="pill fail">Fail</span></td>
+            <td><span class="pill fail">Fail</span></td></tr></tbody></table></div></section>
+<section aria-label="Case-by-case grading"><section class="case-section" id="case-c01">
+      <div class="case-heading"><span class="case-id">c01</span><div><h2>HTTP beaconing</h2><p><b>Key verdict:</b> Suspicious · Near-five-minute, low-byte repeat requests support possible beaconing; destination reputation and malware are unproven.</p></div></div>
+      <div class="model-grid"><article class="model-card" data-model="muse-glimmer:30b-mlx" data-passed="1">
+          <div class="model-head"><h3>muse-glimmer:30b-mlx</h3><span class="pill pass">Analytical pass</span></div>
+          <p class="response-line"><b>Model verdict:</b> suspicious · <b>Threat type:</b> command and control beaconing · <b>Format:</b> valid</p>
+          <div class="checks"><div class="check"><div><span class="pill pass">Pass</span><strong>Interpretation</strong></div><p>Identifies the repeated near-five-minute requests as possible beaconing.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Evidence</strong></div><p>Cites requests across the sequence and connects timing, URL, and 204 responses.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Restraint</strong></div><p>Leaves intent unconfirmed. The reserved-IP and no-domain remarks should not be treated as reputation proof.</p></div></div>
+          <details><summary>Read model response and cited IDs</summary><div class="response"><p>Host 10.47.12.88 ws-014.corp.internal user jlee repeatedly contacts 203.0.113.77:443 with GET /nmtyxs/?12840192 and receives 204 responses at approximately five minute intervals over ~55 minutes, using a generic Mozilla user agent that differs from the Chrome user agents used for other browsing from the same host. The repeated timing, static path and query parameter, reserved destination IP with no resolved domain, and response code are consistent with beaconing, while other traffic from the same host includes routine Office 365, GitHub, LinkedIn and internal SMB/DNS activity, leaving intent unconfirmed.</p><p><b>Evidence IDs:</b> c01-e006, c01-e011, c01-e016, c01-e020, c01-e023, c01-e024, c01-e027, c01-e031, c01-e035, c01-e038, c01-e041, c01-e043</p></div></details>
+        </article><article class="model-card" data-model="gemma4:26b" data-passed="1">
+          <div class="model-head"><h3>gemma4:26b</h3><span class="pill pass">Analytical pass</span></div>
+          <p class="response-line"><b>Model verdict:</b> suspicious · <b>Threat type:</b> Command and Control (C2) beaconing · <b>Format:</b> valid</p>
+          <div class="checks"><div class="check"><div><span class="pill pass">Pass</span><strong>Interpretation</strong></div><p>Recognizes the recurring HTTP pattern as possible C2-style beaconing.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Evidence</strong></div><p>Cites requests across the sequence and connects recurrence, URL, and 204 responses.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Restraint</strong></div><p>Describes a characteristic pattern rather than asserting confirmed malware; C2 wording is close to the evidence limit.</p></div></div>
+          <details><summary>Read model response and cited IDs</summary><div class="response"><p>User jlee (ws-014) demonstrates highly repetitive and periodic HTTP GET requests to a single external IP address (203.0.113.77) using a consistent URL path and query parameter. These requests consistently return a 204 No Content response, which is a characteristic pattern of malware beaconing to a Command and Control (C2) server.</p><p><b>Evidence IDs:</b> c01-e006, c01-e011, c01-e016, c01-e020, c01-e023, c01-e024, c01-e027, c01-e031, c01-e035, c01-e038, c01-e041, c01-e043</p></div></details>
+        </article></div>
+    </section><section class="case-section" id="case-c02">
+      <div class="case-heading"><span class="case-id">c02</span><div><h2>Internal network scanning</h2><p><b>Key verdict:</b> Suspicious · One host systematically probes multiple internal hosts and ports; authorization is absent in this package.</p></div></div>
+      <div class="model-grid"><article class="model-card" data-model="muse-glimmer:30b-mlx" data-passed="1">
+          <div class="model-head"><h3>muse-glimmer:30b-mlx</h3><span class="pill pass">Analytical pass</span></div>
+          <p class="response-line"><b>Model verdict:</b> suspicious · <b>Threat type:</b> port scanning · <b>Format:</b> valid</p>
+          <div class="checks"><div class="check"><div><span class="pill pass">Pass</span><strong>Interpretation</strong></div><p>Recognizes systematic probing across hosts and administrative ports.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Evidence</strong></div><p>Cites the scan attempts across targets and ports.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Restraint</strong></div><p>Does not infer compromise, exploitation, or completed connections.</p></div></div>
+          <details><summary>Read model response and cited IDs</summary><div class="response"><p>From 2026-09-19T14:30:40Z to 2026-09-19T14:31:02Z host 10.47.12.66 ws-031.corp.internal initiates a rapid series of TCP connection attempts to multiple internal server IPs and ports 22,445,3389,5985 with outcomes reset, incomplete or timeout, indicating systematic probing. The pattern is not accompanied by evidence of authorized scanning in the supplied events, and benign DNS, NTP, HTTPS and printer traffic from other hosts is also present in the window.</p><p><b>Evidence IDs:</b> c02-e006, c02-e007, c02-e009, c02-e010, c02-e011, c02-e012, c02-e014, c02-e015, c02-e017, c02-e018, c02-e019, c02-e020, c02-e021, c02-e022, c02-e024, c02-e025, c02-e027, c02-e028, c02-e029, c02-e030, c02-e031, c02-e032, c02-e034, c02-e035, c02-e036, c02-e038, c02-e039, c02-e040, c02-e041, c02-e042, c02-e043, c02-e044</p></div></details>
+        </article><article class="model-card" data-model="gemma4:26b" data-passed="1">
+          <div class="model-head"><h3>gemma4:26b</h3><span class="pill pass">Analytical pass</span></div>
+          <p class="response-line"><b>Model verdict:</b> suspicious · <b>Threat type:</b> Network Scanning · <b>Format:</b> valid</p>
+          <div class="checks"><div class="check"><div><span class="pill pass">Pass</span><strong>Interpretation</strong></div><p>Recognizes multi-host, multi-port network scanning.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Evidence</strong></div><p>Cites the probe series across the targets and ports.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Restraint</strong></div><p>Does not claim successful lateral movement or exploitation.</p></div></div>
+          <details><summary>Read model response and cited IDs</summary><div class="response"><p>Host ws-031.corp.internal (10.47.12.66) performed sequential connection attempts to multiple servers (srv-020 through srv-027) across various administrative ports, including SSH (22), SMB (445), RDP (3389), and WinRM (5985). Most of these connection attempts resulted in failures such as resets, timeouts, or incomplete handshakes, which is characteristic of network scanning or reconnaissance activity.</p><p><b>Evidence IDs:</b> c02-e006, c02-e007, c02-e009, c02-e010, c02-e011, c02-e012, c02-e014, c02-e015, c02-e017, c02-e018, c02-e019, c02-e020, c02-e021, c02-e022, c02-e024, c02-e025, c02-e027, c02-e028, c02-e029, c02-e030, c02-e031, c02-e032, c02-e034, c02-e035, c02-e036, c02-e038, c02-e039, c02-e040, c02-e041, c02-e042, c02-e043, c02-e044</p></div></details>
+        </article></div>
+    </section><section class="case-section" id="case-c03">
+      <div class="case-heading"><span class="case-id">c03</span><div><h2>Managed telemetry</h2><p><b>Key verdict:</b> Benign · Deployment configuration, process identity, endpoint connections, and proxy requests align.</p></div></div>
+      <div class="model-grid"><article class="model-card" data-model="muse-glimmer:30b-mlx" data-passed="1">
+          <div class="model-head"><h3>muse-glimmer:30b-mlx</h3><span class="pill pass">Analytical pass</span></div>
+          <p class="response-line"><b>Model verdict:</b> benign · <b>Threat type:</b> none · <b>Format:</b> valid</p>
+          <div class="checks"><div class="check"><div><span class="pill pass">Pass</span><strong>Interpretation</strong></div><p>Explains that the observed traffic matches managed telemetry.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Evidence</strong></div><p>Links deployment, process, endpoint connections, and proxy requests.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Restraint</strong></div><p>Limits the conclusion to the matched traffic and notes unrelated browsing lacks process attribution.</p></div></div>
+          <details><summary>Read model response and cited IDs</summary><div class="response"><p>Endpoint ws-014 had configuration DEP-2048 applied for corp-telemetry-agent 4.2.1 with endpoint_url https://203.0.113.77/v1/status, period_seconds 300 and jitter_seconds 15, and telemetry-agent.exe was started by services.exe with matching sha256 and service account SYSTEM. Repeated connection-opened events from proc-014-telemetry-77 pid 4180 to 203.0.113.77:443 are paired with proxy access logs for GET https://203.0.113.77/v1/status with user_agent CorpTelemetry/4.2.1 at approximately 5-minute intervals, consistent with the configured schedule. Two proxy accesses to portal.jayliew.com from the same host lack process attribution, leaving their origin unconfirmed.</p><p><b>Evidence IDs:</b> c03-e001, c03-e002, c03-e003, c03-e004, c03-e005, c03-e006, c03-e007, c03-e008, c03-e009, c03-e010, c03-e012, c03-e013, c03-e014, c03-e015, c03-e016, c03-e017, c03-e018, c03-e019, c03-e020, c03-e021, c03-e023, c03-e024, c03-e025, c03-e026, c03-e027, c03-e028</p></div></details>
+        </article><article class="model-card" data-model="gemma4:26b" data-passed="1">
+          <div class="model-head"><h3>gemma4:26b</h3><span class="pill pass">Analytical pass</span></div>
+          <p class="response-line"><b>Model verdict:</b> benign · <b>Threat type:</b> none · <b>Format:</b> valid</p>
+          <div class="checks"><div class="check"><div><span class="pill pass">Pass</span><strong>Interpretation</strong></div><p>Matches periodic telemetry to the supplied deployment policy.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Evidence</strong></div><p>Cites deployment, process, endpoint, and proxy events.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Restraint</strong></div><p>Makes no unsupported malware or blanket-safety claim.</p></div></div>
+          <details><summary>Read model response and cited IDs</summary><div class="response"><p>The deployment and periodic heartbeats of the CorpTelemetry agent are consistent with the provided configuration policy. The agent telemetry-agent.exe (PID 4180) makes GET requests to 203.0.113.77/v1/status at approximately 5-minute intervals, which aligns with the configured 300-second period and jitter.</p><p><b>Evidence IDs:</b> c03-e001, c03-e002, c03-e003, c03-e004, c03-e005, c03-e006, c03-e007, c03-e008, c03-e009, c03-e010, c03-e012, c03-e013, c03-e014, c03-e015, c03-e016, c03-e017, c03-e018, c03-e019, c03-e020, c03-e021, c03-e023, c03-e024, c03-e025, c03-e026, c03-e027, c03-e028</p></div></details>
+        </article></div>
+    </section><section class="case-section" id="case-c04">
+      <div class="case-heading"><span class="case-id">c04</span><div><h2>Password spray pattern</h2><p><b>Key verdict:</b> Suspicious · One source fails across six accounts, then succeeds as Bob; takeover is not proven.</p></div></div>
+      <div class="model-grid"><article class="model-card" data-model="muse-glimmer:30b-mlx" data-passed="1">
+          <div class="model-head"><h3>muse-glimmer:30b-mlx</h3><span class="pill pass">Analytical pass</span></div>
+          <p class="response-line"><b>Model verdict:</b> suspicious · <b>Threat type:</b> password spray · <b>Format:</b> valid</p>
+          <div class="checks"><div class="check"><div><span class="pill pass">Pass</span><strong>Interpretation</strong></div><p>Recognizes six-account password-spray pattern followed by Bob’s success.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Evidence</strong></div><p>Cites representative failures and the subsequent success.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Restraint</strong></div><p>Calls the attack potential rather than claiming account takeover.</p></div></div>
+          <details><summary>Read model response and cited IDs</summary><div class="response"><p>An external source 198.51.100.7 performed six rapid invalid_credentials logon failures for distinct users alice, bob, carol, dave, erin and frank between 10:00:00 and 10:02:30, followed by a successful logon for bob from the same source at 10:04:00, indicating a potential password spray/brute-force attempt with a subsequent successful authentication. Internal source logons show normal success/failure patterns with no comparable clustering.</p><p><b>Evidence IDs:</b> c04-e005,c04-e006,c04-e007,c04-e008,c04-e009,c04-e010,c04-e011</p></div></details>
+        </article><article class="model-card" data-model="gemma4:26b" data-passed="1">
+          <div class="model-head"><h3>gemma4:26b</h3><span class="pill pass">Analytical pass</span></div>
+          <p class="response-line"><b>Model verdict:</b> suspicious · <b>Threat type:</b> credential stuffing · <b>Format:</b> valid</p>
+          <div class="checks"><div class="check"><div><span class="pill pass">Pass</span><strong>Interpretation</strong></div><p>Recognizes the single-source, many-account credential attack pattern and Bob’s success.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Evidence</strong></div><p>Cites failures for the six users and Bob’s success.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Restraint</strong></div><p>“Indicative” keeps credential stuffing hypothetical; exact attack method remains unproven.</p></div></div>
+          <details><summary>Read model response and cited IDs</summary><div class="response"><p>An external IP address (198.51.100.7) attempted to authenticate against multiple distinct user accounts (alice, bob, carol, dave, erin, and frank) with a series of failed attempts, followed by a successful login for user &#x27;bob&#x27; from the same IP address. This pattern of multiple failed attempts across different usernames from a single source is indicative of a credential stuffing attack.</p><p><b>Evidence IDs:</b> c04-e005, c04-e006, c04-e007, c04-e008, c04-e009, c04-e010, c04-e011</p></div></details>
+        </article></div>
+    </section><section class="case-section" id="case-c05">
+      <div class="case-heading"><span class="case-id">c05</span><div><h2>Scheduled discovery</h2><p><b>Key verdict:</b> Benign · Approval, job records, and observed targets, ports, and time window match.</p></div></div>
+      <div class="model-grid"><article class="model-card" data-model="muse-glimmer:30b-mlx" data-passed="1">
+          <div class="model-head"><h3>muse-glimmer:30b-mlx</h3><span class="pill pass">Analytical pass</span></div>
+          <p class="response-line"><b>Model verdict:</b> benign · <b>Threat type:</b> none · <b>Format:</b> valid</p>
+          <div class="checks"><div class="check"><div><span class="pill pass">Pass</span><strong>Interpretation</strong></div><p>Identifies authorized discovery within the approved scope.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Evidence</strong></div><p>Connects approval and launch to scan flows and job completion.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Restraint</strong></div><p>Does not equate connection failures with failed job execution or exploitation.</p></div></div>
+          <details><summary>Read model response and cited IDs</summary><div class="response"><p>A nmap discovery job was launched from 10.47.12.66 / ws-031.corp.internal as svc-vulnscan within the approved change window CHG-4821 against the authorized target IPs and ports, and firewall connection records show the corresponding TCP attempts with a mix of established, reset and timeout outcomes matching the job completion summary.</p><p><b>Evidence IDs:</b> c05-e001, c05-e002, c05-e003, c05-e005, c05-e015, c05-e017, c05-e033, c05-e039</p></div></details>
+        </article><article class="model-card" data-model="gemma4:26b" data-passed="1">
+          <div class="model-head"><h3>gemma4:26b</h3><span class="pill pass">Analytical pass</span></div>
+          <p class="response-line"><b>Model verdict:</b> benign · <b>Threat type:</b> none · <b>Format:</b> valid</p>
+          <div class="checks"><div class="check"><div><span class="pill pass">Pass</span><strong>Interpretation</strong></div><p>Identifies the scan as aligned with an approved change.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Evidence</strong></div><p>Cites approval, job records, and matching network attempts.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Restraint</strong></div><p>Avoids claims of exploitation or authentication.</p></div></div>
+          <details><summary>Read model response and cited IDs</summary><div class="response"><p>An infrastructure discovery scan was performed using `nmap` by the `svc-vulnscan` service account from host `ws-031.corp.internal` (10.47.12.66). The activity, which targeted specific IPs and ports, aligns exactly with the parameters of approved change request `CHG-4821`, and the scan completion record is consistent with the observed network connection attempts.</p><p><b>Evidence IDs:</b> c05-e001, c05-e002, c05-e003, c05-e004, c05-e005, c05-e006, c05-e007, c05-e008, c05-e009, c05-e010, c05-e012, c05-e013, c05-e014, c05-e015, c05-e016, c05-e017, c05-e018, c05-e019, c05-e021, c05-e022, c05-e023, c05-e024, c05-e025, c05-e026, c05-e027, c05-e028, c05-e029, c05-e030, c05-e031, c05-e032, c05-e033, c05-e035, c05-e036, c05-e037, c05-e038, c05-e039</p></div></details>
+        </article></div>
+    </section><section class="case-section" id="case-c06">
+      <div class="case-heading"><span class="case-id">c06</span><div><h2>Shared VPN logins</h2><p><b>Key verdict:</b> Benign · Distinct VPN device/session bindings explain the shared egress IP; retries complete with registered FIDO2 and issued sessions.</p></div></div>
+      <div class="model-grid"><article class="model-card" data-model="muse-glimmer:30b-mlx" data-passed="1">
+          <div class="model-head"><h3>muse-glimmer:30b-mlx</h3><span class="pill pass">Analytical pass</span></div>
+          <p class="response-line"><b>Model verdict:</b> benign · <b>Threat type:</b> none · <b>Format:</b> valid</p>
+          <div class="checks"><div class="check"><div><span class="pill pass">Pass</span><strong>Interpretation</strong></div><p>Explains shared VPN egress and separate device-bound authentication sequences.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Evidence</strong></div><p>Cites VPN, password, FIDO2, and issued-session records.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Restraint</strong></div><p>Frames a mistyped password as a possibility, not an observed cause.</p></div></div>
+          <details><summary>Read model response and cited IDs</summary><div class="response"><p>Six users established VPN tunnels with device-certificate and FIDO2 authentication from distinct source IPs, then authenticated to the employee-portal from the shared VPN egress IP 198.51.100.7 with device binding verified, matching VPN session IDs, password verification followed by successful registered FIDO2 MFA and session issuance; each user shows a single password failure immediately followed by a successful password verification, consistent with a mistyped password before completing the authorized password + FIDO2 flow.</p><p><b>Evidence IDs:</b> c06-e001,c06-e002,c06-e003,c06-e004,c06-e005,c06-e006,c06-e007,c06-e008,c06-e009,c06-e010,c06-e011,c06-e012,c06-e013,c06-e014,c06-e015,c06-e016,c06-e017,c06-e018,c06-e019,c06-e020,c06-e021,c06-e022,c06-e023,c06-e024,c06-e025,c06-e026,c06-e027,c06-e028,c06-e029,c06-e030</p></div></details>
+        </article><article class="model-card" data-model="gemma4:26b" data-passed="0">
+          <div class="model-head"><h3>gemma4:26b</h3><span class="pill fail">Analytical fail</span></div>
+          <p class="response-line"><b>Model verdict:</b> benign · <b>Threat type:</b> none · <b>Format:</b> valid</p>
+          <div class="checks"><div class="check"><div><span class="pill pass">Pass</span><strong>Interpretation</strong></div><p>Explains separate VPN sessions, shared egress, and completed login flows.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Evidence</strong></div><p>Cites tunnel, retry, FIDO2, and session-issuance events.</p></div><div class="check"><div><span class="pill fail">Fail</span><strong>Restraint</strong></div><p>Calls the FIDO2 credentials “hardware-backed”; the records show registered verification, not hardware backing.</p></div></div>
+          <details><summary>Read model response and cited IDs</summary><div class="response"><p>Six users (erin, bob, frank, alice, dave, and carol) established VPN tunnels using device certificates and FIDO2 (c06-e001 to c06-e006). Following these connections, each user successfully accessed the employee portal after a single failed password attempt (c06-e007 to c06-e030). The application authentication events corroborate authorized activity as the source IP matches the users&#x27; VPN egress IP (198.51.100.7), and the sessions are explicitly linked to the established VPN sessions and verified hardware-backed FIDO2 credentials.</p><p><b>Evidence IDs:</b> c06-e001, c06-e002, c06-e003, c06-e004, c06-e005, c06-e006, c06-e007, c06-e008, c06-e009, c06-e010, c06-e011, c06-e012, c06-e013, c06-e014, c06-e015, c06-e016, c06-e017, c06-e018, c06-e019, c06-e020, c06-e021, c06-e022, c06-e023, c06-e024, c06-e025, c06-e026, c06-e027, c06-e028, c06-e029, c06-e030</p></div></details>
+        </article></div>
+    </section><section class="case-section" id="case-c07">
+      <div class="case-heading"><span class="case-id">c07</span><div><h2>Opaque sync transfers</h2><p><b>Key verdict:</b> Inconclusive · Two upload-heavy TLS flows lack process and payload attribution; an installed sync client does not establish their origin.</p></div></div>
+      <div class="model-grid"><article class="model-card" data-model="muse-glimmer:30b-mlx" data-passed="0">
+          <div class="model-head"><h3>muse-glimmer:30b-mlx</h3><span class="pill fail">Analytical fail</span></div>
+          <p class="response-line"><b>Model verdict:</b> suspicious · <b>Threat type:</b> data exfiltration · <b>Format:</b> valid</p>
+          <div class="checks"><div class="check"><div><span class="pill fail">Fail</span><strong>Interpretation</strong></div><p>Labels the case suspicious/exfiltration without a supported reason to prefer malicious transfer over unverified sync; the key favors inconclusive.</p></div><div class="check"><div><span class="pill fail">Fail</span><strong>Evidence</strong></div><p>Cites DNS, flows, and sensor gap but omits c07-e001, the installed-client record invoked in its explanation.</p></div><div class="check"><div><span class="pill pass">Pass</span><strong>Restraint</strong></div><p>Says intent is uncertain and does not claim confirmed exfiltration, a file upload, or deliberate sensor interference.</p></div></div>
+          <details><summary>Read model response and cited IDs</summary><div class="response"><p>Host 10.47.12.104 lost endpoint sensor attribution from 09:01:00 to 09:13:30 with no buffered events, and during that visibility gap two large outbound TCP uploads to 203.0.113.84 resolved via sync-gateway.example.net occurred with application payload and originating process not recorded, while prior activity shows routine internal browsing and corp-file-sync is inventoried, leaving intent uncertain.</p><p><b>Evidence IDs:</b> c07-e002,c07-e008,c07-e003,c07-e004,c07-e006,c07-e007</p></div></details>
+        </article><article class="model-card" data-model="gemma4:26b" data-passed="0">
+          <div class="model-head"><h3>gemma4:26b</h3><span class="pill fail">Analytical fail</span></div>
+          <p class="response-line"><b>Model verdict:</b> suspicious · <b>Threat type:</b> Data Exfiltration · <b>Format:</b> valid</p>
+          <div class="checks"><div class="check"><div><span class="pill fail">Fail</span><strong>Interpretation</strong></div><p>Calls the ambiguous flows exfiltration and treats the sensor outage as attack evidence; the key supports no firm benign or malicious verdict.</p></div><div class="check"><div><span class="pill fail">Fail</span><strong>Evidence</strong></div><p>Omits the second DNS answer c07-e006 and inventory c07-e001; c07-e021 is a separate download-heavy background flow.</p></div><div class="check"><div><span class="pill fail">Fail</span><strong>Restraint</strong></div><p>Infers defense evasion without evidence and wrongly groups c07-e021 with large outbound transfers.</p></div></div>
+          <details><summary>Read model response and cited IDs</summary><div class="response"><p>The EDR sensor on workstation `ws-044` was disconnected between 09:01:00 and 09:13:30, resulting in a visibility gap where no buffered process or network attribution events were available (`c07-e002`, `c07-e008`). During this period of sensor inactivity, significant outbound data transfers were recorded to external IP addresses, including multiple large flows to `203.0.113.84` (`c07-e004`, `c07-e007`) and `198.51.100.61` (`c07-e021`), suggesting potential defense evasion to facilitate data exfiltration.</p><p><b>Evidence IDs:</b> c07-e002, c07-e003, c07-e004, c07-e007, c07-e008, c07-e021</p></div></details>
+        </article></div>
+    </section></section>
+<section class="panel methods" aria-labelledby="methods-title"><h2 id="methods-title">Method and sources</h2>
+<p>GPT 6.1 Sol, on high thinking, graded each response against the answer key’s three pass/fail checks. Interpretation requires a supportable verdict and central pattern. Evidence requires an explanation tied to decisive cited events. Restraint rejects invented or overly certain material claims. Exact wording, exact citation sets, and reciting all reference counts were not required. Format validity comes from <code>status</code>, parsed sections, and the harness validation fields.</p>
+<p>Cases are independent. A suspicious verdict means potentially malicious activity, not proven compromise. For c07, the key’s preferred verdict is inconclusive; a suspicious alternative was reviewed on its reasoning and citations rather than rejected on label alone.</p>
+<p><b>Results:</b> <code>results/12-Oct-2026-Mon_10-07pm-ET/results.jsonl</code><br><b>Answer keys:</b> <code>evals/answer-keys.md</code></p>
+<p class="fine">Source SHA-256 · results: b1dddd60654400e8b32c366bd9612540bf0e2447e31bcae30276489b0d1f2c65<br>Source SHA-256 · keys: 6e0ddea9dadcdf4fa82d71d5ccbd11bb59e24996a918d5aaede875f7401b5046</p>
+</section></main>
+<script>
+const buttons=[...document.querySelectorAll('[data-filter]')];
+buttons.forEach(button=>button.addEventListener('click',()=>{
+ const filter=button.dataset.filter;
+ buttons.forEach(b=>b.classList.toggle('active',b===button));
+ document.querySelectorAll('tbody tr,.model-card').forEach(el=>{
+  el.hidden=!(filter==='all'||(filter==='failed'&&el.dataset.passed==='0')||filter===el.dataset.model);
+ });
+ document.querySelectorAll('.case-section').forEach(section=>{section.hidden=![...section.querySelectorAll('.model-card')].some(card=>!card.hidden)});
+}));
+</script></body></html>

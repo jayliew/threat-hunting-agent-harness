@@ -266,6 +266,8 @@ Each model uses one prompt across inference configurations.
 - [Threat hunt grading](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/dev/results/12-Oct-2026-Mon_10-07pm-ET/threat-hunt-grading.html): grading (by GPT 6.1 Sol on high thinking) of the 14 evaluations—per-case scores for interpretation, evidence, restraint, and output validity.
 - [Model comparison report](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/dev/results/12-Oct-2026-Mon_10-07pm-ET/report.html): harness-generated `report.html` for that run—summary table of verdicts, output status, timings, context/token use, plus full answers and prompts.
 
+### Run directories
+
 Every run directory contains:
 
 - `report.html`: summary table, full answers, prompt text, thinking traces, settings, timings, and token/context use.

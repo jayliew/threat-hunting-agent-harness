@@ -581,6 +581,20 @@ class ChatTemplateTests(unittest.TestCase):
         info.modelfile = "TEMPLATE {{ .Prompt }}\nRENDERER glm-4.7\n"
         self.assertIn("expects PARSER glm-4.7", installed_model_error("glm-4.7-flash:q4_K_M", info))
 
+    def test_glimmer_renderer_allows_placeholder_template(self) -> None:
+        self.assertIsNone(
+            chat_template_error("muse-glimmer:30b-mlx", "{{ .Prompt }}", "glimmer")
+        )
+        self.assertIsNotNone(chat_template_error("muse-glimmer:30b-mlx", "{{ .Prompt }}"))
+        info = SimpleNamespace(
+            template="{{ .Prompt }}",
+            modelfile="TEMPLATE {{ .Prompt }}\nRENDERER glimmer\nPARSER glimmer\n",
+            parameters="temperature 1\ntop_p 0.95\n",
+        )
+        self.assertIsNone(installed_model_error("muse-glimmer:30b-mlx", info))
+        info.modelfile = "TEMPLATE {{ .Prompt }}\nRENDERER glimmer\n"
+        self.assertIn("expects PARSER glimmer", installed_model_error("muse-glimmer:30b-mlx", info))
+
     def test_gemma_renderer_allows_placeholder_template(self) -> None:
         self.assertIsNone(chat_template_error("gemma4:26b", "{{ .Prompt }}", "gemma4"))
         self.assertIsNone(chat_template_error("gemma4:31b", "{{ .Prompt }}", "gemma4-large"))

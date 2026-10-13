@@ -47,6 +47,13 @@ renderers = ["gemma4", "gemma4-large"]
 hint = "Gemma 4 must use RENDERER gemma4 or gemma4-large."
 
 [[formats]]
+label = "Muse Glimmer"
+name_pattern = "muse-glimmer"
+renderers = ["glimmer"]
+parsers = ["glimmer"]
+hint = "Muse Glimmer must use RENDERER glimmer and PARSER glimmer. Install with ollama pull muse-glimmer:30b-mlx on Apple Silicon."
+
+[[formats]]
 label = "GLM-4.7"
 # GLM-4.6 and earlier use a different renderer and must not match this rule.
 name_pattern = 'glm-4\.7(?!\d)'

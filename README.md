@@ -246,6 +246,13 @@ Each model uses one prompt across inference configurations.
 
 ## Results
 
+### Example results
+
+Preview a completed October 2026 comparison (15 configurations × 7 cases):
+
+- [Threat hunt grading](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/main/results/03-Oct-2026-Sat_08-57pm-ET/threat-hunt-grading.html): human-reviewed grading of the 105 evaluations—rankings, rubric, failures, and per-run scores for interpretation, evidence, restraint, and output validity.
+- [Model comparison report](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/main/results/03-Oct-2026-Sat_08-57pm-ET/report.html): harness-generated `report.html` for that run—summary table of verdicts, output status, timings, context/token use, plus full answers and prompts.
+
 Every run directory contains:
 
 - `report.html`: summary table, full answers, prompt text, thinking traces, settings, timings, and token/context use.

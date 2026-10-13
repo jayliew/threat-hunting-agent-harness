@@ -250,7 +250,7 @@ Each model uses one prompt across inference configurations.
 
 ### 3 October 2026
 
-**TLDR:** Gemma 4 26B leads at 6/7 analytical passes; only 32 of 105 runs pass, and none pass c07.
+**TLDR:** Top three are `gemma4:26b` (6/7), `gemma4:31b` (5/7), and `mistral-small3.2:latest` (4/7). Only 32 of 105 runs pass, and none pass c07.
 
 15 configurations × 7 cases.
 
@@ -259,7 +259,7 @@ Each model uses one prompt across inference configurations.
 
 ### 12 October 2026
 
-**TLDR:** Both models identify the six clear cases, and neither fully handles the opaque transfers in c07 (muse-glimmer 6/7, gemma4 5/7).
+**TLDR:** Both models identify the six clear cases, and neither fully handles the opaque transfers in c07. `muse-glimmer:30b-mlx` is slightly ahead of `gemma4:26b` (6/7 vs 5/7) because it keeps restraint on every case (7/7 vs 5/7).
 
 2 configurations × 7 cases: `muse-glimmer:30b-mlx` and `gemma4:26b`.
 

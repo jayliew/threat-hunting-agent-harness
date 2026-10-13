@@ -248,15 +248,6 @@ Each model uses one prompt across inference configurations.
 
 ## Results
 
-### 3 October 2026
-
-**TLDR:** Top three are `gemma4:26b` (6/7), `gemma4:31b` (5/7), and `mistral-small3.2:latest` (4/7). Only 32 of 105 runs pass, and none pass c07.
-
-15 configurations × 7 cases.
-
-- [Threat hunt grading](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/main/results/03-Oct-2026-Sat_08-57pm-ET/threat-hunt-grading.html): grading (by GPT-6.1 Sol "high") of the 105 evaluations—rankings, rubric, failures, and per-run scores for interpretation, evidence, restraint, and output validity.
-- [Model comparison report](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/main/results/03-Oct-2026-Sat_08-57pm-ET/report.html): harness-generated `report.html` for that run—summary table of verdicts, output status, timings, context/token use, plus full answers and prompts.
-
 ### 12 October 2026
 
 **TLDR:** Both models identify the six clear cases, and neither fully handles the opaque transfers in c07. `muse-glimmer:30b-mlx` is slightly ahead of `gemma4:26b` (6/7 vs 5/7) because it keeps restraint on every case (7/7 vs 5/7).
@@ -265,6 +256,15 @@ Each model uses one prompt across inference configurations.
 
 - [Threat hunt grading](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/dev/results/12-Oct-2026-Mon_10-07pm-ET/threat-hunt-grading.html): grading (by GPT 6.1 Sol on high thinking) of the 14 evaluations—per-case scores for interpretation, evidence, restraint, and output validity.
 - [Model comparison report](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/dev/results/12-Oct-2026-Mon_10-07pm-ET/report.html): harness-generated `report.html` for that run—summary table of verdicts, output status, timings, context/token use, plus full answers and prompts.
+
+### 3 October 2026
+
+**TLDR:** Top three are `gemma4:26b` (6/7), `gemma4:31b` (5/7), and `mistral-small3.2:latest` (4/7). Only 32 of 105 runs pass, and none pass c07.
+
+15 configurations × 7 cases.
+
+- [Threat hunt grading](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/main/results/03-Oct-2026-Sat_08-57pm-ET/threat-hunt-grading.html): grading (by GPT-6.1 Sol "high") of the 105 evaluations—rankings, rubric, failures, and per-run scores for interpretation, evidence, restraint, and output validity.
+- [Model comparison report](https://html-preview.github.io/?url=https://github.com/jayliew/threat-hunting-agent-harness/blob/main/results/03-Oct-2026-Sat_08-57pm-ET/report.html): harness-generated `report.html` for that run—summary table of verdicts, output status, timings, context/token use, plus full answers and prompts.
 
 ### Run directories
 

@@ -1325,6 +1325,13 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             "command-r.conf": ("command-r:latest", "131072", 131072, None, None),
             "gemma4-31b.conf": ("gemma4:31b", "32768", 32768, "true", True),
             "gemma4-26b.conf": ("gemma4:26b", "32768", 32768, "true", True),
+            "muse-glimmer-30b-mlx.conf": (
+                "muse-glimmer:30b-mlx",
+                "32768",
+                32768,
+                "high",
+                "high",
+            ),
             "glm-4.7-flash-q4_K_M.conf": (
                 "glm-4.7-flash:q4_K_M",
                 "202752",
@@ -1364,6 +1371,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             "command-r.conf": ("0.3", 0.3, "0.90", 0.9, "40", 40),
             "gemma4-31b.conf": ("1.0", 1.0, "0.95", 0.95, "64", 64),
             "gemma4-26b.conf": ("1.0", 1.0, "0.95", 0.95, "64", 64),
+            "muse-glimmer-30b-mlx.conf": ("1.0", 1.0, "0.95", 0.95, "64", 64),
             "glm-4.7-flash-q4_K_M.conf": ("1.0", 1.0, "0.95", 0.95, "40", 40),
             "mistral-small3.2-24b.conf": ("0.15", 0.15, "0.90", 0.9, "40", 40),
             "mistral-nemo-12b.conf": ("0.3", 0.3, "0.90", 0.9, "40", 40),

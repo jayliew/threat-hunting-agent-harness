@@ -106,6 +106,7 @@ The suite currently recognizes these Ollama names:
 - `gpt-oss:20b`
 - `granite4.2:30b`
 - `llama3.3:70b`
+- `muse-glimmer:30b-mlx`
 - `mistral-nemo:12b`
 - `mistral-small3.2:24b`
 - `mistral-small3.2:latest`
@@ -117,6 +118,7 @@ Most are installed directly with `ollama run NAME` or `ollama pull NAME`. For ex
 ```bash
 ollama run deepseek-r1:32b
 ollama run gemma4:31b
+ollama run muse-glimmer:30b-mlx
 ollama run glm-4.7-flash:q4_K_M
 ollama run gpt-oss:20b
 ollama run granite4.2:30b
@@ -278,6 +280,7 @@ The harness sends ordinary message text and relies on the installed Ollama templ
 | Mistral Small     | `[SYSTEM_PROMPT]`, `[/SYSTEM_PROMPT]`, `[INST]`, `[/INST]`                                |
 | Mistral Nemo      | `[INST]`, `[/INST]`, and `.System`                                                        |
 | Gemma 4           | `RENDERER gemma4` or `RENDERER gemma4-large`                                              |
+| Muse Glimmer      | `RENDERER glimmer` and `PARSER glimmer`                                                   |
 | GLM-4.7           | `RENDERER glm-4.7` and `PARSER glm-4.7`                                                   |
 | Granite 4         | `<\|im_start\|>` and `<\|im_end\|>`                                                       |
 | DeepSeek-R1       | `<｜User｜>` and `<｜Assistant｜>`                                                        |

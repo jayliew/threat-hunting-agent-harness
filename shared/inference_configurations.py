@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from . import REPO_ROOT
+from .colibri import parse_base_url
 from .harness import NUM_CTX
 
 DEFAULT_INFERENCE_CONFIG_DIR = REPO_ROOT / "inference_config"
@@ -34,6 +35,8 @@ INFERENCE_CONFIGURATION_FIELDS = (
     "temperature",
     "top_p",
     "top_k",
+    "provider",
+    "base_url",
 )
 INFERENCE_CONFIGURATION_FIELD_NAMES = frozenset(INFERENCE_CONFIGURATION_FIELDS)
 
@@ -155,6 +158,70 @@ def parse_top_k(value: str, source: str) -> int:
             f"{source}: top_k must be a positive integer with no commas (got {value!r})"
         )
     return int(text)
+
+
+def inference_configuration_provider(configuration: dict | None) -> str | None:
+    """Provider declared by one setup. A missing line leaves the choice to the model spec."""
+    if configuration is None:
+        return None
+    raw = configuration.get("fields", {}).get("provider")
+    if raw is None:
+        return None
+    source = configuration.get("source") or "inference configuration"
+    if raw not in {"ollama", "colibri"}:
+        raise ValueError(
+            f"{source}: provider must be ollama or colibri (got {raw!r})"
+        )
+    return raw
+
+
+def inference_configuration_base_url(configuration: dict | None) -> str | None:
+    """Colibri base URL declared by one setup. A missing line keeps the run default."""
+    if configuration is None:
+        return None
+    raw = configuration.get("fields", {}).get("base_url")
+    if raw is None:
+        return None
+    source = configuration.get("source") or "inference configuration"
+    return parse_base_url(raw, source)
+
+
+def resolve_provider(spec_provider: str | None, configuration: dict | None) -> str:
+    """Combine a CLI prefix with the configuration. They must not disagree."""
+    conf_provider = inference_configuration_provider(configuration)
+    if spec_provider and conf_provider and spec_provider != conf_provider:
+        source = configuration.get("source") if configuration else "inference configuration"
+        raise ValueError(
+            f"{source}: provider={conf_provider} does not match "
+            f"the {spec_provider} model spec"
+        )
+    return spec_provider or conf_provider or "ollama"
+
+
+def validate_backend_configuration(configuration: dict | None, provider: str) -> None:
+    """Reject sampling and endpoint fields the selected backend cannot record honestly."""
+    if configuration is None:
+        return
+    fields = configuration.get("fields", {})
+    source = configuration.get("source") or "inference configuration"
+    if provider != "colibri" and "base_url" in fields:
+        raise ValueError(f"{source}: base_url applies only to provider=colibri")
+    if provider == "colibri" and "top_k" in fields:
+        raise ValueError(
+            f"{source}: top_k is not a Colibri chat parameter. "
+            "Omit it; Colibri chat accepts temperature and top_p. "
+            "Server-side --topk is outside this harness."
+        )
+
+
+def planned_configurations(
+    name: str, loaded: list[dict], explicit: list[dict]
+) -> list[dict | None]:
+    """Configurations that will become slots for one selected model name."""
+    pinned = inference_configurations_for_model(explicit, name) if explicit else []
+    if pinned:
+        return list(pinned)
+    return [unique_inference_configuration(loaded, name)]
 
 
 def inference_configuration_sampling(configuration: dict | None) -> dict:
@@ -301,10 +368,20 @@ def assign_run_slots(
                     "list the thinking capability"
                 )
                 continue
+            provider = model.get("provider") or "ollama"
+            try:
+                validate_backend_configuration(configuration, provider)
+                base_url = inference_configuration_base_url(configuration)
+            except ValueError as error:
+                problems.append(str(error))
+                continue
             slot = dict(model)
+            slot["provider"] = provider
             slot["num_ctx"] = num_ctx
             slot["think"] = think
             slot["sampling"] = sampling
+            if provider == "colibri":
+                slot["base_url"] = base_url or model.get("base_url")
             if configuration is None:
                 slot["run_key"] = model["name"]
                 slot["inference_configuration_source"] = None

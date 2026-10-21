@@ -134,11 +134,23 @@ def write_declared_inference_configurations(directory: Path, configurations: lis
 
 
 def slot_label(model: dict) -> str:
-    """Distinguish two setups of the same installed model."""
+    """Distinguish provider, model, and two setups of the same model."""
+    provider = model.get("provider") or "ollama"
+    label = f"{provider} · {model['name']}"
     source = model.get("inference_configuration_source")
     if source:
-        return f"{model['name']} ({source})"
-    return model["name"]
+        return f"{label} ({source})"
+    return label
+
+
+def backend_note(model: dict) -> str:
+    """Colibri does not apply this harness's Ollama seed or KV cache settings."""
+    if (model.get("provider") or "ollama") != "colibri":
+        return ""
+    return (
+        "Backend: colibri · seed not applied · "
+        "context and KV cache come from coli serve<br>"
+    )
 
 
 def seconds(value: float | None) -> str:
@@ -193,8 +205,13 @@ def think_label(value) -> str:
 
 def thinking_label(result: dict | None, model: dict, settings: dict) -> str:
     if result is not None:
-        if "think" in result.get("request", {}):
-            return think_label(result["request"]["think"])
+        request = result.get("request") or {}
+        if request.get("provider") == "colibri" or "enable_thinking" in request:
+            if request.get("reasoning_effort"):
+                return str(request["reasoning_effort"])
+            return think_label(bool(request.get("enable_thinking")))
+        if "think" in request:
+            return think_label(request["think"])
         return "not supported"
     if "thinking" not in (model.get("capabilities") or []):
         return "not supported"
@@ -333,6 +350,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             if result is None:
                 pending_details = (
                     f'{context_label_html(model.get("num_ctx", settings.get("num_ctx")), None, model.get("context_length"))}<br>'
+                    f'{backend_note(model)}'
                     f'{framing_note(model)}'
                     f'Prompt: {e(model.get("system_prompt") or "default")}<br>'
                     f'Thinking: {e(think)}<br>'
@@ -377,6 +395,7 @@ def write_report(directory: Path, manifest: dict, results: list[dict]) -> None:
             prompt_name = result.get("system_prompt") or model.get("system_prompt") or "default"
             run_details = (
                 f'{context_label_html(allocated, used, model_max)}<br>'
+                f'{backend_note(model)}'
                 f'{framing_note(model)}'
                 f'Prompt: {e(prompt_name)}<br>'
                 f'Thinking: {e(think)}<br>'

@@ -14,3 +14,4 @@ These are for running via Colibri.
 - [ ] Qwen3.8-Flash-Next — 186 GB
 - [ ] MiMo-V2.6 Flash 309B — 172 GB
 - [ ] DeepSeek V4 Flash 284B — 167 GB
+- [ ] Recursive Flint 39.8B — 80 GB

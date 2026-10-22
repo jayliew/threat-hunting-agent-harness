@@ -1362,6 +1362,7 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
                 "medium",
                 "medium",
             ),
+            "qwen36-35b-a3b.conf": ("qwen36-35b-a3b", "32768", 32768, "true", True),
         }
         sampling = {
             "qwen3-32b.conf": ("0.6", 0.6, "0.95", 0.95, "20", 20),
@@ -1378,28 +1379,38 @@ class DeclaredInferenceConfigurationTests(unittest.TestCase):
             "phi3-medium-128k.conf": ("0.7", 0.7, "0.90", 0.9, "40", 40),
             "foundation-sec-8b-instruct.conf": ("0.2", 0.2, "0.90", 0.9, "40", 40),
             "cyberpal2-20b.conf": ("0.0", 0.0, "0.90", 0.9, "40", 40),
+            "qwen36-35b-a3b.conf": ("1.0", 1.0, "0.95", 0.95),
+        }
+        providers = {
+            "qwen36-35b-a3b.conf": "colibri",
         }
         root = Path(__file__).resolve().parent.parent / "inference_config"
+        self.assertEqual({path.name for path in root.glob("*.conf")}, set(expected))
         for name, (model, text, number, thinking, parsed) in expected.items():
             configuration = inference_configurations.parse_inference_configuration_file(root / name)
-            temperature, temperature_value, top_p, top_p_value, top_k, top_k_value = sampling[name]
+            temperature, temperature_value, top_p, top_p_value, *top_k_entry = sampling[name]
             fields = {
                 "model": model,
                 "num_ctx": text,
                 "temperature": temperature,
                 "top_p": top_p,
-                "top_k": top_k,
             }
+            parsed_sampling = {
+                "temperature": temperature_value,
+                "top_p": top_p_value,
+            }
+            if top_k_entry:
+                top_k, top_k_value = top_k_entry
+                fields["top_k"] = top_k
+                parsed_sampling["top_k"] = top_k_value
             if thinking is not None:
                 fields["thinking"] = thinking
+            if name in providers:
+                fields["provider"] = providers[name]
             self.assertEqual(configuration["fields"], fields)
             self.assertEqual(
                 inference_configurations.inference_configuration_sampling(configuration),
-                {
-                    "temperature": temperature_value,
-                    "top_p": top_p_value,
-                    "top_k": top_k_value,
-                },
+                parsed_sampling,
             )
             self.assertEqual(inference_configurations.inference_configuration_num_ctx(configuration), number)
             self.assertEqual(inference_configurations.inference_configuration_think(configuration), parsed)

@@ -2,7 +2,7 @@
 
 Open-weight models are advancing quickly, but security teams still lack a practical way to compare how well they investigate real threat-hunting patterns. To our knowledge, no public benchmark or evaluation currently focuses on open-weight model performance across both host and network security logs.
 
-Threat Hunting Agent Harness is a local, reproducible test bed for that problem. It runs Ollama models against synthetic ECS event sets, requires a structured evidence-backed finding, validates the response, and produces side-by-side reports for human review. The current scenarios test suspicious activity, convincing benign lookalikes, and cases where the evidence should remain inconclusive.
+Threat Hunting Agent Harness is a local, reproducible test bed for that problem. It runs Ollama models, and optionally models served by [Colibri](https://github.com/JustVugg/colibri), against synthetic ECS event sets, requires a structured evidence-backed finding, validates the response, and produces side-by-side reports for human review. One comparison can mix the two. The current scenarios test suspicious activity, convincing benign lookalikes, and cases where the evidence should remain inconclusive.
 
 This is an early proof of concept, and participants are welcome. Security practitioners, model researchers, and engineers can contribute model runs, new scenarios, answer keys, inference configurations, or improvements to the harness. Open an issue to discuss an experiment or submit a pull request with results and changes.
 
@@ -25,8 +25,8 @@ Requirements:
 
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/)
-- [Ollama](https://ollama.com), running locally
-- At least one supported model already installed in `ollama list`
+- [Ollama](https://ollama.com), running locally, for Ollama models
+- At least one supported model already installed in `ollama list`, or a Colibri model already served by `coli serve`
 
 On macOS, set the recommended Ollama server environment before starting or restarting Ollama:
 
@@ -66,6 +66,11 @@ uv run python compare_models.py \
 
 # Run the default comparison matrix
 uv run python compare_models.py
+
+# Mix an installed Ollama model with one model already served by coli serve
+uv run python compare_models.py \
+  --models qwen3:32b colibri/glm-5.2-colibri \
+  --logs logs/http-beaconing.jsonl
 ```
 
 The default matrix compares Qwen3 32B, Mistral Small 3.2 24B, and Foundation-Sec 8B across all seven scenarios (21 runs). Edit `MODELS` and `DEFAULT_SCENARIO_LOGS` in `compare_models.py`, or override them:
@@ -213,12 +218,36 @@ Supported keys are:
 - `temperature`
 - `top_p`
 - `top_k`
+- `provider` (`ollama` or `colibri`)
+- `base_url` (Colibri only)
 
-Uncommented values override Ollama or Modelfile defaults for that request. The runner validates names and values, prints the selected configuration, and copies it into the result directory before inference. If multiple configurations name the same model, select one or more with `--inference-configuration`.
+Uncommented values override Ollama or Modelfile defaults for that request. The runner validates names and values, prints the selected configuration, and copies it into the result directory before inference. If multiple configurations name the same model, select one or more with `--inference-configuration`. `provider=colibri` selects Colibri for a bare `--models` name. A `colibri/` prefix and a configuration that names the other provider is an error. `base_url` overrides `--colibri-base-url` for that model.
 
 Request defaults in `shared/harness.py` are `num_ctx=32768`, `thinking=false`, `temperature=0`, `seed=0`, `num_predict=-1`, and context shifting disabled. `top_p` and `top_k` are omitted unless configured. Thinking and final output share the context window. The harness sends `think` only to models that advertise the capability.
 
-The checked-in configurations record model-specific context and thinking settings. The installed model's quantization comes from the Ollama model named by `model`. The expected server-side KV cache is `f16` (`OLLAMA_KV_CACHE_TYPE`). It is recorded on each hunt and is not sent as a chat option.
+The checked-in configurations record model-specific context and thinking settings. The installed model's quantization comes from the Ollama model named by `model`. The expected server-side KV cache is `f16` (`OLLAMA_KV_CACHE_TYPE`). It is recorded on each Ollama hunt and is not sent as a chat option.
+
+## Colibri
+
+Colibri is optional. The harness does not install it, download weights, or start `coli serve`. Start the server yourself, then name the published model id with a `colibri/` prefix:
+
+```bash
+uv run python compare_models.py \
+  --models qwen3:32b colibri/glm-5.2-colibri \
+  --logs logs/http-beaconing.jsonl
+```
+
+The default base URL is `http://127.0.0.1:8000/v1`. Override it with `--colibri-base-url` or `COLIBRI_BASE_URL`. A configuration `base_url` wins for that model, which is how a second Colibri model joins the same matrix: one `coli serve` process serves one model, so each extra model needs its own server and base URL. Both servers must already be up. Runs stay sequential.
+
+If `coli serve` was started with `COLI_API_KEY`, pass the same value as `--colibri-api-key` or `COLIBRI_API_KEY`. The key is sent as a bearer token and is not written into results.
+
+Colibri applies the engine chat template. `shared/model_formats.toml` is not checked for these models. The same system and user messages are posted to `/v1/chat/completions`. `thinking=false` sends `enable_thinking: false`, `thinking=true` sends `enable_thinking: true`, and `low`, `medium`, or `high` send `reasoning_effort`. `top_k` is rejected because Colibri's chat API does not accept it. Temperature and `top_p` are sent when configured.
+
+`inference_config/qwen36-35b-a3b.conf` is applied for `colibri/qwen36-35b-a3b` without `--inference-configuration`. It turns thinking on and sends `temperature=1.0`, `top_p=0.95`, and `max_tokens=32768`.
+
+`num_ctx` is the context window this harness scores against. It is also sent as `max_tokens`, so the server default of 1024 does not cap the answer. Colibri clamps that ceiling to the room left in the process context. Set `coli serve --ctx` and `--ngen` at least as large as that `num_ctx` (`32768` for `qwen36-35b-a3b`). The harness cannot resize that context per request. A prompt that does not fit fails the hunt.
+
+Colibri accepts `seed` and ignores it. These runs record `seed_applied: false`. Context length and KV cache quantization are whatever that `coli serve` process was started with, not the Ollama `seed=0` and `f16` defaults.
 
 ## Hunt and validation behavior
 
@@ -281,7 +310,7 @@ Wall time includes model loading and request overhead. Eval time covers prompt p
 
 ## Chat-template compatibility
 
-The harness sends ordinary message text and relies on the installed Ollama template or renderer for native turn markers. Before any chat call, `shared/model_config.py` checks `/api/show` data against `shared/model_formats.toml`.
+The harness sends ordinary message text and relies on the installed Ollama template or renderer for native turn markers. Before any Ollama chat call, `shared/model_config.py` checks `/api/show` data against `shared/model_formats.toml`. Colibri models skip this check; `coli serve` renders the engine template.
 
 | Family            | Required framing                                                                          |
 | ----------------- | ----------------------------------------------------------------------------------------- |
@@ -333,6 +362,7 @@ Name matching is case-insensitive, and the first regular-expression match wins. 
 | ------------------------------------ | ------------------------------------------------------------- |
 | `compare_models.py`                  | Run model/scenario matrices and write reports                 |
 | `shared/harness.py`                  | Log loading, prompting, inference, accounting, and validation |
+| `shared/colibri.py`                  | Client for an already-running `coli serve`                   |
 | `shared/prompts.py`                  | Shared and model-specific prompts                             |
 | `shared/model_config.py`             | Installed-model format validation                             |
 | `shared/model_formats.toml`          | Ordered chat-format requirements                              |

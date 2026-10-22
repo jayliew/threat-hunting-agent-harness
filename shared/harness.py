@@ -1,4 +1,4 @@
-"""Shared log loading, Ollama inference, and hunt validation."""
+"""Shared log loading, Ollama and Colibri inference, and hunt validation."""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +15,7 @@ from ollama import ChatResponse, Client
 from ollama._types import ChatRequest
 
 from . import REPO_ROOT
+from .colibri import NormalizedChat, wire_body
 from .model_config import chat_template_error, installed_model_error, installed_renderer
 from .prompts import (
     DEFAULT_PROMPT,
@@ -310,12 +311,8 @@ def format_token_report(result: dict) -> str:
     return " · ".join(parts)
 
 
-def preflight_models_and_logs(
-    client: Client, models: list[str], logs: list[str]
-) -> tuple[list[dict], list[dict]]:
-    """Resolve models and logs before any inference; raise if anything is unusable."""
-    if not models or not logs:
-        raise ValueError("Configure at least one model and one log file.")
+def inspect_ollama_models(client: Client, models: list[str]) -> tuple[list[dict], list[str]]:
+    """Resolve installed Ollama models. Problems are returned, not raised."""
     installed = {item.model: item for item in client.list().models}
     selected, problems, seen = [], [], set()
     for name in models:
@@ -339,6 +336,7 @@ def preflight_models_and_logs(
                 raise ValueError(error)
             selected.append({
                 "name": canonical,
+                "provider": "ollama",
                 "digest": model.digest,
                 "capabilities": capabilities,
                 "chat_template": template,
@@ -348,7 +346,12 @@ def preflight_models_and_logs(
             })
         except Exception as error:
             problems.append(f"Cannot use {name}: {error}")
-    cases, seen_paths = [], set()
+    return selected, problems
+
+
+def inspect_logs(logs: list[str]) -> tuple[list[dict], list[str]]:
+    """Load hunt logs. Problems are returned, not raised."""
+    cases, problems, seen_paths = [], [], set()
     for name in logs:
         path = resolve_log_path(name).resolve()
         if path in seen_paths:
@@ -368,8 +371,23 @@ def preflight_models_and_logs(
             })
         except Exception as error:
             problems.append(f"Cannot read {name}: {error}")
+    return cases, problems
+
+
+def preflight_failure(problems: list[str]) -> None:
     if problems:
         raise ValueError("Preflight failed:\n" + "\n".join(problems))
+
+
+def preflight_models_and_logs(
+    client: Client, models: list[str], logs: list[str]
+) -> tuple[list[dict], list[dict]]:
+    """Resolve Ollama models and logs before any inference; raise if anything is unusable."""
+    if not models or not logs:
+        raise ValueError("Configure at least one model and one log file.")
+    selected, model_problems = inspect_ollama_models(client, models)
+    cases, log_problems = inspect_logs(logs)
+    preflight_failure(model_problems + log_problems)
     return selected, cases
 
 
@@ -577,6 +595,42 @@ def set_evaluation_seconds(timing: dict) -> None:
     timing["evaluation_seconds"] = prompt + generated
 
 
+def apply_chat_response(
+    result: dict,
+    response,
+    events: list[dict],
+    allocated: int,
+    model_max: int | None,
+    num_predict: int,
+) -> None:
+    """Copy one chat response into the hunt result and validate the contract."""
+    content = response.message.content or ""
+    result["response"] = response.model_dump(mode="json")
+    result["raw_content"] = content
+    result["thinking"] = response.message.thinking or ""
+    result["tokens"] = usage_tokens(response)
+    assign_token_split(result["tokens"], result["thinking"], content)
+    result["context"] = context_usage(allocated, result["tokens"], model_max)
+    sections, unexpected = parse_hunt_output(content)
+    result["sections"] = sections
+    result["unexpected"] = unexpected
+    if unexpected:
+        result["warnings"].append(UNEXPECTED_CONTENT_WARNING)
+    allowed = allowed_evidence_ids(events)
+    result["unknown_evidence_ids"] = sorted(set(
+        parse_evidence_ids(result["sections"].get("Evidence", ""))
+    ) - allowed)
+    result["validation_errors"] = [error for error in (
+        incomplete_response_message(response, num_predict),
+        invalid_hunt_output_message(content, allowed),
+    ) if error]
+    result["status"] = "invalid" if result["validation_errors"] else "ok"
+    apply_context_limit(result)
+    for field in ("total_duration", "load_duration", "prompt_eval_duration", "eval_duration"):
+        value = getattr(response, field, None)
+        result["timing"][field + "_seconds"] = value / 1e9 if value is not None else None
+
+
 def build_messages(
     events: list[dict], prompt: ModelPrompt | None = None
 ) -> list[dict[str, str]]:
@@ -585,6 +639,108 @@ def build_messages(
         {"role": "system", "content": chosen.system},
         {"role": "user", "content": build_user_message(events, chosen.user_task)},
     ]
+
+
+def colibri_request(
+    model: str,
+    messages: list[dict[str, str]],
+    allocated: int,
+    think: bool | str,
+    sampling: dict | None,
+    base_url: str | None,
+) -> dict:
+    """OpenAI chat body plus harness notes that are not sent to Colibri."""
+    chosen = sampling or {}
+    if "top_k" in chosen:
+        raise ValueError(
+            "top_k is not a Colibri chat parameter. "
+            "Omit it; Colibri chat accepts temperature and top_p."
+        )
+    request = {
+        "provider": "colibri",
+        "model": model,
+        "messages": messages,
+        "max_tokens": allocated,
+        "temperature": chosen.get("temperature", TEMPERATURE),
+        "stream": False,
+        "base_url": base_url or "",
+        "seed_applied": False,
+        "context_control": "server",
+    }
+    if "top_p" in chosen:
+        request["top_p"] = chosen["top_p"]
+    if think in {"low", "medium", "high"}:
+        request["reasoning_effort"] = think
+        request["enable_thinking"] = True
+    else:
+        request["enable_thinking"] = bool(think)
+    return request
+
+
+def run_colibri_hunt(
+    model: str,
+    events: list[dict],
+    *,
+    colibri_client,
+    capabilities: list[str] | None = None,
+    model_max: int | None = None,
+    num_ctx: int | None = None,
+    think: bool | str | None = None,
+    sampling: dict | None = None,
+    prompt: ModelPrompt | None = None,
+    base_url: str | None = None,
+) -> dict:
+    """One fresh Colibri conversation. The server applies its own chat template."""
+    allocated = NUM_CTX if num_ctx is None else num_ctx
+    requested_think = THINK if think is None else think
+    messages = build_messages(events, prompt)
+    tokens = empty_tokens()
+    result = {
+        "model": model,
+        "provider": "colibri",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "status": "error",
+        "raw_content": "",
+        "thinking": "",
+        "sections": {},
+        "unexpected": [],
+        "unknown_evidence_ids": [],
+        "validation_errors": [],
+        "error": None,
+        "response": None,
+        "chat_template": "",
+        "renderer": "",
+        "request": {},
+        "prompt_sha256": hashlib.sha256(
+            json.dumps(messages, sort_keys=True).encode()
+        ).hexdigest(),
+        "timing": {},
+        "tokens": tokens,
+        "warnings": [],
+        "context": context_usage(allocated, tokens, model_max),
+    }
+    started = perf_counter()
+    try:
+        result["request"] = colibri_request(
+            model, messages, allocated, requested_think, sampling, base_url
+        )
+        if colibri_client is None:
+            raise RuntimeError("Colibri client is not configured")
+        result["capabilities"] = list(capabilities or ["completion", "thinking"])
+        payload = colibri_client.chat(wire_body(result["request"]))
+        apply_chat_response(
+            result,
+            NormalizedChat(payload),
+            events,
+            allocated,
+            model_max,
+            allocated,
+        )
+    except Exception as error:
+        result["error"] = f"{type(error).__name__}: {error}"
+    result["timing"]["wall_seconds"] = perf_counter() - started
+    set_evaluation_seconds(result["timing"])
+    return result
 
 
 def run_hunt(
@@ -601,8 +757,24 @@ def run_hunt(
     think: bool | str | None = None,
     sampling: dict | None = None,
     prompt: ModelPrompt | None = None,
+    provider: str = "ollama",
+    colibri_client=None,
+    base_url: str | None = None,
 ) -> dict:
     """Run one fresh conversation; retain answers and failures for inspection."""
+    if provider == "colibri":
+        return run_colibri_hunt(
+            model,
+            events,
+            colibri_client=colibri_client,
+            capabilities=capabilities,
+            model_max=model_max,
+            num_ctx=num_ctx,
+            think=think,
+            sampling=sampling,
+            prompt=prompt,
+            base_url=base_url,
+        )
     client = client if client is not None else Client(timeout=None)
     allocated = NUM_CTX if num_ctx is None else num_ctx
     requested_think = THINK if think is None else think
@@ -618,6 +790,7 @@ def run_hunt(
     tokens = empty_tokens()
     result = {
         "model": model,
+        "provider": "ollama",
         "started_at": datetime.now(timezone.utc).isoformat(),
         "status": "error",
         "raw_content": "",
@@ -676,31 +849,9 @@ def run_hunt(
                 set_evaluation_seconds(result["timing"])
                 return result
         response = send_chat(client, result["request"])
-        content = response.message.content or ""
-        result["response"] = response.model_dump(mode="json")
-        result["raw_content"] = content
-        result["thinking"] = response.message.thinking or ""
-        result["tokens"] = usage_tokens(response)
-        assign_token_split(result["tokens"], result["thinking"], content)
-        result["context"] = context_usage(allocated, result["tokens"], model_max)
-        sections, unexpected = parse_hunt_output(content)
-        result["sections"] = sections
-        result["unexpected"] = unexpected
-        if unexpected:
-            result["warnings"].append(UNEXPECTED_CONTENT_WARNING)
-        allowed = allowed_evidence_ids(events)
-        result["unknown_evidence_ids"] = sorted(set(
-            parse_evidence_ids(result["sections"].get("Evidence", ""))
-        ) - allowed)
-        result["validation_errors"] = [error for error in (
-            incomplete_response_message(response, NUM_PREDICT),
-            invalid_hunt_output_message(content, allowed),
-        ) if error]
-        result["status"] = "invalid" if result["validation_errors"] else "ok"
-        apply_context_limit(result)
-        for field in ("total_duration", "load_duration", "prompt_eval_duration", "eval_duration"):
-            value = getattr(response, field, None)
-            result["timing"][field + "_seconds"] = value / 1e9 if value is not None else None
+        apply_chat_response(
+            result, response, events, allocated, model_max, NUM_PREDICT
+        )
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
     result["timing"]["wall_seconds"] = perf_counter() - started

@@ -156,6 +156,7 @@ class ColibriHuntTests(unittest.TestCase):
     def compare(self, models: list[str], payload: dict | None = None, **kwargs):
         served = kwargs.pop("served", {"http://127.0.0.1:8000/v1": ["glm-5.2-colibri"]})
         api = kwargs.pop("api", ollama_client())
+        configurations = kwargs.pop("configurations", self.configurations)
         transport = serving(served, payload or completion(), self.seen)
         with contextlib.redirect_stdout(io.StringIO()):
             directory = compare_models.run_comparison(
@@ -163,7 +164,7 @@ class ColibriHuntTests(unittest.TestCase):
                 models,
                 [str(self.log)],
                 self.root / "results",
-                self.configurations,
+                configurations,
                 colibri_transport=transport,
                 **kwargs,
             )
@@ -290,6 +291,31 @@ class ColibriHuntTests(unittest.TestCase):
         self.assertNotIn("top_k", body)
         self.assertEqual(rows[0]["request"]["base_url"], "http://127.0.0.1:8001/v1")
         self.assertNotIn("http://127.0.0.1:8000", rows[0]["request"]["base_url"])
+
+    def test_checked_in_qwen36_configuration_is_sent(self) -> None:
+        repo_config = Path(__file__).resolve().parent.parent / "inference_config"
+        _api, _directory, rows = self.compare(
+            ["colibri/qwen36-35b-a3b"],
+            served={"http://127.0.0.1:8000/v1": ["qwen36-35b-a3b"]},
+            configurations=repo_config,
+        )
+        body = json.loads(next(
+            request.data for request, _timeout in self.seen if request.get_method() == "POST"
+        ))
+        self.assertTrue(body["enable_thinking"])
+        self.assertEqual(body["temperature"], 1.0)
+        self.assertEqual(body["top_p"], 0.95)
+        self.assertEqual(body["max_tokens"], 32768)
+        self.assertNotIn("top_k", body)
+        self.assertEqual(rows[0]["request"]["temperature"], 1.0)
+        self.assertEqual(rows[0]["request"]["top_p"], 0.95)
+        self.assertEqual(rows[0]["request"]["max_tokens"], 32768)
+        self.assertTrue(rows[0]["request"]["enable_thinking"])
+        self.assertNotIn("top_k", rows[0]["request"])
+        self.assertEqual(
+            rows[0]["declared_inference_configuration"],
+            "inference_config/qwen36-35b-a3b.conf",
+        )
 
     def test_length_finish_is_invalid_and_reasoning_is_kept(self) -> None:
         seen = []

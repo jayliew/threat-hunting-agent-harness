@@ -243,7 +243,9 @@ If `coli serve` was started with `COLI_API_KEY`, pass the same value as `--colib
 
 Colibri applies the engine chat template. `shared/model_formats.toml` is not checked for these models. The same system and user messages are posted to `/v1/chat/completions`. `thinking=false` sends `enable_thinking: false`, `thinking=true` sends `enable_thinking: true`, and `low`, `medium`, or `high` send `reasoning_effort`. `top_k` is rejected because Colibri's chat API does not accept it. Temperature and `top_p` are sent when configured.
 
-`num_ctx` is the context window this harness scores against. It is also sent as `max_tokens`, so the server default of 1024 does not cap the answer. Colibri clamps that ceiling to the room left in the process context. Set `coli serve --ctx` and `--max-tokens` large enough for the hunt. The harness cannot resize that context per request. A prompt that does not fit fails the hunt.
+`inference_config/qwen36-35b-a3b.conf` is applied for `colibri/qwen36-35b-a3b` without `--inference-configuration`. It turns thinking on and sends `temperature=1.0`, `top_p=0.95`, and `max_tokens=32768`.
+
+`num_ctx` is the context window this harness scores against. It is also sent as `max_tokens`, so the server default of 1024 does not cap the answer. Colibri clamps that ceiling to the room left in the process context. Set `coli serve --ctx` and `--ngen` at least as large as that `num_ctx` (`32768` for `qwen36-35b-a3b`). The harness cannot resize that context per request. A prompt that does not fit fails the hunt.
 
 Colibri accepts `seed` and ignores it. These runs record `seed_applied: false`. Context length and KV cache quantization are whatever that `coli serve` process was started with, not the Ollama `seed=0` and `f16` defaults.
 
